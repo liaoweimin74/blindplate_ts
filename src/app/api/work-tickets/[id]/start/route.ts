@@ -1,0 +1,90 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { auditFlowDetail, extractActor, jsonError, logAudit, parseId, readBody, resolveActor } from '@/lib/bp-server-utils'
+import { findPointPipelineConflicts, findRequestPipelineConflicts, findSamePipelineRunningTicket, formatPipelineConflictMessage } from '@/lib/bp-pipeline-occupancy'
+
+export const dynamic = 'force-dynamic'
+
+/**
+ * POST /api/work-tickets/[id]/start 开始作业（APPROVED → IN_PROGRESS），需求 → IN_PROGRESS
+ * 一票一板：逐票开工。安全硬约束双重校验：
+ * ① 点位管线未被其他需求生效票占用；② 同需求内同管线无另一张作业中的票（严禁同一管道两处同时抽堵）。
+ */
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params
+    const tid = parseId(id)
+    if (!tid) return jsonError('无效的作业票 ID')
+    const ticket = await db.workTicket.findUnique({ where: { id: tid } })
+    if (!ticket) return jsonError('作业票不存在', 404)
+    if (ticket.status !== 'APPROVED') {
+      return jsonError(`当前状态为 ${ticket.status}，仅已批准的作业票可开始作业`)
+    }
+    const request0 = await db.workRequest.findUnique({ where: { id: ticket.workRequestId } })
+    // 安全硬约束①：开工前再次校验管线占用（点粒度；存量合并票回退需求粒度）
+    const conflicts = ticket.pointId != null
+      ? await findPointPipelineConflicts(ticket.pointId, ticket.workRequestId, request0?.pipelineId ?? null)
+      : await findRequestPipelineConflicts(ticket.workRequestId)
+    if (conflicts.length) {
+      return NextResponse.json(
+        { error: `开工被拒绝：${formatPipelineConflictMessage(conflicts)}`, conflicts },
+        { status: 409 }
+      )
+    }
+    // 安全硬约束②：同管线同时作业互斥（同需求另一票作业中且落在同一管线 → 拒绝）
+    const sameRunning = await findSamePipelineRunningTicket(ticket)
+    if (sameRunning) {
+      return NextResponse.json(
+        {
+          error: `开工被拒绝：同一管线禁止两处同时抽堵作业——作业票 ${sameRunning.code}（${sameRunning.pointCode ?? ''}）正在同一管线上作业，请按隔离方案顺序逐点进行`,
+          samePipeline: sameRunning,
+        },
+        { status: 409 }
+      )
+    }
+    // 提取操作人（body 可为空：无 __actor 时回落任务负责人快照）
+    const extracted = extractActor(await readBody(req))
+    const now = new Date()
+    const updated = await db.workTicket.update({
+      where: { id: tid },
+      data: { status: 'IN_PROGRESS', startedAt: now },
+    })
+    const task = await db.workTask.findFirst({ where: { workRequestId: ticket.workRequestId } })
+    const updatedTask = task && task.status === 'PENDING'
+      ? await db.workTask.update({
+          where: { id: task.id },
+          data: { status: 'IN_PROGRESS', actualStart: now },
+        })
+      : task
+    const request = await db.workRequest.update({
+      where: { id: ticket.workRequestId },
+      data: { status: 'IN_PROGRESS' },
+    })
+    // 审计留痕：开始作业（票 + 任务两行）
+    const actor = resolveActor(extracted, updatedTask?.assignee ?? ticket.issuer, updatedTask?.assigneeId ?? null)
+    await logAudit({
+      actorId: actor.actorId,
+      actorName: actor.actorName,
+      action: 'START',
+      entity: 'WORK_TICKET',
+      entityId: tid,
+      entityCode: ticket.code,
+      detail: auditFlowDetail(ticket.code, ticket.status, 'IN_PROGRESS', `开始作业（隔离点 ${ticket.pointCode ?? ticket.pointLocation ?? ''}，需求 ${request.code}${updatedTask && task?.status === 'PENDING' ? `，任务 ${updatedTask.code} 同步开始` : ''}）`),
+    })
+    if (updatedTask && task?.status === 'PENDING') {
+      await logAudit({
+        actorId: actor.actorId,
+        actorName: actor.actorName,
+        action: 'START',
+        entity: 'WORK_TASK',
+        entityId: updatedTask.id,
+        entityCode: updatedTask.code,
+        detail: auditFlowDetail(updatedTask.code, task.status, 'IN_PROGRESS', `任务开始执行（作业票 ${ticket.code}，需求 ${request.code}）`),
+      })
+    }
+    return NextResponse.json({ ticket: updated, task: updatedTask, request })
+  } catch (e) {
+    console.error('[POST /api/work-tickets/[id]/start]', e)
+    return jsonError(e instanceof Error ? e.message : '开始作业失败', 500)
+  }
+}

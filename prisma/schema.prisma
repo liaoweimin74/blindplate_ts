@@ -1,0 +1,440 @@
+// 盲板管理系统 - 数据模型设计
+// 说明: 本 Schema 使用 Prisma 编写, 兼容 SQLite(沙箱)与 MySQL(生产)
+// 迁移至 MySQL 时仅需将 datasource provider 改为 "mysql" 并调整 url
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ 系统管理 ============
+
+/// 用户
+model User {
+  id             String    @id @default(cuid())
+  username       String    @unique
+  password       String    @default("123456") // scrypt:盐:哈希 格式；存量明文在登录时透明升级
+  name           String
+  role           String // ADMIN系统管理员 | MANAGER分管领导 | ENGINEER工艺工程师 | REVIEWER方案审核人 | OPERATOR作业人员 | GUARDIAN监护人 | ACCEPTOR验收人
+  department     String? // 所属部门/车间
+  phone          String?
+  active         Boolean   @default(true)
+  failedAttempts Int       @default(0) // 连续登录失败次数（成功后清零）
+  lockedUntil    DateTime? // 账号锁定截止时间（连续失败≥5次锁定10分钟）
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+/// 装置/车间 (基础数据)
+model Unit {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  manager     String? // 装置负责人
+  phone       String?
+  remark      String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  pipelines   Pipeline[] // 管线主数据
+  pidDiagrams PidDiagram[] // PID 组态图
+  equipments  Equipment[] // 设备主数据
+}
+
+/// 数据字典 (盲板规格/类型/材质/介质等基础数据)
+model Dict {
+  id       Int    @id @default(autoincrement())
+  category String // BLIND_SPEC盲板规格 | BLIND_TYPE盲板类型 | MATERIAL材质 | PRESSURE压力等级 | MEDIUM介质
+  value    String
+  label    String
+  order    Int    @default(0)
+}
+
+// ============ 盲板台账 ============
+
+/// 盲板实体 (一板一码)
+model BlindPlate {
+  id            Int       @id @default(autoincrement())
+  code          String    @unique // 盲板编号 如 MB-DN50-0001
+  spec          String // 规格 DN50
+  type          String // 类型 八字盲板/插板/垫环/盲法兰
+  material      String // 材质 Q235B/304/316L
+  thickness     Float // 厚度 mm
+  pressureRating String // 压力等级 PN1.0/PN2.5...
+  status        String    @default("IN_STOCK") // IN_STOCK在库 RESERVED已预留 INSTALLED已安装 SCRAPPED已报废
+  location      String? // 当前位置 (在库=库位; 已安装=装置+管线位置)
+  unitId        Int? // 所属装置
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+/// 盲板库存 (按 规格+类型+材质 汇总)
+model InventoryItem {
+  id          Int      @id @default(autoincrement())
+  spec        String
+  type        String
+  material    String
+  quantity    Int      @default(0) // 在库数量
+  minQuantity Int      @default(2) // 最低库存(预警线)
+  updatedAt   DateTime @updatedAt
+}
+
+/// 盲板变动记录
+model ChangeRecord {
+  id          Int      @id @default(autoincrement())
+  blindPlateId Int?
+  blindCode   String // 盲板编号
+  action      String // RESERVE领用预留 | INSTALL安装 | REMOVE拆除 | RETURN归还入库 | SCRAP报废 | PURCHASE采购入库
+  workCode    String? // 关联作业票/需求编号
+  location    String? // 涉及位置
+  fromStatus  String?
+  toStatus    String?
+  operator    String
+  note        String?
+  createdAt   DateTime @default(now())
+}
+
+// ============ 作业流程 ============
+
+/// 作业需求 (核心主单据)
+model WorkRequest {
+  id           Int       @id @default(autoincrement())
+  code         String    @unique // 需求编号 WR-20250101-001
+  title        String
+  workType     String // ADD装盲板 | REMOVE抽盲板 | BOTH抽装盲板
+  unitId       Int // 装置
+  location     String // 具体位置(管线/设备位号)
+  pipelineId   Int? // 引用管线主数据 Pipeline（业务精确引用）
+  pipelineName String? // 管线名称（冗余快照）
+  medium       String? // 介质
+  pressure     String? // 管线压力
+  temperature  String? // 管线温度
+  reason       String // 作业原因
+  urgency      String    @default("MEDIUM") // LOW/MEDIUM/HIGH
+  plannedStart DateTime?
+  plannedEnd   DateTime?
+  applicantId  String // 申请人userId
+  applicantName String
+  status       String    @default("DRAFT")
+  // DRAFT草稿 | PENDING_SURVEY待现场勘察 | SURVEYED已勘察待JSA | JSA_DONE JSA完成待方案
+  // ISOLATION_PREPARING隔离方案编制中 | ISOLATION_PENDING_REVIEW隔离方案待审核 | ISOLATION_REJECTED隔离方案已驳回 | ISOLATION_APPROVED隔离方案已审核
+  // DISPOSAL_PREPARING工艺处置方案编制中 | DISPOSAL_PENDING_REVIEW待审核 | DISPOSAL_REJECTED已驳回 | DISPOSAL_APPROVED已审核
+  // PENDING_CONFIRM待工艺处置确认 | CONFIRMED处置已确认待开票 | TICKET_ISSUED作业票待批准 | TICKET_APPROVED已批准待作业
+  // IN_PROGRESS作业中 | PENDING_ACCEPTANCE待验收 | COMPLETED已完成 | CANCELLED已取消
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+/// 现场勘察记录
+model SiteSurvey {
+  id            Int      @id @default(autoincrement())
+  workRequestId Int      @unique
+  surveyor      String // 勘察人
+  surveyDate    DateTime
+  siteCondition String // 现场条件描述
+  pipelineVerify String? // 管线参数核实(压力/温度/介质与需求是否一致)
+  hazardPoints  String? // 现场风险点
+  pointRefs     String? // 引用隔离点主数据 JSON 数组 [{masterPointId,code,name,pipelineName}]
+  isSafe        Boolean  @default(true) // 是否具备作业条件
+  suggestion    String? // 勘察意见/建议
+  createdAt     DateTime @default(now())
+}
+
+/// JSA 分析
+model JsaAnalysis {
+  id            Int      @id @default(autoincrement())
+  workRequestId Int      @unique
+  leader        String // 分析组长
+  members       String? // 参与人员(逗号分隔)
+  analysisDate  DateTime
+  riskLevel     String   @default("MEDIUM") // LOW/MEDIUM/HIGH 综合风险等级
+  residualRisk  String? // 剩余风险与应急措施
+  pointRefs     String? // 涉及隔离点主数据 JSON 数组 [{masterPointId,code,name,pipelineName}]
+  createdAt     DateTime @default(now())
+  steps         JsaStep[]
+}
+
+/// JSA 作业步骤 (步骤-危害-措施)
+model JsaStep {
+  id      Int         @id @default(autoincrement())
+  jsaId   Int
+  jsa     JsaAnalysis @relation(fields: [jsaId], references: [id], onDelete: Cascade)
+  seq     Int // 步骤序号
+  step    String // 作业步骤
+  hazard  String // 危害因素
+  measure String // 控制措施
+}
+
+/// 隔离方案
+model IsolationScheme {
+  id            Int       @id @default(autoincrement())
+  workRequestId Int       @unique
+  code          String // 方案编号 GL-xxxx
+  preparedBy    String // 编制人
+  preparedAt    DateTime  @default(now())
+  status        String    @default("DRAFT") // DRAFT/PENDING_REVIEW/APPROVED/REJECTED
+  comment       String? // 审核意见
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  points        IsolationPoint[]
+}
+
+/// 隔离点 (盲板加装/拆除明细; 作业执行阶段逐项确认)
+model IsolationPoint {
+  id            Int              @id @default(autoincrement())
+  schemeId      Int
+  scheme        IsolationScheme  @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  seq           Int // 序号
+  location      String // 隔离位置(具体法兰/阀门位置)
+  medium        String? // 管内介质
+  pressure      String? // 压力
+  temperature   String? // 温度
+  blindSpec     String // 盲板规格
+  blindType     String // 盲板类型
+  action        String // ADD加装盲板 | REMOVE拆除盲板
+  blindPlateId  Int? // 领用的盲板实体
+  done          Boolean  @default(false) // 作业执行时勾选
+  doneAt        DateTime?
+  operator      String? // 实际操作人
+  code          String? // 隔离点编码（与主数据编码对应，PID 挂点匹配用）
+  name          String? // 隔离点名称
+  masterPointId Int? // 引用隔离点主数据 IsoPointMaster
+  masterCode    String? // 主数据编码快照（业务环节精确引用主数据）
+}
+
+/// 工艺处置方案
+model DisposalScheme {
+  id            Int           @id @default(autoincrement())
+  workRequestId Int           @unique
+  code          String // 方案编号 GY-xxxx
+  preparedBy    String
+  preparedAt    DateTime      @default(now())
+  status        String        @default("DRAFT") // DRAFT/PENDING_REVIEW/APPROVED/REJECTED
+  comment       String?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  steps         DisposalStep[]
+}
+
+/// 工艺处置步骤
+model DisposalStep {
+  id        Int            @id @default(autoincrement())
+  schemeId  Int
+  scheme    DisposalScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  seq       Int
+  method    String // VENT泄压降压 | DRAIN排净 | REPLACE置换 | PURGE吹扫 | STEAM蒸煮 | GAS_TEST气体检测 | ISOLATE切断加盲板 | OTHER其他
+  detail    String // 处置内容
+  standard  String? // 合格标准
+  completed      Boolean  @default(false)
+  confirmedBy    String? // 逐项确认：确认人（工艺工程师）
+  confirmedAt    DateTime? // 逐项确认时间
+  confirmResult  String? // 逐项确认结果：OK合格 | ABNORMAL异常（待整改后重新确认）
+  confirmRemark  String? // 逐项确认备注（实测数据/异常描述）
+  masterPointId  Int?    // 该步骤针对的隔离点主数据
+  masterCode     String? // 主数据编码快照
+}
+
+/// 工艺处置确认
+model DisposalConfirmation {
+  id                 Int      @id @default(autoincrement())
+  workRequestId      Int      @unique
+  confirmer          String // 确认人(工艺工程师)
+  confirmedAt        DateTime
+  stepsConfirmed     Boolean // 处置步骤全部完成
+  flammableResult    String? // 可燃气体检测 LEL%
+  oxygenResult       String? // 氧含量 %
+  toxicResult        String? // 有毒气体浓度
+  analysisQualified  Boolean  @default(false) // 分析合格
+  remarks            String?
+  result             String // QUALIFIED合格 | UNQUALIFIED不合格
+}
+
+/// 作业票 (盲板抽堵安全作业票；严格一票一板：一张票只对应一个隔离点的一个盲板作业)
+model WorkTicket {
+  id            Int       @id @default(autoincrement())
+  code          String    @unique // 票号 BP-xxxx
+  workRequestId Int // 所属作业需求（一需求多票：每隔离点一票）
+  pointId       Int? // 绑定隔离点 IsolationPoint（一票一板；存量合并票为空）
+  pointCode     String? // 隔离点编码快照（票面展示）
+  pointLocation String? // 隔离位置快照（票面展示）
+  blindSpec     String? // 盲板规格快照
+  blindType     String? // 盲板类型快照
+  action        String? // ADD加装盲板 | REMOVE拆除盲板（快照）
+  plannedStart  DateTime
+  plannedEnd    DateTime
+  guardian      String // 监护人
+  workers       String // 作业人员(逗号分隔)
+  issuer        String // 签发人
+  safetyMeasures String // 安全措施(多行)
+  status        String    @default("DRAFT") // DRAFT待签发 PENDING_REVIEW待批准 APPROVED已批准 IN_PROGRESS作业中 FINISHED已完工 CLOSED已关闭 VOID已作废
+  comment       String?
+  approvedBy    String?
+  approvedAt    DateTime?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([workRequestId])
+  @@index([pointId])
+}
+
+/// 作业任务 (下发执行; 隔离点作为任务明细)
+model WorkTask {
+  id            Int       @id @default(autoincrement())
+  code          String    @unique // 任务号 TSK-xxxx
+  workRequestId Int       @unique
+  ticketId      Int?
+  assignee      String // 负责人(班长)
+  assigneeId    String?
+  planStart     DateTime?
+  planEnd       DateTime?
+  status        String    @default("PENDING") // PENDING待执行 IN_PROGRESS执行中 DONE已完成
+  actualStart   DateTime?
+  actualEnd     DateTime?
+  remark        String?
+  createdAt     DateTime  @default(now())
+}
+
+/// 作业验收
+model Acceptance {
+  id            Int      @id @default(autoincrement())
+  workRequestId Int      @unique
+  acceptor      String // 验收人
+  acceptedAt    DateTime
+  leakCheck     Boolean // 无泄漏确认
+  restoreCheck  Boolean // 现场恢复确认(标识/垫片/螺栓紧固)
+  ledgerCheck   Boolean // 台账更新确认(盲板变动已登记)
+  conclusion    String   @default("PASS") // PASS通过 | RECTIFY整改后复验
+  problems      String? // 发现问题
+  remarks       String?
+}
+
+/// 审批记录 (多业务通用留痕)
+model ApprovalRecord {
+  id        Int      @id @default(autoincrement())
+  bizType   String // ISOLATION隔离方案 | DISPOSAL工艺处置方案 | TICKET作业票
+  bizId     Int
+  bizCode   String?
+  action    String // SUBMIT提交 | APPROVE同意 | REJECT驳回
+  operator  String
+  comment   String?
+  createdAt DateTime @default(now())
+}
+
+/// 站内消息通知（按人或按角色广播）
+model Notification {
+  id         Int       @id @default(autoincrement())
+  userId     String? // 目标用户ID（精确到人；为空时按 targetRole 广播）
+  targetRole String? // 目标角色 ADMIN/MANAGER/ENGINEER/REVIEWER/OPERATOR/GUARDIAN/ACCEPTOR
+  type       String // APPROVAL审批提醒 | STATUS进度 | ALERT预警 | EXECUTE执行反馈 | SYSTEM系统
+  title      String
+  content    String
+  bizType    String? // ISOLATION | DISPOSAL | TICKET | REQUEST | INVENTORY | ACCEPTANCE
+  bizId      Int?
+  bizCode    String?
+  linkModule String? // 前端跳转模块 key（如 approval-center）
+  linkTab    String? // 前端跳转子页签 key
+  readAt     DateTime? // 已读时间（null=未读）
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([targetRole])
+  @@index([createdAt])
+}
+
+/// 系统操作审计日志（基础数据/系统管理变更留痕：谁在何时做了什么）
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  actorId    String? // 操作人 userId（系统自动操作时为空）
+  actorName  String   // 操作人姓名快照
+  action     String   // CREATE创建 | UPDATE更新 | DELETE删除 | PASSWORD_CHANGE修改密码 | PUBLISH发布 | WITHDRAW撤回 | LOGIN登录
+  entity     String   // USER用户 | UNIT装置 | DICT数据字典 | ANNOUNCEMENT公告 | AUTH认证
+  entityId   String? // 目标记录主键（字符串兼容多类型）
+  entityCode String? // 目标标识快照（用户名/装置代码/字典标签等）
+  detail     String? // 变更摘要
+  createdAt  DateTime @default(now())
+
+  @@index([entity])
+  @@index([createdAt])
+  @@index([actorId])
+}
+
+// ============ 管线/隔离点主数据/PID 组态（Task 23-a 重建） ============
+
+/// 管线主数据
+model Pipeline {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  unitId    Int?
+  medium    String? // 管内介质
+  pressure  String? // 压力等级
+  material  String? // 材质
+  spec      String? // 管径规格
+  remark    String?
+  startEquipmentId Int? // 起点设备（由 PID 图连线绑定自动回写，也可在管线台账手动维护）
+  endEquipmentId   Int? // 终点设备（同上）
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  unit      Unit?    @relation(fields: [unitId], references: [id])
+  points    IsoPointMaster[]
+  startEquipment Equipment? @relation("pipeStart", fields: [startEquipmentId], references: [id])
+  endEquipment   Equipment? @relation("pipeEnd", fields: [endEquipmentId], references: [id])
+}
+
+/// 设备主数据（减压塔/换热器/泵等静态设备台账，供 PID 图元绑定）
+model Equipment {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique // 设备位号，如 T-101 / E-202 / P-101A
+  name      String
+  type      String   // 设备类型：COLUMN塔 | EXCHANGER换热器 | PUMP泵 | TANK罐 | VESSEL容器 | REACTOR反应器 | OTHER其他
+  unitId    Int?
+  remark    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  unit      Unit?    @relation(fields: [unitId], references: [id])
+  pipeStarts Pipeline[] @relation("pipeStart")
+  pipeEnds   Pipeline[] @relation("pipeEnd")
+}
+
+/// 隔离点主数据（设备/管线上的标准隔离点位，供方案编制与 PID 组态引用）
+model IsoPointMaster {
+  id         Int      @id @default(autoincrement())
+  code       String   @unique
+  name       String
+  pipelineId Int?
+  location   String? // 具体位置描述
+  remark     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  pipeline   Pipeline? @relation(fields: [pipelineId], references: [id])
+}
+
+/// PID 组态图（画布图形/连线/隔离点挂标，content 为 JSON 字符串）
+model PidDiagram {
+  id        Int      @id @default(autoincrement())
+  name      String
+  unitId    Int?
+  content   String   @default("{}")
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  unit      Unit?    @relation(fields: [unitId], references: [id])
+}
+
+/// 自定义图元库（用户在图元编辑器中用基础图形/已有图元组合构建，保存后出现在左侧设备图元列表）
+model PidSymbol {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  basedOn   String?
+  designW   Int      @default(200)
+  designH   Int      @default(200)
+  parts     String   @default("[]")
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
