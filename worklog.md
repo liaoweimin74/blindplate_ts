@@ -2609,3 +2609,23 @@ Stage Summary:
 - **新运维铁律（P0 教训）**：SQLite DB 文件被 git/快照替换 inode 后旧连接 READ-only（SQLITE_READONLY_DBMOVED=1032），表现为 GET 正常+写全 500——凡 git checkout/reset 涉及 db/custom.db 或平台快照还原后必须双 fork 重启 dev server；判据 `ls -la /proc/$(pgrep -f next-server)/fd | grep deleted`
 - agent-browser 新坑：①合成事件 dispatchEvent 对该 React 树 onClick 不可靠，SVG 元素用 __reactProps 直调 ②window.confirm 需先覆写 `window.confirm=()=>true` ③登录页动态角色框会顶位按钮，坐标点击易漂移用 JS click
 - 下阶段建议：①撤回交底时级联清理其附件（当前留孤儿，2 张已留档）②管理页「重新核对」后可考虑自动刷新作业方确认页缓存 ③在案候选：录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度、push（token 仍空，本地 ahead 11）
+
+---
+Task ID: 76
+Agent: Z.ai Code (主会话)
+Task: 用户报障三连修——①work-tickets/19/review 报「attempt to write a readonly database」②移动端已取消（待审核）任务仍显示待执行可点执行确认 ③已完成（已关闭）任务同样可点执行确认
+
+Work Log:
+- 【bug1 定性：Task 75 P0 环境事故余波，当前已恢复】用户报错 Prisma update 抛 SqliteError extended_code 1032 readonly——与 worklog Task 75 段 2599 行记录完全同源：13:30:20 db/custom.db 被（path 级 git checkout/快照还原）替换 inode，dev server 旧句柄变 readonly（SQLITE_READONLY_DBMOVED），Task 75 巡检轮 13:32 双 fork 重启 dev server 已修复。本轮证据链：a) `ls -la db/` + `stat` 权限正常（z:z 664/755，当前用户 z）；b) 独立进程写探测 AuditLog create+delete 成功（id=345）；c) dev server 进程内 POST /api/work-tickets/19/review 实测成功返回（票 19 → VOID）；d) 磁盘 22% 充裕、lsattr 无锁定、dev server pid 12408 为 z 用户 13:32 启动与 Task 75 重启时刻吻合。结论：bug1 在当前 dev server 实例无法复现，属历史窗口期问题，无代码改动必要
+- 【诊断痕迹完整恢复】POST review 复现曾将票 19 置 VOID + 写入诊断 audit/notification——已全部回滚：票 19 恢复 PENDING_REVIEW + comment 清空，auditLog deleteMany(actorName=diagnostic) 删 1 条，notification 删 1 条；DB 终态复核 T19 = {BP-202609-013, PENDING_REVIEW, comment:null}
+- 【bug2/3 根因（源码级）】mobile-preview.tsx 点卡片状态行只看 `p.done` 布尔——done=false 一律渲染「待执行」+ emerald「执行确认」可点，不看关联作业票状态；后端 execute 有一票一板门禁（boundTicket 非 APPROVED/IN_PROGRESS 返 409）故点击必报错，前端漏了镜像门禁。桌面端 task-mgmt.tsx 966-979 行已有同款门禁（sheetTickets.find + execBlocked + disabled），移动端是漏掉的镜像面
+- 【修复（mobile-preview.tsx 5 处）】①import 增 TICKET_STATUS_MAP ②新增 TicketBrief 接口 + pointTicketMap state（pointId → 最新生效票）③openTaskDetail 并行第三路拉 `/api/work-tickets?workRequestId=`（catch 回退空数组不阻断详情），构建映射口径与后端 execute 完全一致：过滤 VOID + pointId 非空 + createdAt 降序后写覆盖，无票不拦截（存量合并票回退需求粒度）④点卡 map 回调改块体：bound/execBlocked/waitReview 三值派生——blocked 态状态行 amber「作业票待批准/待签发」（waitReview）或 stone「作业票已完工/已关闭」（终态，图标 stone）+ 票号 font-mono 上移卡片头部（位置名与徽章之间 shrink-0）+「执行确认」换 stone disabled「暂不可执行」（title 带票号+状态+原因）⑤终态（FINISHED/CLOSED）隐藏「预留盲板」（作业已结束备料无意义），waitReview 与正常态保留
+- 【E2E 三场景实证（agent-browser，移动端预览 414 宽）】bug2 场景 TSK-202609-009（WR-202609-006）：点 43 卡 = 头部「E2E 法兰位 · BP-202609-013 · 加装盲板」+ 状态行 amber「作业票待批准」+「预留盲板」可点 +「暂不可执行」disabled ✓；bug3 场景 TSK-202609-012（WR-202609-014）：点 48 卡 =「BP-202609-016」+ stone「作业票已关闭」+ 仅「暂不可执行」disabled（预留已隐藏）✓；正向对照 TSK-202609-013（WR-202609-015）：点 49 票 BP-202609-017 APPROVED =「待执行」+「预留盲板」+ emerald「执行确认」可点 ✓ 无误伤
+- 【布局打磨】初版票号放状态行在 414px 下被挤成竖排换行——上移卡片头部后一行容纳；顺带发现 agent-browser `scroll down` 命令输出超 1MiB MCP 帧限挂起（历史 snapshot 挂起新变体），改用 eval window.scrollBy 稳定
+- 【验证】lint 0 / tsc(src) 0 / dev.log 无新错误
+
+Stage Summary:
+- 移动端点级一票一板门禁补齐：待审核/待签发/已完工/已关闭票的点不再显示可执行入口，现场人员可直读「为什么不能干」（票状态+票号+title 原因），后端 409 从「兜底」回归「保险丝」本位；桌面端/移动端口径统一（同源 work-tickets API + 同一 TTL 状态判断）
+- bug1 无代码改动：根因是环境事故（db inode 替换），Task 75 已立运维铁律（git/快照触 db 后必须重启 dev server），本轮补全「用户侧报错时间线」证据闭环
+- 测试痕迹：无新增业务数据（三场景全用存量 T74/T75 E2E 舞台）；诊断操作已完整回滚
+- 下阶段建议：①push 仍阻塞（GITHUB_TOKEN 空，本地 ahead 12）②在案候选：录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度、撤回交底级联清附件③移动端已完成任务的点卡 done 分支逻辑未动（低风险）

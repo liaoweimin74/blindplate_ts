@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { apiGet, apiPost, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import {
-  ModuleProps, PLATE_STATUS_MAP, POINT_ACTION_MAP, ROLE_MAP, TASK_STATUS_MAP,
+  ModuleProps, PLATE_STATUS_MAP, POINT_ACTION_MAP, ROLE_MAP, TASK_STATUS_MAP, TICKET_STATUS_MAP,
   FLOW_STEPS, flowStepIndex, CHANGE_ACTION_MAP,
 } from '@/lib/bp-types'
 import { NOTIFY_TYPE_META, timeAgo, type BpNotification } from './notification-bell'
@@ -48,6 +48,8 @@ interface PlateRow {
   thickness: number; pressureRating: string; status: string; location: string | null
   unitId: number | null
 }
+/** 需求下作业票简表（一票一板门禁用：pointId → 生效票状态） */
+interface TicketBrief { id: number; code: string; status: string; pointId: number | null; createdAt?: string }
 interface AnnouncementRow {
   id: number; title: string; content: string; createdAt: string; readAt?: string | null
 }
@@ -252,6 +254,8 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
   const [scheme, setScheme] = useState<SchemeRow | null>(null)
   const [schemeLoading, setSchemeLoading] = useState(false)
   const [plateCodeMap, setPlateCodeMap] = useState<Map<number, string>>(new Map())
+  // 一票一板门禁：pointId → 最新生效票（非 VOID），口径与后端 execute 门禁一致
+  const [pointTicketMap, setPointTicketMap] = useState<Map<number, TicketBrief>>(new Map())
 
   // 预留盲板
   const [reservePoint, setReservePoint] = useState<PointRow | null>(null)
@@ -425,14 +429,23 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
   }, [tab])
 
   const openTaskDetail = async (task: TaskRow) => {
-    setOpenTask(task); setScheme(null); setSchemeLoading(true)
+    setOpenTask(task); setScheme(null); setPointTicketMap(new Map()); setSchemeLoading(true)
     try {
-      const [s, plates] = await Promise.all([
+      const [s, plates, ts] = await Promise.all([
         apiGet<SchemeRow | null>(`/api/isolation-schemes?workRequestId=${task.workRequestId}`),
         apiGet<PlateRow[]>('/api/blind-plates'),
+        apiGet<TicketBrief[]>(`/api/work-tickets?workRequestId=${task.workRequestId}`).catch(() => [] as TicketBrief[]),
       ])
       setScheme(s)
       setPlateCodeMap(new Map(plates.map((p) => [p.id, p.code] as const)))
+      // 同后端 execute 门禁口径：每点取最新非 VOID 票（createdAt 降序，后写覆盖），无票则不拦截（存量合并票回退需求粒度）
+      const byPoint = new Map<number, TicketBrief>()
+      for (const t of ts) {
+        if (t.status === 'VOID' || t.pointId == null) continue
+        const prev = byPoint.get(t.pointId)
+        if (!prev || (t.createdAt ?? '').localeCompare(prev.createdAt ?? '') >= 0) byPoint.set(t.pointId, t)
+      }
+      setPointTicketMap(byPoint)
     } catch (e) {
       toast({ variant: 'destructive', title: '加载失败', description: e instanceof Error ? e.message : '获取隔离方案失败' })
     } finally { setSchemeLoading(false) }
@@ -730,11 +743,17 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
               ) : scheme.points.length === 0 ? (
                 <div className="py-12 text-center text-sm text-stone-400">隔离方案尚未编制隔离点</div>
               ) : (
-                scheme.points.map((p) => (
+                scheme.points.map((p) => {
+                  // 一票一板门禁（镜像桌面端 task-mgmt）：该点绑定票未批准/作业中时禁执行，与后端 execute 校验同口径
+                  const bound = pointTicketMap.get(p.id)
+                  const execBlocked = !!bound && !['APPROVED', 'IN_PROGRESS'].includes(bound.status)
+                  const waitReview = execBlocked && (bound!.status === 'DRAFT' || bound!.status === 'PENDING_REVIEW')
+                  return (
                   <div key={p.id} className="rounded-2xl bg-white p-4 shadow-sm border border-stone-100">
                     <div className="flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{p.seq}</span>
                       <span className="text-sm font-semibold text-stone-800 flex-1 min-w-0 truncate">{p.location}</span>
+                      {bound && <span className="text-[10px] font-mono text-stone-400 shrink-0">{bound.code}</span>}
                       <Badge variant="outline" className={cn('text-[10px] h-5 shrink-0',
                         p.action === 'ADD' ? 'border-violet-200 text-violet-700 bg-violet-50' : 'border-teal-200 text-teal-700 bg-teal-50')}>
                         {POINT_ACTION_MAP[p.action] ?? p.action}
@@ -755,25 +774,36 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
                         </>
                       ) : (
                         <>
-                          <CircleDashed className="w-4 h-4 text-amber-500" />
-                          <span className="text-xs text-amber-600 font-medium">待执行</span>
+                          <CircleDashed className={cn('w-4 h-4', waitReview || !execBlocked ? 'text-amber-500' : 'text-stone-400')} />
+                          <span className={cn('text-xs font-medium', waitReview || !execBlocked ? 'text-amber-600' : 'text-stone-500')}>
+                            {execBlocked ? `作业票${TICKET_STATUS_MAP[bound!.status]?.label ?? bound!.status}` : '待执行'}
+                          </span>
                           <div className="ml-auto flex gap-1.5">
-                            {!p.done && p.action === 'ADD' && !p.blindPlateId && (
+                            {!p.done && p.action === 'ADD' && !p.blindPlateId && (waitReview || !execBlocked) && (
                               <Button size="sm" variant="outline" className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
                                 onClick={() => void openReserve(p)}>
                                 预留盲板
                               </Button>
                             )}
-                            <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                              onClick={() => { setExecPoint(p); setExecOperator(currentUser.name) }}>
-                              执行确认
-                            </Button>
+                            {execBlocked ? (
+                              <Button size="sm" variant="outline" disabled
+                                title={`作业票 ${bound?.code} 当前为「${TICKET_STATUS_MAP[bound?.status ?? '']?.label ?? bound?.status ?? ''}」，${waitReview ? '批准后方可执行' : '不可再执行'}`}
+                                className="h-7 text-xs border-stone-200 bg-stone-50 text-stone-400 cursor-not-allowed">
+                                暂不可执行
+                              </Button>
+                            ) : (
+                              <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                                onClick={() => { setExecPoint(p); setExecOperator(currentUser.name) }}>
+                                执行确认
+                              </Button>
+                            )}
                           </div>
                         </>
                       )}
                     </div>
                   </div>
-                ))
+                  )
+                })
               )}
               <div className="h-2" />
             </div>
