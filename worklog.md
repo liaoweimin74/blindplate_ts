@@ -2449,3 +2449,19 @@ Work Log:
 Stage Summary:
 - push 通道仍阻塞：GitHub 侧 token Contents 权限实测仍为只读（双重实证：git push 403 + 写端点 403），需用户在 token 编辑页确认「Repository permissions → Contents = Read and write」并点击底部 Update token 保存；或改用已备好的 4-patch 通道（48K，git am）
 - fine-grained PAT 权限编辑保存即时生效——若编辑页显示已是 Read and write 但写探测仍 403，则属 GitHub 异常（极小概率），届时换新 token 最快
+
+---
+Task ID: 71-c
+Agent: Z.ai Code (主会话)
+Task: 用户第三次调整权限后 push 成功，通道正式打通
+
+Work Log:
+- 【push 成功】git push → 41c72b5..429d580 main -> main，5 提交（5940774 fix 纯系统字体 / 630b4b2 chore 治理 / 1e789b1 docs T70 / cd02db8 docs T71 / 429d580 docs T71-b）全部上远程
+- 【三重验证】git fetch 后 status 显示 main...origin/main 无 ahead/behind；git log origin/main 与本地逐条一致；GitHub API commits 端点独立确认 5 提交在远程——本地/远程/API 三方一致
+- 【Plan B 解除】/tmp/bp-patches 4 个补丁已无用武之地，删除
+- 【前两轮 403 复盘】用户第 1、2 次称已开通但实测未生效，第 3 次生效——符合「编辑页下拉选择后未点 Update token 保存」的假设；fine-grained PAT 保存即时生效的结论再次验证
+
+Stage Summary:
+- git 推送通道正式打通：沙箱可直推用户仓库 main，后续每阶段收尾可直接 push；plan B patch 通道退役
+- 用户本地待办：git pull → bun install（fontkit 新依赖）→ 本地 PDF 导出回归实测（Windows 应命中 msyh.ttc/simsun.ttc）→ 本地 .env 若曾被追踪需 git rm --cached .env（本仓库远程从未追踪，新 clone 无此问题）
+- 安全提醒：PAT 已完成历史使命且在聊天中明文出现过，建议用户到 GitHub 轮换（生成新 token 或删除重建）
