@@ -2392,3 +2392,25 @@ Stage Summary:
 - 经验沉淀：deepseek-flash 为推理模型，max_tokens=思维链+答案总预算（finish_reason=length + content=""）——任何接 DeepSeek 推理模型的调用都必须给思维链留预算；空响应必须诊断透传而非静默空串
 - 双通道行为差异明确化：builtin（thinking disabled，maxTokens 8000 够用）vs DeepSeek（思维链计入预算，×4 封顶 32000）——bpComplete 调用方无需感知差异
 - 后续可选：DeepSeek 通道空响应自动重试 1 次（当前诊断透传、用户手点重试）；体检进度分级（SSE）；在案候选不变
+
+---
+Task ID: 70
+Agent: Z.ai Code (主会话)
+Task: ①修复用户 Windows 本地「体检报告 PDF 导出 ENOENT（D:\usr\share\fonts\...）」②git 远程仓库接入与环境对齐 ③.env 安全治理
+
+Work Log:
+- 【环境异常发现与对齐】会话取证发现沙箱被重置回 Task 55 快照（git log 无 Task 56-69、worklog 无对应段落、Task 68/69 修复代码不在）——用户提供远程仓库 github.com/liaoweimin74/blindplate_ts（用户以本地最新版为 Initial commit 建 main），沙箱经 HTTPS fetch → git branch backup/sandbox-task55 备份旧历史 → reset --hard origin/main 完整对齐；验证 Task 68（predev/postinstall+6.19.2 pin）/Task 69（32000×3）/worklog Task 66-69 段落全部在位
+- 【.env 安全治理】git rm --cached .env（历史版本经查仅含 DATABASE_URL 无密钥）+ .gitignore 加 !.env.example 反排除 + 新增 .env.example 模板（DATABASE_URL/LLM 双通道/PDF_FONT_DIR 占位）；用户远程 Initial commit 经 ls-tree 取证确认不含 .env，key 未泄露
+- 【PDF 根因】src/lib/bp-audit-pdf.ts 硬编码 FONT_DIR='/usr/share/fonts/truetype/noto-serif-sc'，Windows 上 Node 将 /usr/... 解析到当前盘符 D:\usr\...（与用户报错逐字吻合）；且 registerFont('cn', FONT_REG) 前只探测了 Bold 未探测 Regular → 裸 ENOENT
+- 【修复（方案演进 v2，用户拍板「不用特殊字体」后重构）】①fonttools 子集化 NotoSerifSC Regular/Bold（GB2312 全集 6763 汉字+ASCII+工程符号共 7549 字符，各 2.92MB，原全量 14.8MB 砍 80%）入 assets/fonts/；②resolveFontFile 四级回退链：env PDF_FONT_DIR → 项目内子集 → 系统 TTF/OTF（simhei/Deng/simkai/simfang，仅 TTF/OTF）→ Linux fc-match（附 ttcf 魔数过滤）；③全缺失时抛中文指引性错误，不再裸 ENOENT
+- 【TTC 实验矩阵（决定性，推翻初版假设）】pdfkit 0.20+fontkit 实测：TTF✓ OTF(CFF)✓ TTC✗（createSubset is not a function，wqy-zenhei.ttc 实测崩溃）——微软雅黑/宋体/苹果苹方/Debian noto-cjk/文泉驿均为 TTC 容器全部不可用；初版候选链中 .ttc 全部剔除，isUsableFontFile 读文件头 4 字节拒 ttcf 魔数（fc-match 返回 TTC 时同样拒绝）
+- 【验证】lint 0/tsc 0；curl 全链路：FAST 体检（9 装置/32 设备/32 管线/14 隔离点，4E/54W/18I）→ 报告 AUDIT-20260912-MTZ1HTD9 → PDF 接口 HTTP 200 + application/pdf + %PDF-1.3 字节头 + 存档落盘；v2 子集字体回归 131525B 同过（报告 AUDIT-20260913-MTZ1TTZZ）；子集渲染实验：化工生僻字（烯睛酯酚胺烃苯蔡酮醚焓熵阀釜馏）+ 工程符号（℃±×÷㎡①②③ⅠⅡⅢ）全部嵌入成功；候选链 4 断言 PASS（项目内命中/TTC 魔数实证 ttcf/env 无候选跳过/回退活性）；dev.log 无错误
+- 【诚实披露】沙箱无法完美模拟 win32（/usr/share 目录无权限移除、无 C:\Windows\Fonts）：Windows 系统字体兜底分支为代码审查级验证未实测；resolveFontFile 的 null 分支同理（沙箱总有系统字体兜底），核心机制（优先级顺序+existsSync 探测+无效路径跳过）已由断言实锤，与 Windows 场景逻辑同构
+- 【用户拍板+QA 补验】用户确认业务数据（db/custom.db、prisma/dev.db）不敏感保留入库；运行时杂物出库（commit 6f1a8e7：*.pid/dev.log.bak-* ignore + rm --cached，消除 dev 重启 git status 噪音）；agent-browser 端到端 QA（张工登录/验证码 5BQK 截图直读——验证码为图片渲染 DOM 无 text 元素，惯例更新）：数据体检页签完整渲染→UI 提交快速校验出报告 AUDIT-20260913-MTZ1TTZZ→存档列表两项均「下载 PDF」→浏览器端真实落地 ~/Downloads/*.pdf 两个（%PDF-1.3 头）→dev.log 无 ENOENT；414px 移动端违规卡片证据链/存档按钮 44px 触控/响应式正常
+
+Stage Summary:
+- 用户 Windows PDF 导出 ENOENT 治本：GB2312 全集子集字体（2.92MB×2 共 5.84MB，全平台保底渲染一致）+ 四级回退链 + TTC 实测排除 + 指引性报错；仓库增量仅为初版全量捆绑的 1/5
+- 【关键经验】pdfkit 0.20+fontkit 仅支持单体 TTF/OTF，TTC 容器（雅黑/苹方/noto-cjk/文泉驿）createSubset 崩溃——凡 PDF 字体方案必先验证格式矩阵；fonttools pyftsubset 是把中文全量字体（30MB）压到 GB2312 全集（6MB）的标准手段
+- 工程基线升级：git 远程仓库接入（origin/main=用户本地权威版），沙箱旧历史保全于 backup/sandbox-task55 分支；.env 永久出库+模板入库
+- 待用户拍板：①沙箱 push 权限（HTTPS 匿名只读，需 fine-grained PAT 仅授权本仓库 Contents 读写，或由用户本地应用 patch）【已拍板项：业务数据 db/dev.db 保留入库（用户确认测试数据不敏感）；.zscripts/dev.pid 与 dev.log.bak-23a 运行时杂物已出库；仓库公开态用户已知悉维持】
+- 下一阶段建议：①PDF 修复合入用户本地后回归实测 ②在案候选（体检周检 cron、SSE 进度、按报告修复草稿等）
