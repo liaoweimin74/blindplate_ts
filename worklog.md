@@ -2484,3 +2484,20 @@ Stage Summary:
 - 登录页从 demo 卡片墙升级为正式表单+演示快选下拉，E2E 全流程通过；处置方案步骤列表溢出/悬浮 bug 根治（w-fit+nowrap 根因），同款隐患在 work-requests 一并修复
 - 待用户本地 pull 回归：登录页新交互 + 长内容步骤编辑
 - 下一阶段建议：窄屏下 12 列步骤行的响应式堆叠（当前紧凑但受控）、移动端编辑器专项；在案候选（体检周检 cron、SSE 进度、按报告修复草稿）不变
+
+---
+Task ID: 72-b
+Agent: Z.ai Code (主会话)
+Task: 用户指令「push到仓库」——Task 72 成果推送收尾 + 自动快照 UUID 提交重写
+
+Work Log:
+- 【状态盘点】Task 72 三个规范提交（764f652 登录页 / b4d45f0 步骤列表溢出修复 / 9b13686 worklog）经 fetch 确认已在远程 origin/main（上轮已推送）；本地唯一未推送项 = UUID 主题自动快照提交 358fd02（仅 db/custom.db 二进制变更，作者时间 03:40）+ 工作区新的 db 运行时痕迹
+- 【UUID 提交重写（沿用 Task 72 先例）】git reset --soft origin/main 使 358fd02 退回暂存区 → git add db/custom.db 合并工作区痕迹 → 重写为规范提交 4481113「chore(db): Task 72 收尾——同步 E2E 验证产生的测试痕迹数据」（提交正文注明被重写的 UUID 来源，可追溯）
+- 【push 成功】9b13686..4481113 main -> main（token 脱敏输出惯例）
+- 【三方验证】fetch 后 git status 无 ahead/behind；origin/main 顶部 = 4481113；GitHub API commits 端点独立确认 sha 44811137cf… 与提交消息逐字一致——本地/远程/API 三方一致
+- 【新观察】push 后工作区立即再现 M db/custom.db——dev server 运行期间会持续产生运行时写入（session/审计类），属正常现象，无需追着提交，下轮开工时随当轮成果一并入库即可
+
+Stage Summary:
+- 仓库远程 main = Task 72 全部成果（登录页正式化 + 步骤列表溢出/悬浮修复 + worklog + db 痕迹收尾提交 4481113）
+- 用户本地待办不变：git pull → bun install（fontkit 依赖）→ 登录页新交互与长内容步骤编辑回归
+- 下阶段建议沿用 Task 72：窄屏 12 列步骤行响应式堆叠、移动端编辑器专项；在案候选（体检周检 cron、SSE 进度、按报告修复草稿）不变
