@@ -1,14 +1,172 @@
-// 盲板管理系统 - 主数据体检 PDF 报告生成（Task 54）
-// pdfkit + 系统字体 Noto Serif SC（沙箱 /usr/share/fonts/truetype/noto-serif-sc/）
+// 盲板管理系统 - 主数据体检 PDF 报告生成（Task 54；Task 71 纯系统字体：仓库不捆绑任何字体文件）
+// 字体来源：系统 CJK 字体（Windows 雅黑/宋体/黑体/等线 · macOS 苹方/宋体 · Linux Noto/文泉驿 + fontconfig 兜底）
+// .ttf / .otf / .ttc 集合均支持——.ttc 须经 fontkit 取出单字体对象再交 pdfkit（.ttc 路径直传集合对象会崩，Task 70/71 实测）
 // 报告结构：封面 → 概览统计 → 分级明细（ERROR → WARNING → INFO；疑似矛盾单列）→ 规则附录
 import PDFDocument from 'pdfkit'
+import { create as fontkitCreate } from 'fontkit'
+import { execSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import type { AuditViolation, AuditSummary, AuditDepth, AuditScope } from '@/lib/bp-master-validation'
 
-const FONT_DIR = '/usr/share/fonts/truetype/noto-serif-sc'
-const FONT_REG = path.join(FONT_DIR, 'NotoSerifSC-Regular.ttf')
-const FONT_BOLD = path.join(FONT_DIR, 'NotoSerifSC-Bold.ttf')
+type FontKind = 'regular' | 'bold'
+
+/**
+ * 字体解析优先级（Task 71：纯系统字体，仓库不捆绑字体文件）：
+ * ① 环境变量 PDF_FONT_DIR（显式指定字体目录，任何平台优先）
+ * ② 项目 assets/fonts/（可选手工放置目录，已 gitignore 不入库）
+ * ③ 系统 CJK 字体目录（按平台；.ttf/.otf/.ttc 均可）
+ * ④ Linux fontconfig 动态探测（fc-match；返回的 .ttc 同样可用）
+ *
+ * 【TTC 支持说明】pdfkit 0.20 不能直接吃 .ttc 路径：fontkit.create(缓冲) 不带 postscriptName
+ * 时对 .ttc 返回 TrueTypeCollection 集合对象（无 layout/createSubset），pdfkit EmbeddedFont
+ * 构造时调 createSubset 即崩（"createSubset is not a function"，Task 70 实测）。
+ * 正确姿势（Task 71 实测 PASS）：fontkit.create(缓冲) → 集合 → getFont(字面)/fonts[0] 取单字体
+ * → doc.registerFont(名, 字体对象)（PDFFontFactory 第三通道直接接受 fontkit 字体对象）。
+ */
+function fontCandidateDirs(): string[] {
+  const dirs: string[] = []
+  if (process.env.PDF_FONT_DIR) dirs.push(process.env.PDF_FONT_DIR)
+  dirs.push(path.join(process.cwd(), 'assets', 'fonts'))
+  if (process.platform === 'win32') {
+    dirs.push(process.env.WINDIR ? path.join(process.env.WINDIR, 'Fonts') : 'C:\\Windows\\Fonts')
+  } else if (process.platform === 'darwin') {
+    dirs.push('/System/Library/Fonts', '/System/Library/Fonts/Supplemental', '/Library/Fonts')
+  } else {
+    dirs.push(
+      '/usr/share/fonts/truetype/noto-serif-sc', // 自装 Noto Serif SC（单体 TTF）
+      '/usr/share/fonts/opentype/noto',          // apt fonts-noto-cjk（.ttc 集合）
+      '/usr/share/fonts/truetype/noto',
+      '/usr/share/fonts/truetype/wqy',           // apt fonts-wqy-zenhei/microhei（.ttc 集合）
+      '/usr/share/fonts/truetype/arphic',
+      '/usr/share/fonts/truetype/droid',
+      '/usr/share/fonts',
+    )
+  }
+  return dirs
+}
+
+// 候选文件名（.ttc 集合一等公民）：Windows 雅黑/宋体优先（系统必装概率最高）
+const FONT_FILE_CANDIDATES: Record<FontKind, string[]> = {
+  regular: [
+    'NotoSerifSC-Regular.ttf', // 手工放置/自装 Noto Serif SC（单体 TTF）
+    // Windows 系统自带（msyh/simsun 为 .ttc 集合；simhei/Deng/simkai/simfang 为单体 TTF）
+    'msyh.ttc', 'msyh.ttf', 'simsun.ttc', 'simhei.ttf', 'Deng.ttf', 'simkai.ttf', 'simfang.ttf',
+    // Linux（noto-cjk/文泉驿为 .ttc 集合；Droid 为单体 TTF）
+    'NotoSerifCJK-Regular.ttc', 'NotoSansCJK-Regular.ttc', 'wqy-zenhei.ttc', 'wqy-microhei.ttc', 'DroidSansFallbackFull.ttf',
+    'NotoSerifCJKsc-Regular.otf', 'NotoSansCJKsc-Regular.otf', 'ARPLUMing.otf', 'uming.ttc',
+    // macOS（苹方/宋体为 .ttc 集合）
+    'PingFang.ttc', 'Songti.ttc', 'Hiragino Sans GB.ttc',
+  ],
+  bold: [
+    'NotoSerifSC-Bold.ttf',
+    // Windows：雅黑 Bold（集合/单体）；黑体无独立 Bold 用原文件兜底；等线 Bold
+    'msyhbd.ttc', 'msyhbd.ttf', 'DengB.ttf', 'simhei.ttf',
+    'NotoSerifCJK-Bold.ttc', 'NotoSansCJK-Bold.ttc',
+    'Songti.ttc', 'PingFang.ttc',
+  ],
+}
+
+// .ttc 集合内优先选中的字面（postscriptName，如 noto-cjk 按 SC 取）；未命中回退集合第一个字体
+const TTC_PREFERRED_NAMES: Record<string, string[]> = {
+  'regular:NotoSerifCJK-Regular.ttc': ['NotoSerifCJKsc-Regular'],
+  'regular:NotoSansCJK-Regular.ttc': ['NotoSansCJKsc-Regular'],
+  'bold:NotoSerifCJK-Bold.ttc': ['NotoSerifCJKsc-Bold'],
+  'bold:NotoSansCJK-Bold.ttc': ['NotoSansCJKsc-Bold'],
+  'regular:PingFang.ttc': ['PingFangSC-Regular'],
+  'bold:PingFang.ttc': ['PingFangSC-Semibold'],
+  'regular:Songti.ttc': ['STSongti-SC-Regular', 'SongtiSC-Regular'],
+  'bold:Songti.ttc': ['STSongti-SC-Bold', 'SongtiSC-Bold'],
+  'regular:Hiragino Sans GB.ttc': ['HiraginoSansGB-W3'],
+}
+
+interface FontkitFontLike {
+  postscriptName?: string
+  layout: (text: string) => unknown
+}
+
+const isFontLike = (f: unknown): f is FontkitFontLike =>
+  typeof f === 'object' && f !== null && typeof (f as { layout?: unknown }).layout === 'function'
+
+/** 打开字体文件并归一化为「单字体」对象：单体 TTF/OTF 直接返回；.ttc 集合按首选字面取出单字体（回退集合第一个）。失败返回 null */
+function openFontObject(p: string, kind: FontKind): FontkitFontLike | null {
+  try {
+    const opened: unknown = fontkitCreate(fs.readFileSync(p))
+    if (isFontLike(opened)) return opened
+    const coll = opened as { getFont?: (n: string) => unknown; fonts?: unknown[] }
+    for (const psName of TTC_PREFERRED_NAMES[`${kind}:${path.basename(p)}`] ?? []) {
+      try {
+        const f = coll.getFont?.(psName)
+        if (isFontLike(f)) return f
+      } catch { /* 字面不存在 → 试下一个 */ }
+    }
+    const first = coll.fonts?.[0]
+    return isFontLike(first) ? first : null
+  } catch {
+    return null // 文件损坏/非字体 → 下一候选
+  }
+}
+
+/** Linux fontconfig 兜底：候选文件名全部落空时按语言+字重动态探测（.ttc 集合同样可用） */
+function fcMatchFont(kind: FontKind): string | null {
+  try {
+    const pattern = kind === 'bold' ? 'sans:lang=zh-cn:weight=bold' : 'sans:lang=zh-cn'
+    const out = execSync(`fc-match -f '%{file}' '${pattern}'`, { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim()
+    return out || null
+  } catch {
+    return null // 无 fontconfig 环境（如精简容器）→ 返回 null 走指引性报错
+  }
+}
+
+/** 存在性探测候选目录×文件名，返回命中路径（不打开文件；导出仅为诊断脚本/测试使用） */
+export function resolveFontFile(kind: FontKind): string | null {
+  for (const dir of fontCandidateDirs()) {
+    for (const name of FONT_FILE_CANDIDATES[kind]) {
+      const p = path.join(dir, name)
+      try {
+        if (fs.existsSync(p)) return p
+      } catch { /* 目录不可读 → 下一候选 */ }
+    }
+  }
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return fcMatchFont(kind)
+  return null
+}
+
+/** 注册第一个可用中文字体：预开 fontkit 验证（.ttc 自动取单字体）→ registerFont + 探针实开（失败降级下一候选）；返回命中路径 */
+function registerCnFont(doc: InstanceType<typeof PDFDocument>, name: string, kind: FontKind): string | null {
+  const candidates: string[] = []
+  for (const dir of fontCandidateDirs()) {
+    for (const fileName of FONT_FILE_CANDIDATES[kind]) {
+      const p = path.join(dir, fileName)
+      try {
+        if (fs.existsSync(p)) candidates.push(p)
+      } catch { /* 目录不可读 → 跳过 */ }
+    }
+  }
+  if (candidates.length === 0 && process.platform !== 'win32' && process.platform !== 'darwin') {
+    const fc = fcMatchFont(kind)
+    if (fc) candidates.push(fc)
+  }
+  for (const p of candidates) {
+    const fontObj = openFontObject(p, kind)
+    if (!fontObj) {
+      console.warn(`[bp-audit-pdf] 字体打开失败（跳过）: ${p}`)
+      continue
+    }
+    try {
+      // pdfkit PDFFontFactory 第三通道：直接接受 fontkit 字体对象（.ttc 路径直传会崩，必须先取单字体）
+      doc.registerFont(name, fontObj as unknown as Buffer)
+      // 探针：registerFont 仅登记，字体实开发生在首次 font() 调用——立即触发以暴露问题并降级
+      doc.font(name).fontSize(8).text(' ', 0, 0, { width: 20, lineBreak: false })
+      console.log(`[bp-audit-pdf] PDF ${kind} 字体命中: ${p}${p.toLowerCase().endsWith('.ttc') ? '（.ttc 集合 → 单字体对象）' : ''}`)
+      return p
+    } catch (err) {
+      console.warn(`[bp-audit-pdf] 字体注册失败（跳过）: ${p} → ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  return null
+}
 
 export interface AuditReportMeta {
   reportId: string
@@ -105,10 +263,14 @@ export async function renderAuditPdf(data: AuditReportData): Promise<Buffer> {
     doc.on('end', () => resolve(Buffer.concat(chunks)))
   })
 
-  const hasBold = fs.existsSync(FONT_BOLD)
-  doc.registerFont('cn', FONT_REG)
-  if (hasBold) doc.registerFont('cn-bold', FONT_BOLD)
-  const B = hasBold ? 'cn-bold' : 'cn'
+  const fontReg = registerCnFont(doc, 'cn', 'regular')
+  if (!fontReg) {
+    throw new Error(
+      'PDF 中文字体缺失：系统与候选目录均未找到可用中文字体（.ttf/.otf/.ttc 均可）。请任选其一：①Linux 服务器执行 apt install fonts-noto-cjk（或 fonts-wqy-zenhei）后重试；②将任意中文字体文件放入项目 assets/fonts/ 目录（该目录不入库）；③设置环境变量 PDF_FONT_DIR 指向含中文字体的目录。Windows/macOS 一般自带中文字体，出现此错误通常意味着系统字体被精简'
+    )
+  }
+  const fontBold = registerCnFont(doc, 'cn-bold', 'bold')
+  const B = fontBold ? 'cn-bold' : 'cn'
   const W = doc.page.width - 96
   let y = 0
 
