@@ -18,9 +18,9 @@ import {
   type AttachmentDto, type PhotoCheckDto,
 } from '@/components/bp/bp-media'
 import {
-  ChevronLeft, MapPin, ClipboardCheck, Megaphone, HardHat, ListChecks, RefreshCw,
+  ChevronLeft, ChevronDown, MapPin, ClipboardCheck, Megaphone, HardHat, ListChecks, RefreshCw,
   Loader2, Camera, Mic, Sparkles, CircleCheck, AlertTriangle, ChevronRight,
-  ClipboardList, ShieldCheck, PlayCircle, FileCheck2, Search, Settings2, Undo2,
+  ClipboardList, ShieldCheck, PlayCircle, FileCheck2, Search, Settings2, Undo2, Archive,
 } from 'lucide-react'
 
 // ============ 类型 ============
@@ -28,7 +28,13 @@ interface ReqLite {
   id: number; code: string; title: string; workType: string; location: string
   status: string; medium: string | null; pressure: string | null; temperature: string | null
   urgency: string; plannedStart: string | null; plannedEnd: string | null
+  updatedAt?: string | null
   unit?: { id: number; name: string; code: string } | null
+}
+interface AcceptanceRow {
+  id: number; workRequestId: number; conclusion: string; acceptor: string
+  leakCheck: boolean; restoreCheck: boolean; ledgerCheck: boolean
+  problems: string | null; remarks: string | null; acceptedAt: string
 }
 interface TicketLite {
   id: number; code: string; workRequestId: number; status: string
@@ -59,6 +65,7 @@ const METHOD_ZH: Record<string, string> = {
 
 type View =
   | { kind: 'todo' }
+  | { kind: 'history' }
   | { kind: 'survey'; reqId: number }
   | { kind: 'confirm'; reqId: number }
   | { kind: 'brief-new'; ticketId: number }
@@ -121,6 +128,8 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
   }, [tickets, briefings, role])
   const execTodos = useMemo(() => hasRole(role, ROLES.exec) ? tickets.filter((t) => t.status === 'IN_PROGRESS') : [], [tickets, role])
   const acceptTodos = useMemo(() => hasRole(role, ROLES.accept) ? reqs.filter((r) => r.status === 'PENDING_ACCEPTANCE') : [], [reqs, role])
+  // 已完结记录：验收通过（COMPLETED）的需求，供现场人员事后查询（完成即从待办消失，这里补查询入口）
+  const completedCount = useMemo(() => reqs.filter((r) => r.status === 'COMPLETED').length, [reqs])
 
   const startTicket = async (ticket: TicketLite) => {
     try {
@@ -153,6 +162,11 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
               <div className="mt-3 flex items-center gap-2 text-[11px]">
                 <span className="px-2 py-0.5 rounded-full bg-white/20">我的待办 {totalTodos} 项</span>
                 <span className="text-teal-100/80">{fmtDate(new Date())}</span>
+                <button onClick={() => setView({ kind: 'history' })}
+                  className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/20 hover:bg-white/30 active:scale-95 transition-all text-white"
+                  aria-label="查看已完结记录" title="查看已完结记录">
+                  <Archive className="w-3 h-3" />已完结 {completedCount}
+                </button>
               </div>
             </div>
 
@@ -257,6 +271,7 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
           </>
         )}
 
+        {view.kind === 'history' && <HistoryPage reqs={reqs} tickets={tickets} briefings={briefings} loading={loading} onBack={() => setView({ kind: 'todo' })} />}
         {view.kind === 'survey' && <SurveyPage reqId={view.reqId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'confirm' && <DisposalConfirmPage reqId={view.reqId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'brief-new' && <BriefNewPage ticketId={view.ticketId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} onManage={(id) => setView({ kind: 'brief-manage', briefingId: id })} />}
@@ -265,6 +280,161 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
         {view.kind === 'exec' && <ExecPage ticketId={view.ticketId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'accept' && <AcceptPage reqId={view.reqId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
       </div>
+    </div>
+  )
+}
+
+// ============ 已完结记录（验收通过后的查询入口：完成即从待办消失，这里可回查全流程结果） ============
+const WORK_TYPE_ZH: Record<string, string> = { ADD: '装盲板', REMOVE: '抽盲板', BOTH: '抽装盲板' }
+
+function HistoryPage(props: {
+  reqs: ReqLite[]
+  tickets: TicketLite[]
+  briefings: BriefingRow[]
+  loading: boolean
+  onBack: () => void
+}) {
+  const { reqs, tickets, briefings, loading, onBack } = props
+  // 已完结需求：验收通过（COMPLETED），按最后状态变更时间倒序
+  const doneReqs = useMemo(
+    () => reqs.filter((r) => r.status === 'COMPLETED')
+      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')),
+    [reqs],
+  )
+
+  return (
+    <div className="space-y-3">
+      {/* 顶栏：返回 + 标题 + 计数 */}
+      <div className="flex items-center gap-2 -mx-1">
+        <button onClick={onBack}
+          className="w-9 h-9 rounded-full bg-white shadow-sm flex items-center justify-center active:scale-95 transition-transform"
+          aria-label="返回待办" title="返回待办">
+          <ChevronLeft className="w-4 h-4 text-stone-600" />
+        </button>
+        <h2 className="text-base font-bold text-stone-800 flex items-center gap-1.5">
+          <Archive className="w-4 h-4 text-teal-600" />已完结记录
+        </h2>
+        <span className="ml-auto text-[11px] text-stone-400">共 {doneReqs.length} 条 · 验收通过</span>
+      </div>
+
+      {loading ? (
+        Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)
+      ) : doneReqs.length === 0 ? (
+        <div className="rounded-xl bg-white p-8 text-center space-y-2">
+          <FileCheck2 className="w-10 h-10 text-stone-300 mx-auto" />
+          <p className="text-sm text-stone-600">暂无已完结的现场作业</p>
+          <p className="text-[11px] text-stone-400">验收通过后的作业会自动归档到这里（台账/变动记录同步桌面端）</p>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {doneReqs.map((r) => (
+            <HistoryCard key={r.id} req={r} tickets={tickets} briefings={briefings} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 已完结卡片：收起时展示需求摘要，展开后回查关联作业票/交底/验收结论 */
+function HistoryCard({ req, tickets, briefings }: { req: ReqLite; tickets: TicketLite[]; briefings: BriefingRow[] }) {
+  const [open, setOpen] = useState(false)
+  const [acc, setAcc] = useState<AcceptanceRow | null | 'loading'>(null)
+
+  // 展开（点击事件）时拉验收记录：GET /api/acceptances?workRequestId= → 无则 null
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    if (next && acc === null) {
+      setAcc('loading')
+      apiGet<AcceptanceRow | null>(`/api/acceptances?workRequestId=${req.id}`)
+        .then((a) => setAcc(a))
+        .catch(() => setAcc(null))
+    }
+  }
+
+  const linkedTickets = tickets.filter((t) => t.workRequestId === req.id)
+  const reqBriefings = briefings.filter((b) => b.workRequestId === req.id)
+
+  return (
+    <div className="rounded-xl bg-white border border-stone-100 shadow-sm overflow-hidden">
+      {/* 卡头：点击展开/收起 */}
+      <button onClick={toggle} className="w-full text-left p-3.5 space-y-1.5 active:bg-stone-50 transition-colors"
+        aria-expanded={open}>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs font-bold text-teal-700">{req.code}</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 text-[10px] font-medium">验收通过</span>
+          <span className="ml-auto flex items-center text-[10px] text-stone-400">
+            {req.updatedAt ? fmtDate(req.updatedAt) : ''}
+            <ChevronDown className={cn('w-3.5 h-3.5 ml-1 transition-transform', open && 'rotate-180')} />
+          </span>
+        </div>
+        <p className="text-sm font-semibold text-stone-800 line-clamp-1">{req.title}</p>
+        <p className="text-[11px] text-stone-400 flex items-center gap-1">
+          <MapPin className="w-3 h-3 shrink-0" />
+          <span className="truncate">{req.unit?.name ?? '-'} · {req.location} · {WORK_TYPE_ZH[req.workType] ?? req.workType}</span>
+        </p>
+        <p className="text-[10px] text-stone-400">
+          作业票 {linkedTickets.length} 张 · 交底 {reqBriefings.length} 次
+        </p>
+      </button>
+
+      {/* 展开区：作业票 / 交底 / 验收结论 */}
+      {open && (
+        <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-stone-100 pt-2.5">
+          {/* 关联作业票 */}
+          <div>
+            <p className="text-[10px] font-semibold text-stone-500 mb-1">关联作业票</p>
+            {linkedTickets.length === 0 ? (
+              <p className="text-[11px] text-stone-400 py-1">无关联作业票</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {linkedTickets.map((t) => (
+                  <span key={t.id} className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-mono',
+                    t.status === 'FINISHED' ? 'border-teal-200 bg-teal-50 text-teal-700' : 'border-stone-200 bg-stone-50 text-stone-500')}>
+                    {t.code}
+                    <span className={cn('w-1.5 h-1.5 rounded-full', t.status === 'FINISHED' ? 'bg-teal-500' : 'bg-stone-300')} />
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 验收记录 */}
+          <div>
+            <p className="text-[10px] font-semibold text-stone-500 mb-1">验收结论</p>
+            {acc === 'loading' ? (
+              <Skeleton className="h-16 rounded-lg" />
+            ) : acc === null ? (
+              <p className="text-[11px] text-stone-400 py-1">未查到验收记录</p>
+            ) : (
+              <div className="rounded-lg bg-stone-50 p-2.5 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border',
+                    acc.conclusion === 'PASS'
+                      ? 'bg-teal-50 text-teal-700 border-teal-200'
+                      : 'bg-rose-50 text-rose-700 border-rose-200')}>
+                    {acc.conclusion === 'PASS' ? <CircleCheck className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                    {acc.conclusion === 'PASS' ? '验收通过' : '需整改复验'}
+                  </span>
+                  <span className="text-[10px] text-stone-400">验收人 {acc.acceptor} · {fmtDateTime(acc.acceptedAt)}</span>
+                </div>
+                <div className="flex items-center gap-3 text-[10px] text-stone-500">
+                  <span className="flex items-center gap-1">{acc.leakCheck ? <CircleCheck className="w-3 h-3 text-teal-600" /> : <AlertTriangle className="w-3 h-3 text-rose-500" />}无泄漏</span>
+                  <span className="flex items-center gap-1">{acc.restoreCheck ? <CircleCheck className="w-3 h-3 text-teal-600" /> : <AlertTriangle className="w-3 h-3 text-rose-500" />}现场恢复</span>
+                  <span className="flex items-center gap-1">{acc.ledgerCheck ? <CircleCheck className="w-3 h-3 text-teal-600" /> : <AlertTriangle className="w-3 h-3 text-rose-500" />}台账同步</span>
+                </div>
+                {(acc.problems || acc.remarks) && (
+                  <p className="text-[10px] text-stone-500 leading-relaxed">
+                    {acc.problems && <span className="text-rose-600">问题：{acc.problems} </span>}
+                    {acc.remarks && <span>备注：{acc.remarks}</span>}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

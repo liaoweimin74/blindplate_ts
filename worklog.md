@@ -2649,3 +2649,21 @@ Stage Summary:
 - field-ops 组件双模式化（embedded/standalone）零破坏：Task 74/75 全部子页（Survey/DisposalConfirm/BriefNew/BriefManage/BriefConfirm/Exec/Accept）无需改动自动继承
 - 数据迁移：存量通知 linkModule 7 条已迁移；BP_ENTRY_CATALOG 单条更新
 - 下阶段建议：①push 仍阻塞（token 空，本地 ahead 13）②候选在案：撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度③移动端「任务」Tab 与「现场」Tab 的待办语义有部分重叠（执行确认 vs 开工作业），后续可考虑任务 Tab 精简为纯隔离点作业、现场环节统一归「现场」Tab（需用户拍板，本版不动）
+
+---
+Task ID: 78
+Agent: Z.ai Code (主会话)
+Task: 用户咨询「移动端预览中：现场任务完成以后在哪里可以查询？」——回答查询路径并补齐「现场」Tab 已完结记录查询入口
+
+Work Log:
+- 【现状证据（先答后改）】①「任务」Tab 本可查：/api/work-tasks 无状态过滤全量返回，已完工任务卡带「已完工」徽章+进度条 100%，点详情每点显示「已完成」+操作人+时间（mobile-preview L772-776）；②「现场」Tab 查不了：五环节待办为状态驱动过滤（field-ops L109-123：PENDING_SURVEY/PENDING_CONFIRM/TICKET_APPROVED/IN_PROGRESS/PENDING_ACCEPTANCE），需求验收通过（status=COMPLETED）即从全部待办消失，View 仅 todo+6 子页无历史入口——产品缺口；③DB 事实：WorkRequest 10 条 COMPLETED、WorkTicket 1 FINISHED+12 CLOSED
+- 【实施（field-ops.tsx）】①ReqLite 增 updatedAt（WorkRequest @updatedAt，COMPLETED 后即完工时间）+ 新增 AcceptanceRow 接口；②View 增 { kind:'history' }；③待办顶部状态条「我的待办 N 项」行右侧增 ml-auto 白色/20 胶囊按钮「已完结 {completedCount}」（Archive 图标，aria-label 查看已完结记录）；④HistoryPage：COMPLETED 需求按 updatedAt 倒序，顶栏返回+计数，空态引导文案；⑤HistoryCard 收起摘要（编号/验收通过徽章 teal/标题/装置·位置·类型/完工日期/票数·交底数），点击展开拉 GET /api/acceptances?workRequestId=（复用现有 API 零新增）显示关联作业票徽章（FINISHED teal/CLOSED stone）+验收结论（PASS teal/RECTIFY rose）+验收人·时间+三查项（无泄漏/现场恢复/台账同步，通过 teal CircleCheck 不通过 rose AlertTriangle）+问题/备注
+- 【自纠两处笔误】①票徽章三元表达式误写进普通 className 字符串（会原样输出）→ 改 cn() 模板；②验收时间字段 API 实测为 acceptedAt 而非接口定义的 createdAt（显示「-」暴露）→ curl 实测 {"acceptedAt":"2026-09-13T09:47:20.399Z"} 后修正接口与渲染
+- 【lint 规则重构】react-hooks/set-state-in-effect 拦截 effect 内同步 setAcc('loading') → 改为 toggle() 点击事件内拉取（事件处理器 setState 合规），open 时且 acc===null 才请求一次
+- 【E2E（agent-browser 六项全绿）】入口按钮「已完结 10」与 DB 10 条吻合 → 列表页 10 条按时间倒序（WR-202609-014/009/008/WR-202506-008/WR-202609-002/001/002/006/010/001）→ WR-202609-014 展开：BP-202609-016 票+验收通过+系统管理员+时间（2026-09-13 格式修复生效）+三查项 ✓ → WR-202506-001 展开：BP-202506-001+周验收+2026-08-25 09:00+备注「盲板安装到位，查漏合格，台账已更新」✓；快照 a11y 树不显示展开区内容系 button 子树合并行为，DOM eval 验证为真相
+- 【验证】lint 0 / tsc(src) 0；刷新后桌面模块状态重置属预期（导航链：移动端预览→现场Tab→已完结 可复进）
+
+Stage Summary:
+- 「现场任务完成后在哪里查」闭环：任务 Tab（原有）+ 现场 Tab 新增「已完结记录」（本轮）双入口；已完结页提供需求摘要/关联票/交底次数/验收结论三查项完整回查，零新增 API（复用 work-requests/work-tickets/briefings/acceptances 四现有接口）
+- 现场人员主工作台不再「干完就消失」——完工记录可追溯，与桌面台账同步口径一致
+- 下阶段建议：①push 仍阻塞（token 空，本地 ahead 15）②候选在案：撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度③已完结页可扩展验收照片墙（attachments bizType=ACCEPTANCE bizCode=需求编号，附件挂 bizCode 维度需先核实存取键）
