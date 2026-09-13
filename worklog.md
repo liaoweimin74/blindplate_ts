@@ -2465,3 +2465,22 @@ Stage Summary:
 - git 推送通道正式打通：沙箱可直推用户仓库 main，后续每阶段收尾可直接 push；plan B patch 通道退役
 - 用户本地待办：git pull → bun install（fontkit 新依赖）→ 本地 PDF 导出回归实测（Windows 应命中 msyh.ttc/simsun.ttc）→ 本地 .env 若曾被追踪需 git rm --cached .env（本仓库远程从未追踪，新 clone 无此问题）
 - 安全提醒：PAT 已完成历史使命且在聊天中明文出现过，建议用户到 GitHub 轮换（生成新 token 或删除重建）
+
+---
+Task ID: 72
+Agent: Z.ai Code (主会话)
+Task: ①登录页正式化（用户拍板：像 demo 页 → 用户名+密码表单，内建演示用户下拉选择）②修复新建工艺处置方案步骤列表溢出/删除按钮悬浮 bug
+
+Work Log:
+- 【登录页改造（app-shell.tsx）】移除三列用户卡片九宫格；新表单：用户名/密码（Eye 明文切换）/图形验证码全部带 Label+图标+aria；「演示账号快选」shadcn Select 按业务层级排序（ADMIN→MANAGER→ENGINEER→REVIEWER→OPERATOR→GUARDIAN→ACCEPTOR），选中自动填入账号+演示密码 123456 并聚焦验证码；手动输入用户名命中内建账号时下拉同步选中+角色提示卡（matched useMemo 双向联动）；记住上次账号改为仅预填用户名不预填密码；「或手动输入账号」分隔线
+- 【登录页 E2E】下拉选张工→自动填 zhangg/123456→验证码截图直读 F6HM→登录成功进首页看板；414px 移动端登录页正常（上轮截图）
+- 【步骤列表 bug 根因（源码级）】shadcn SelectTrigger 默认类 w-fit + whitespace-nowrap：grid 项显式 w-fit 使 fit-content 以 min-content（nowrap 全文宽）下限解析 → 选中值长（如「[T102塔底产品输送管线] IP-E101-01 E101入口法兰」）时触发器按单行全文宽撑开，压过相邻 Input 与删除按钮（「悬浮」观感）并横向顶出弹窗；Input 的 min-content≈177px（size 默认值）在窄列同样阻缩
+- 【修复（schemes.tsx + work-requests.tsx 同款 4+2 处）】行内全部 SelectTrigger 补 w-full min-w-0（含隔离点行盲板规格/类型/动作/在库盲板 4 个）；Input 补 min-w-0；处置步骤与隔离点列表各包 max-h-[42vh/52vh] overflow-y-auto 内滚容器（细滚动条样式）；删除按钮规范化（h-8 圆角 hover:bg-rose-50 触控目标+title+aria-label）
+- 【修复验证（agent-browser 实测）】新建工艺处置方案弹窗：选最长隔离点后触发器截断显示「[T102塔底产品输送管线] IF…」不再越列；连加步骤至 11 行，内滚容器 scrollH=480/clientH=242 overflowY=auto 生效，弹窗高恰为 90vh 上限（519px）不超屏，滚到底后页脚（取消/创建草稿/创建并提交审核）完整可见；414px 移动端弹窗无横向溢出、页脚纵排可见
+- 【工程插曲】①上轮 shell 会话被 agent-browser snapshot 挂起（pkill 亦无法执行，本轮自愈）——教训：snapshot 前确认页面交互态稳定；②平台自动快照把未提交的登录页改动收进 UUID 主题提交（06e86a4），因未推送遂 reset --soft 19392e5 重写为规范提交 764f652——教训：阶段中落盘的改动尽量及时提交，防快照抢提交
+- 【验证】lint 0 / tsc(src) 0 / dev.log 无错误
+
+Stage Summary:
+- 登录页从 demo 卡片墙升级为正式表单+演示快选下拉，E2E 全流程通过；处置方案步骤列表溢出/悬浮 bug 根治（w-fit+nowrap 根因），同款隐患在 work-requests 一并修复
+- 待用户本地 pull 回归：登录页新交互 + 长内容步骤编辑
+- 下一阶段建议：窄屏下 12 列步骤行的响应式堆叠（当前紧凑但受控）、移动端编辑器专项；在案候选（体检周检 cron、SSE 进度、按报告修复草稿）不变
