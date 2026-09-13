@@ -26,8 +26,9 @@ import {
   Signal, Wifi, BatteryMedium, Loader2, CircleCheck, CircleDashed, Inbox, QrCode,
   MapPin, RefreshCw, LogOut, BellRing, Trash2, Info, Download, CloudOff, Smartphone, ScanSearch,
   Route, Ban, KeyRound, Megaphone, Building2, Phone, Eye, EyeOff, Check, X,
-  AlertTriangle, BellOff, CheckCheck, MonitorSmartphone, History, FolderOpen,
+  AlertTriangle, BellOff, CheckCheck, MonitorSmartphone, History, FolderOpen, HardHat,
 } from 'lucide-react'
+import FieldOpsModule from '@/components/bp/field-ops'
 
 // ============ 类型 ============
 interface UnitRow { id: number; name: string; code: string }
@@ -70,20 +71,20 @@ const MSG_FILTERS = [
 ] as const
 type MsgFilterKey = (typeof MSG_FILTERS)[number]['key']
 
-/** linkModule → 桌面端模块中文名（移动端模拟器不跨模块跳转，仅提示去桌面端处理） */
+/** linkModule → 模块中文名（跳转提示用；保留 field-ops 兼容存量通知数据） */
 const LINK_MODULE_LABEL: Record<string, string> = {
   dashboard: '首页看板',
   'approval-center': '审批中心',
   'work-requests': '作业需求',
   schemes: '方案编制',
   'task-mgmt': '作业任务管理',
-  ledger: '台账管理',
-  stats: '统计分析',
+  'mobile-preview': '移动端预览（现场作业）',
+  'field-ops': '移动端预览（现场作业）',
   'base-data': '基础数据管理',
   'system-mgmt': '系统管理',
 }
 
-type PhoneTab = 'tasks' | 'scan' | 'msg' | 'me'
+type PhoneTab = 'tasks' | 'scan' | 'ops' | 'msg' | 'me'
 
 /** 我的-修改密码表单 */
 interface PwdForm { oldPassword: string; newPassword: string; confirmPassword: string }
@@ -580,6 +581,7 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
   const TABS: { key: PhoneTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { key: 'tasks', label: '任务', icon: ClipboardList },
     { key: 'scan', label: '扫码', icon: ScanLine },
+    { key: 'ops', label: '现场', icon: HardHat },
     { key: 'msg', label: '消息', icon: Bell },
     { key: 'me', label: '我的', icon: User },
   ]
@@ -615,6 +617,7 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
           <div className="space-y-3">
             {[
               { icon: ClipboardList, title: '我的任务', desc: '按负责人拉取作业任务，查看计划时间与隔离点执行进度' },
+              { icon: HardHat, title: '现场作业', desc: '「现场」Tab 五环节闭环：勘察多角度拍照 / 处置现场确认 / 现场交底（拍照+录音+作业方确认）/ 作业与验收 AI 位置核对' },
               { icon: ScanSearch, title: '扫码识别', desc: '模拟扫码/快捷选择编号，即时解析盲板档案、装置归属与最近变动' },
               { icon: CircleCheck, title: '执行反馈', desc: '逐点确认「预留盲板 → 现场安装/拆除」，操作人实名留痕' },
               { icon: BellRing, title: '验收申请', desc: '作业完工后推送验收人，消息中心同步审批、进度、预警等全部通知' },
@@ -640,7 +643,7 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
           进入「任务」Tab 点击任意任务卡进入详情，可对未完成隔离点执行
           <span className="text-emerald-700 font-medium"> 预留盲板 </span>与
           <span className="text-emerald-700 font-medium"> 执行确认 </span>
-          （POST /api/isolation-points/[id]/reserve 与 /execute）；「扫码」Tab 点击「模拟扫码」可从台账快捷选择或输入盲板编号（如 MB-DN100-0003），扫描线动画后展示盲板档案卡与最近变动记录，解析失败可从历史一键重查。
+          （POST /api/isolation-points/[id]/reserve 与 /execute）；「现场」Tab 即现场作业工作台，按角色展示勘察/处置确认/交底/作业/验收待办；「扫码」Tab 点击「模拟扫码」可从台账快捷选择或输入盲板编号（如 MB-DN100-0003），扫描线动画后展示盲板档案卡与最近变动记录，解析失败可从历史一键重查。
         </div>
       </div>
 
@@ -1187,6 +1190,11 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
             )
           })()}
 
+          {/* ===== 现场 Tab（现场作业全流程：勘察/处置确认/交底/作业/验收，嵌入手机壳） ===== */}
+          {tab === 'ops' && (
+            <FieldOpsModule currentUser={currentUser} embedded />
+          )}
+
           {/* ===== 我的 Tab · 首页（个人中心） ===== */}
           {tab === 'me' && meView === 'home' && (
             <div className="p-3.5 space-y-3">
@@ -1310,7 +1318,7 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
         </div>
 
         {/* 底部 TabBar */}
-        <div className="shrink-0 border-t border-stone-200 bg-white grid grid-cols-4 pt-1.5 pb-4">
+        <div className="shrink-0 border-t border-stone-200 bg-white grid grid-cols-5 pt-1.5 pb-4">
           {TABS.map((t) => {
             const Icon = t.icon
             const active = tab === t.key

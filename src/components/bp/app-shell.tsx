@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   LayoutDashboard, ClipboardList, FileSignature, TicketCheck, BookOpen,
-  BarChart3, Database, Settings, Smartphone, Menu, X, Factory, ChevronDown, ShieldCheck, HardHat,
+  BarChart3, Database, Settings, Smartphone, Menu, X, Factory, ChevronDown, ShieldCheck,
   RefreshCw, ShieldAlert, ListChecks, FlaskConical, DraftingCompass,
   User, KeyRound, Eye, EyeOff,
 } from 'lucide-react'
@@ -26,7 +26,6 @@ import PipelineMasterModule from '@/components/bp/pipeline-master'
 import BaseDataModule from '@/components/bp/base-data'
 import SystemMgmtModule from '@/components/bp/system-mgmt'
 import MobilePreviewModule from '@/components/bp/mobile-preview'
-import FieldOpsModule from '@/components/bp/field-ops'
 import NotificationBell from '@/components/bp/notification-bell'
 import GlobalSearch from '@/components/bp/global-search'
 import UserMenu from '@/components/bp/user-menu'
@@ -37,7 +36,7 @@ type ModuleKey =
   | 'stats' | 'pid-config' | 'pipeline-master' | 'base-data' | 'equipment-master' | 'system-mgmt' | 'mobile-preview'
   // 拆分后的独立模块（schemes/task-mgmt 保留兼容旧跳转）
   | 'isolation-scheme' | 'disposal-scheme' | 'ticket-mgmt' | 'task-track'
-  | 'blind-status' | 'iso-point-master' | 'field-ops'
+  | 'blind-status' | 'iso-point-master'
 
 interface NavItem {
   key: string
@@ -97,7 +96,6 @@ const NAV: NavItem[] = [
     { key: 'announcements', label: '公告发布' },
     { key: 'audit', label: '操作日志' },
   ] },
-  { key: 'field-ops', label: '现场作业', icon: HardHat },
   { key: 'mobile-preview', label: '移动端预览', icon: Smartphone },
 ]
 
@@ -115,8 +113,7 @@ const MODULE_META: Record<ModuleKey, { title: string; desc: string }> = {
   'iso-point-master': { title: '隔离点主数据', desc: '隔离点主数据维护，业务环节精确引用' },
   'base-data': { title: '基础数据管理', desc: '装置信息、数据字典、管线与隔离点主数据维护' },
   'system-mgmt': { title: '系统管理', desc: '用户账号、权限、管理员公告发布与操作日志审计' },
-  'mobile-preview': { title: '移动端预览', desc: 'uniapp 移动端核心流程演示（作业人员视角）' },
-  'field-ops': { title: '现场作业', desc: '移动端现场操作：勘察拍照 / 处置确认 / 现场交底（拍照+录音+AI位置核对） / 作业核对 / 验收核对' },
+  'mobile-preview': { title: '移动端预览', desc: 'uniapp 移动端核心流程演示（作业人员视角，含现场作业五环节：勘察拍照 / 处置确认 / 现场交底 / 作业核对 / 验收核对）' },
   'isolation-scheme': { title: '隔离方案', desc: '依据现场勘察与 JSA 分析确定隔离点位，编制/提交/审核隔离方案' },
   'disposal-scheme': { title: '工艺处置方案', desc: '泄压/排净/置换/吹扫/气体检测等工艺处置步骤编制与审核' },
   'ticket-mgmt': { title: '开作业票', desc: '盲板抽堵安全作业票签发与批准（GB 30871）' },
@@ -379,7 +376,6 @@ function ModuleRouter({ active, moduleProps, onLogout }: { active: ModuleKey; mo
     case 'equipment-master': return <BaseDataModule key="bd-equipments" {...moduleProps} initialTab="equipments" />
     case 'system-mgmt': return <SystemMgmtModule {...moduleProps} />
     case 'mobile-preview': return <MobilePreviewModule {...moduleProps} onLogout={onLogout} />
-    case 'field-ops': return <FieldOpsModule {...moduleProps} />
     default: return null
   }
 }

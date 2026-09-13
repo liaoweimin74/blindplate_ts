@@ -79,7 +79,8 @@ const ROLES = {
 const hasRole = (role: string | undefined, list: readonly string[]) => !!role && list.includes(role)
 
 // ============ 主组件 ============
-export default function FieldOpsModule({ currentUser }: ModuleProps) {
+/** embedded：嵌入移动端预览手机壳内（去外层页面壳/最大宽，由宿主管滚动与内边距） */
+export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & { embedded?: boolean }) {
   const { toast } = useToast()
   const [view, setView] = useState<View>({ kind: 'todo' })
   const [reqs, setReqs] = useState<ReqLite[]>([])
@@ -134,8 +135,8 @@ export default function FieldOpsModule({ currentUser }: ModuleProps) {
   const totalTodos = surveyTodos.length + confirmTodos.length + briefNewTodos.length + briefConfirmTodos.length + execStartTodos.length + execTodos.length + acceptTodos.length
 
   return (
-    <div className="min-h-[60vh] bg-stone-100">
-      <div className="mx-auto max-w-md px-3 py-4 space-y-3 pb-10">
+    <div className={embedded ? '' : 'min-h-[60vh] bg-stone-100'}>
+      <div className={embedded ? 'px-3 py-3.5 space-y-3 pb-6' : 'mx-auto max-w-md px-3 py-4 space-y-3 pb-10'}>
         {view.kind === 'todo' && (
           <>
             {/* 顶部状态条 */}

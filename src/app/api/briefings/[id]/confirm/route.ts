@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       bizType: 'TICKET',
       bizId: briefing.ticketId ?? undefined,
       bizCode: briefing.ticketCode ?? undefined,
-      linkModule: 'field-ops',
+      linkModule: 'mobile-preview',
     }).catch(() => null)
     return NextResponse.json({ briefing: updated })
   } catch (e) {

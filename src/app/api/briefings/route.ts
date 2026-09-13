@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
       bizType: 'TICKET',
       bizId: ticketId ?? undefined,
       bizCode: ticketCode ?? request.code,
-      linkModule: 'field-ops',
+      linkModule: 'mobile-preview',
     }).catch(() => null)
 
     return NextResponse.json({ briefing }, { status: 201 })

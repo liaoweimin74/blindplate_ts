@@ -327,7 +327,7 @@ export const BP_ENTRY_CATALOG: BpEntryMeta[] = [
   { key: 'disposal-scheme:new', label: '新建工艺处置方案', desc: '发起编制工艺处置方案（动作）' },
   { key: 'ticket-mgmt', label: '开作业票', desc: '盲板抽堵安全作业票签发与批准' },
   { key: 'task-track', label: '作业任务跟踪', desc: '现场作业任务执行与逐点确认' },
-  { key: 'field-ops', label: '现场作业（移动端）', desc: '移动端现场操作：勘察多角度拍照、处置现场确认、现场交底（拍照+录音+作业方确认+AI位置核对）、作业拍照核对、验收拍照核对' },
+  { key: 'mobile-preview', label: '现场作业（移动端）', desc: '移动端预览「现场」Tab：勘察多角度拍照、处置现场确认、现场交底（拍照+录音+作业方确认+AI位置核对）、作业拍照核对、验收拍照核对' },
   { key: 'ledger:plates', label: '盲板台账', desc: '盲板档案与台账查询' },
   { key: 'blind-status', label: '盲板状态', desc: 'PID 图上隔离点实时通/盲状态查看' },
   { key: 'ledger:records', label: '变动记录', desc: '盲板抽堵变动留痕' },

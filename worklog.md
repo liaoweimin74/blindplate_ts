@@ -2629,3 +2629,23 @@ Stage Summary:
 - bug1 无代码改动：根因是环境事故（db inode 替换），Task 75 已立运维铁律（git/快照触 db 后必须重启 dev server），本轮补全「用户侧报错时间线」证据闭环
 - 测试痕迹：无新增业务数据（三场景全用存量 T74/T75 E2E 舞台）；诊断操作已完整回滚
 - 下阶段建议：①push 仍阻塞（GITHUB_TOKEN 空，本地 ahead 12）②在案候选：录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度、撤回交底级联清附件③移动端已完成任务的点卡 done 分支逻辑未动（低风险）
+
+---
+Task ID: 77
+Agent: Z.ai Code (主会话)
+Task: 用户指令「现场作业应该放到移动端预览里去」——将桌面侧栏独立模块「现场作业」（field-ops）整体整合进移动端预览手机壳
+
+Work Log:
+- 【消费链全摸排后才动手】'field-ops' 字符串全局 4 文件引用：①app-shell.tsx（菜单项/ModuleKey/MODULE_META/case 渲染/import+HardHat icon）②bp-types.ts BP_ENTRY_CATALOG:330（AI 助手「小安」回答内嵌直达目录，bp-ai.ts prompt 与 ai-assistant EntryLink 共用，onGo→app-shell navigate）③api/briefings/route.ts:109 与 api/briefings/[id]/confirm/route.ts:54（交底创建/确认通知 pushNotifications linkModule，notification-bell 点击→onNavigate→navigate）——三链路同 key 联动，全部一次性迁移
+- 【field-ops.tsx 加 embedded 模式】`FieldOpsModule({ currentUser, embedded }: ModuleProps & { embedded?: boolean })`——嵌入时外壳 `''` + 内容 `px-3 py-3.5 space-y-3 pb-6`（由宿主手机壳管滚动/内边距/背景），独立模式原样保留（min-h-[60vh] bg-stone-100 + max-w-md 居中）——组件可双向复用，桌面删入口后无死代码
+- 【mobile-preview.tsx 五 Tab 改造】PhoneTab 增 'ops'；TABS 插入 `{ key:'ops', label:'现场', icon:HardHat }`（任务|扫码|现场|消息|我的）；底栏 grid-cols-4→5；内容区 `{tab==='ops' && <FieldOpsModule currentUser embedded />}`（插于消息与我的之间）；import FieldOpsModule+HardHat；LINK_MODULE_LABEL 增 'mobile-preview':'移动端预览（现场作业）' 并保留 'field-ops' 同名兼容（防漏网存量）；左侧说明区核心功能列表插入「现场作业」条目（HardHat，五环节描述）+ 操作提示补「现场 Tab 即现场作业工作台」
+- 【app-shell.tsx 删现场作业入口】ModuleKey 联合类型删 'field-ops'、侧栏 NAV 删菜单项（mobile-preview 顺位上移）、MODULE_META 删条目且 mobile-preview desc 扩为「含现场作业五环节」、renderModule 删 case、import FieldOpsModule 删、lucide HardHat 删（仅菜单在用）
+- 【bp-types BP_ENTRY_CATALOG】field-ops 条目改 `key:'mobile-preview', label:'现场作业（移动端）', desc:移动端预览「现场」Tab…`——AI 助手直达链接与全局搜索目录同源自动生效
+- 【两个 briefings API】通知 linkModule 'field-ops'→'mobile-preview'；DB 存量通知 updateMany 迁移 7 条（count 实证 7→7）；notification-bell 点击跳转不断链
+- 【E2E（agent-browser）】a) 桌面侧栏「现场作业」菜单已消失（find text 现场 只命中「现场勘察」子页实证）；b) 移动端预览底栏五 Tab 渲染（任务|扫码|现场|消息(红点)|我的）grid-cols-5 均分；c) 「现场」Tab 内嵌渲染完整：teal 渐变头部（现场作业·系统管理员·我的待办 3 项·刷新钮）+「现场交底（交底方）」分组+3 张去交底票卡（BP-011/012/017）；d) 子页导航：点 BP-202609-017 去交底 → 现场交底表单页手机壳内完整（返回箭头/票据卡/要点/被交底人/拍照）→ aria-label=返回 click → 断言回待办列表（back-to-todo）✓；e) lint 0 / tsc(src) 0 / dev.log 无错误 / HTTP 200
+
+Stage Summary:
+- 现场作业回归移动端本体：桌面侧栏不再有重复入口，五环节闭环（勘察/处置确认/交底+管理/作业/验收）全部在手机壳「现场」Tab 内可达；通知点击与 AI 助手直达均落「移动端预览」模块
+- field-ops 组件双模式化（embedded/standalone）零破坏：Task 74/75 全部子页（Survey/DisposalConfirm/BriefNew/BriefManage/BriefConfirm/Exec/Accept）无需改动自动继承
+- 数据迁移：存量通知 linkModule 7 条已迁移；BP_ENTRY_CATALOG 单条更新
+- 下阶段建议：①push 仍阻塞（token 空，本地 ahead 13）②候选在案：撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度③移动端「任务」Tab 与「现场」Tab 的待办语义有部分重叠（执行确认 vs 开工作业），后续可考虑任务 Tab 精简为纯隔离点作业、现场环节统一归「现场」Tab（需用户拍板，本版不动）
