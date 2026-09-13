@@ -2543,3 +2543,21 @@ Stage Summary:
 - 远程 main = Task 73 完整成果（PID 四项增强），用户本地 git pull 即可回归
 - 本地待推送共 3 个提交：81ebec3 gitignore(/skills/) + 7fd045c worklog Task 73-b + 本补遗提交，token 补回后一键 push + fetch 三方验证
 - 下阶段建议：token 补回后 push 收尾；PID 增强后续（挂接图元属性面板显示所属管线+手动解除按钮、真实图纸 AI 导入 inlineSymbols 识别率检验）；在案候选不变（体检周检 cron、SSE 进度、按报告修复草稿）
+
+---
+Task ID: 73-c
+Agent: Z.ai Code (主会话)
+Task: 用户反馈「在图上点击标注时会跳出选择隔离点位，没办法自由挂标」——标注交互双模式改造（自由挂标入口）
+
+Work Log:
+- 【问题确认（源码级）】标注链路原为单通道：标注工具 →「标注隔离点」Dialog 仅列 /api/iso-point-masters 主数据 → pickMasterPoint → placingMark(=MasterPoint) → addMarkAt 强制 masterPointId=placingMark.id——用户被前置要求「先有主数据才能挂标」，与 Task 73 需求②「先自由挂标 → 生成主数据按编码建档」的工作流形成鸡生蛋死锁（代码 generate-master/route.ts 正是以挂标 code 为唯一键建档）
+- 【改造（pid-config.tsx 5 处）】①新 type PlacingMark={masterId: number|null, code, name}（L209），placingMark state 由 MasterPoint 改型，masterId=null 即自由挂标——PidMark.masterPointId 本就可选（L139），数据模型天然兼容 ②标注 Dialog 重构为分段控件双模式（从主数据选择/自由挂标，role=tablist+aria-selected，非 Radix Tabs 规避 E2E 合成点击无效坑）：自由页 = 编码必填+名称可选+Enter 快捷放置+teal「进入放置模式」+底部说明 ③双守卫实时提示：同码已在本图 → amber「不可重复标注」+按钮禁用；同码已存在主数据 → amber「可直接放置，生成主数据时自动关联」+允许（与 generate-master 的 exists→linked 分支语义一致）④addMarkAt 适配：masterPointId=masterId??undefined、name 空转 undefined、toast 分流（标注完成/自由挂标完成——后者描述提示「未关联主数据——保存后点『生成主数据』按编码建档」）⑤Dialog 打开时重置四态（关键词/编码/名称/模式）；工具栏标注按钮 title 更新；主数据页空态文案改引导「切换自由挂标」
+- 【下游影响面排查（改造前逐点确认零改动必要）】checkMarkPipeOwnership 已判 !mark.masterPointId 短路；管线小徽章渲染已判 m.masterPointId != null；查看态悬停浮层/文字开关走 code+statusMap 与绑定无关；生成主数据 skip 条件 masterPointId!=null 恰好放行自由挂标
+- 【E2E 全矩阵（agent-browser，图 28「T73C自由挂标验证」新建实测）】双模式弹窗渲染（默认主数据页 17 行）；自由挂标 IP-FREE-01（名称「自由挂标测试点」）→ toast「自由挂标完成…未关联主数据」+标注徽章 0→1；防重码守卫（同码再输 → amber 提示+按钮禁用 实测 true/true）；已存在同码提示（IP-E101-01 → amber+按钮可用）；保存（误中生成主数据按钮反而实测「请先保存图」前置守卫）→ 生成主数据 → 结果弹窗隔离点新建 1=IP-FREE-01（空图无管线正确报「未识别到所属管线（位置距管线较远）」）；服务端复核 IsoPointMaster id=34（remark「PID 图生成主数据自动创建」）+ 图 content 挂标 masterPointId=34 回填闭环；幂等复测再点生成 → 跳过 1；主数据路径回归（真实指针序列点行 IP-E101-01 → 放置 → toast「标注完成」+徽章 1→2，保存后 masterPointId=1 自带关联）——老路径行为与改造前逐字一致
+- 【E2E 插曲】①Radix Dialog 关闭后其 X 按钮 textContent 为空/sr-only，用 textContent==='' 找 X 不可靠——改找 'Close' 或 svg.lucide-x；②验证码 F 点位：登录页读码 FYQR 一次过；③worklog 72/73 记录的「fill 不触发 React 受控输入」再次验证，全程原生 value setter+dispatchEvent
+- 【验证】lint 0 / tsc(src) 0 / dev.log 无错误；测试痕迹保留为演示数据：图 28（含已关联 IP-FREE-01→34 与自带关联 IP-E101-01→1 两类样本）
+
+Stage Summary:
+- 自由挂标通道打通：标注弹窗双模式（主数据选择照旧 / 自由挂标先标后建），Task 73「生成主数据」工作流的前置死锁解除——先画图标码、后一键建档关联的完整链路 E2E 闭环
+- 4 个本地待推提交累积中（81ebec3/7fd045c/e6c511b/本提交），token 仍空（长度 0 实测）继续跳过 push
+- 下阶段建议：①挂接图元属性面板显示所属管线+手动解除按钮（Task 73 在案）②自由挂标后未生成主数据的挂标可在图上给「未关联」角标提示（可选打磨）③真实图纸 AI 导入验证 inlineSymbols
