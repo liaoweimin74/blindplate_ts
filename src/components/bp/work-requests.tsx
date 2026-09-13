@@ -1562,28 +1562,32 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                 </span>
               )}
             </div>
+            <div className="max-h-[42vh] overflow-y-auto -mx-1 px-1 pt-1 space-y-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar-track]:bg-transparent">
             {dispRows.map((r, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-center">
                 <span className="col-span-1 text-xs text-stone-400 text-center">{i + 1}</span>
                 <Select value={r.method} onValueChange={(v) => setDispRows(dispRows.map((x, j) => j === i ? { ...x, method: v } : x))}>
-                  <SelectTrigger className="col-span-2 h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="col-span-2 h-8 text-xs w-full min-w-0"><SelectValue /></SelectTrigger>
                   <SelectContent>{Object.entries(DISPOSAL_METHOD_MAP).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                 </Select>
-                <Input className="col-span-4 h-8 text-xs" placeholder="处置内容 *" value={r.detail} onChange={(e) => setDispRows(dispRows.map((x, j) => j === i ? { ...x, detail: e.target.value } : x))} />
-                <Input className="col-span-2 h-8 text-xs" placeholder="合格标准" value={r.standard} onChange={(e) => setDispRows(dispRows.map((x, j) => j === i ? { ...x, standard: e.target.value } : x))} />
+                <Input className="col-span-4 h-8 text-xs min-w-0" placeholder="处置内容 *" value={r.detail} onChange={(e) => setDispRows(dispRows.map((x, j) => j === i ? { ...x, detail: e.target.value } : x))} />
+                <Input className="col-span-2 h-8 text-xs min-w-0" placeholder="合格标准" value={r.standard} onChange={(e) => setDispRows(dispRows.map((x, j) => j === i ? { ...x, standard: e.target.value } : x))} />
                 <Select value={r.masterPointId != null ? String(r.masterPointId) : 'none'} onValueChange={(v) => {
                   const m = pointMasters.find((x) => String(x.id) === v) ?? null
                   setDispRows(dispRows.map((x, j) => j === i ? { ...x, masterPointId: m ? m.id : null, masterCode: m ? m.code : null } : x))
                 }}>
-                  <SelectTrigger className="col-span-2 h-8 text-xs"><SelectValue placeholder="关联隔离点" /></SelectTrigger>
+                  <SelectTrigger className="col-span-2 h-8 text-xs w-full min-w-0"><SelectValue placeholder="关联隔离点" /></SelectTrigger>
                   <SelectContent className="max-h-56">
                     <SelectItem value="none">不关联</SelectItem>
                     {pointMasters.map((m) => <SelectItem key={m.id} value={String(m.id)}>[{m.pipelineName ?? m.pipeline?.name ?? '—'}] {m.code} {m.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <button className="col-span-1 text-rose-500 hover:text-rose-700 flex justify-center" onClick={() => setDispRows(dispRows.filter((_, j) => j !== i))} title="删除该步骤"><Trash2 className="w-3.5 h-3.5" /></button>
+                <button type="button" title="删除该步骤" aria-label={`删除步骤 ${i + 1}`}
+                  className="col-span-1 h-8 rounded-md text-rose-500 hover:text-rose-700 hover:bg-rose-50 flex items-center justify-center transition-colors"
+                  onClick={() => setDispRows(dispRows.filter((_, j) => j !== i))}><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             ))}
+            </div>
             <Button size="sm" variant="outline" className="text-xs border-emerald-300 text-emerald-700" onClick={() => setDispRows([...dispRows, { method: 'DRAIN', detail: '', standard: '', masterPointId: null, masterCode: null }])}>
               <Plus className="w-3.5 h-3.5 mr-1" />添加步骤
             </Button>

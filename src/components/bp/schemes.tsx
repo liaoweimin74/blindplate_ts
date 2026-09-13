@@ -842,6 +842,7 @@ export default function SchemesModule({ currentUser, initialTab, singleTab }: Mo
             </div>
             {detailType === 'isolation' ? (
               <div className="space-y-2">
+                <div className="max-h-[52vh] overflow-y-auto -mx-1 px-1 pt-1 space-y-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar-track]:bg-transparent">
                 {editPointRows.map((r, i) => (
                   <div key={i} className="rounded-md border p-2.5 space-y-2 bg-stone-50/60">
                     <div className="flex items-center text-xs text-stone-400">
@@ -886,20 +887,20 @@ export default function SchemesModule({ currentUser, initialTab, singleTab }: Mo
                       <Input className="h-8 text-xs" placeholder="压力" value={r.pressure} onChange={(e) => setEditPointRows(editPointRows.map((x, j) => j === i ? { ...x, pressure: e.target.value } : x))} />
                       <Input className="h-8 text-xs" placeholder="温度" value={r.temperature} onChange={(e) => setEditPointRows(editPointRows.map((x, j) => j === i ? { ...x, temperature: e.target.value } : x))} />
                       <Select value={r.blindSpec} onValueChange={(v) => setEditPointRows(editPointRows.map((x, j) => j === i ? { ...x, blindSpec: v } : x))}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="盲板规格 *" /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-xs w-full min-w-0"><SelectValue placeholder="盲板规格 *" /></SelectTrigger>
                         <SelectContent>{specDict.map((d) => <SelectItem key={d.id} value={d.value}>{d.label}</SelectItem>)}</SelectContent>
                       </Select>
                       <Select value={r.blindType} onValueChange={(v) => setEditPointRows(editPointRows.map((x, j) => j === i ? { ...x, blindType: v } : x))}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="盲板类型 *" /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-xs w-full min-w-0"><SelectValue placeholder="盲板类型 *" /></SelectTrigger>
                         <SelectContent>{typeDict.map((d) => <SelectItem key={d.id} value={d.value}>{d.label}</SelectItem>)}</SelectContent>
                       </Select>
                       <Select value={r.action} onValueChange={(v) => setEditPointRows(editPointRows.map((x, j) => j === i ? { ...x, action: v, blindPlateId: v === 'REMOVE' ? '' : x.blindPlateId } : x))}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-xs w-full min-w-0"><SelectValue /></SelectTrigger>
                         <SelectContent><SelectItem value="ADD">加装盲板</SelectItem><SelectItem value="REMOVE">拆除盲板</SelectItem></SelectContent>
                       </Select>
                       {r.action === 'ADD' ? (
                         <Select value={r.blindPlateId} onValueChange={(v) => setEditPointRows(editPointRows.map((x, j) => j === i ? { ...x, blindPlateId: v } : x))}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="预留在库盲板 *" /></SelectTrigger>
+                          <SelectTrigger className="h-8 text-xs w-full min-w-0"><SelectValue placeholder="预留在库盲板 *" /></SelectTrigger>
                           <SelectContent className="max-h-56">
                             {plates.filter((p) => p.spec === r.blindSpec).map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.code}（{p.spec} {p.type}）</SelectItem>)}
                           </SelectContent>
@@ -908,21 +909,23 @@ export default function SchemesModule({ currentUser, initialTab, singleTab }: Mo
                     </div>
                   </div>
                 ))}
+                </div>
                 <Button size="sm" variant="outline" className="text-xs border-emerald-300 text-emerald-700" onClick={() => setEditPointRows([...editPointRows, emptyPointRow()])}>
                   <Plus className="w-3.5 h-3.5 mr-1" />添加隔离点
                 </Button>
               </div>
             ) : (
               <div className="space-y-2">
+                <div className="max-h-[42vh] overflow-y-auto -mx-1 px-1 pt-1 space-y-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar-track]:bg-transparent">
                 {editStepRows.map((r, i) => (
                   <div key={i} className="grid grid-cols-12 gap-2 items-center">
                     <span className="col-span-1 text-xs text-stone-400 text-center">{i + 1}</span>
                     <Select value={r.method} onValueChange={(v) => setEditStepRows(editStepRows.map((x, j) => j === i ? { ...x, method: v } : x))}>
-                      <SelectTrigger className="col-span-2 h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="col-span-2 h-8 text-xs w-full min-w-0"><SelectValue /></SelectTrigger>
                       <SelectContent>{Object.entries(DISPOSAL_METHOD_MAP).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                     </Select>
-                    <Input className="col-span-3 h-8 text-xs" placeholder="处置内容 *" value={r.detail} onChange={(e) => setEditStepRows(editStepRows.map((x, j) => j === i ? { ...x, detail: e.target.value } : x))} />
-                    <Input className="col-span-2 h-8 text-xs" placeholder="合格标准" value={r.standard} onChange={(e) => setEditStepRows(editStepRows.map((x, j) => j === i ? { ...x, standard: e.target.value } : x))} />
+                    <Input className="col-span-3 h-8 text-xs min-w-0" placeholder="处置内容 *" value={r.detail} onChange={(e) => setEditStepRows(editStepRows.map((x, j) => j === i ? { ...x, detail: e.target.value } : x))} />
+                    <Input className="col-span-2 h-8 text-xs min-w-0" placeholder="合格标准" value={r.standard} onChange={(e) => setEditStepRows(editStepRows.map((x, j) => j === i ? { ...x, standard: e.target.value } : x))} />
                     <Select
                       value={r.pointSel ?? (r.masterPointId ? String(r.masterPointId) : '')}
                       onValueChange={(v) => {
@@ -930,7 +933,7 @@ export default function SchemesModule({ currentUser, initialTab, singleTab }: Mo
                         setEditStepRows(editStepRows.map((x, j) => j === i ? { ...x, pointSel: v, masterPointId: mp?.id ?? null, masterCode: mp?.code ?? undefined } : x))
                       }}
                     >
-                      <SelectTrigger className="col-span-3 h-8 text-xs"><SelectValue placeholder="关联隔离点（可选）" /></SelectTrigger>
+                      <SelectTrigger className="col-span-3 h-8 text-xs w-full min-w-0"><SelectValue placeholder="关联隔离点（可选）" /></SelectTrigger>
                       <SelectContent className="max-h-56">
                         <SelectItem value="none">不关联</SelectItem>
                         {pointMasters.map((m) => (
@@ -938,9 +941,12 @@ export default function SchemesModule({ currentUser, initialTab, singleTab }: Mo
                         ))}
                       </SelectContent>
                     </Select>
-                    <button className="col-span-1 text-rose-500 hover:text-rose-700 flex justify-center" onClick={() => setEditStepRows(editStepRows.filter((_, j) => j !== i))}><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button type="button" title="删除该步骤" aria-label={`删除步骤 ${i + 1}`}
+                      className="col-span-1 h-8 rounded-md text-rose-500 hover:text-rose-700 hover:bg-rose-50 flex items-center justify-center transition-colors"
+                      onClick={() => setEditStepRows(editStepRows.filter((_, j) => j !== i))}><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 ))}
+                </div>
                 <Button size="sm" variant="outline" className="text-xs border-emerald-300 text-emerald-700" onClick={() => setEditStepRows([...editStepRows, emptyStepRow()])}>
                   <Plus className="w-3.5 h-3.5 mr-1" />添加步骤
                 </Button>
