@@ -52,8 +52,8 @@ test
 prompt
 
 server.log
-# Skills directory
-/skills/tool-results/
+# Skills directory（平台技能库脚手架，非项目代码，整目录不入库）
+/skills/
 tool-results/
 
 
