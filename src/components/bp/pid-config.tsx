@@ -206,6 +206,9 @@ interface MasterPoint {
   refCount: number
 }
 
+/** 挂标放置载荷：masterId=null 为自由挂标（未关联主数据，「生成主数据」时按 code 幂等建档/关联） */
+type PlacingMark = { masterId: number | null; code: string; name: string }
+
 /** 挂标所属管线变更确认（添加/移动终点位置自动计算与当前归属不一致时弹窗） */
 interface PipeOwnershipPrompt {
   markId: string
@@ -1952,7 +1955,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ 'm-equipment': true, basic: true, custom: true })
   const toggleGroup = useCallback((key: string) => setOpenGroups((m) => ({ ...m, [key]: !m[key] })), [])
   const [libHover, setLibHover] = useState<{ title: string; lines: string[]; x: number; y: number } | null>(null)
-  const [placingMark, setPlacingMark] = useState<MasterPoint | null>(null)
+  const [placingMark, setPlacingMark] = useState<PlacingMark | null>(null)
   const [placingSymbol, setPlacingSymbol] = useState<SymbolRow | null>(null)
   // 直线橡皮筋绘制：按下定起点 → 拖动实时改角度/长度 → 抬起定终点（任意方向，/ 与 \ 双向支持）
   const [lineDraft, setLineDraft] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null)
@@ -1988,6 +1991,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   // ---- 标注隔离点 Dialog ----
   const [markDialogOpen, setMarkDialogOpen] = useState(false)
   const [markKeyword, setMarkKeyword] = useState('')
+  const [markMode, setMarkMode] = useState<'master' | 'free'>('master')
+  const [freeMarkCode, setFreeMarkCode] = useState('')
+  const [freeMarkName, setFreeMarkName] = useState('')
   const [masterPoints, setMasterPoints] = useState<MasterPoint[]>([])
   const [masterLoading, setMasterLoading] = useState(false)
 
@@ -2695,9 +2701,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     if (!placingMark) return
     const mark: PidMark = {
       id: uid('m'),
-      masterPointId: placingMark.id,
+      masterPointId: placingMark.masterId ?? undefined,
       code: placingMark.code,
-      name: placingMark.name,
+      name: placingMark.name || undefined,
       x: Math.round(p.x),
       y: Math.round(p.y),
     }
@@ -2705,8 +2711,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     mutate((prev) => ({ ...prev, marks: [...prev.marks, mark] }))
     setPlacingMark(null)
     setSelected({ kind: 'mark', id: mark.id })
-    toast({ title: '标注完成', description: `${placed.code} ${placed.name}（记得保存）` })
-    checkMarkPipeOwnership(mark) // 按放置位置自动计算所属管线（与当前归属不一致时弹确认）
+    toast({
+      title: placed.masterId != null ? '标注完成' : '自由挂标完成',
+      description: `${placed.code}${placed.name ? ` ${placed.name}` : ''}（${placed.masterId != null ? '记得保存' : '未关联主数据——保存后点「生成主数据」按编码建档'}）`,
+    })
+    checkMarkPipeOwnership(mark) // 按放置位置自动计算所属管线（与当前归属不一致时弹确认；自由挂标未关联主数据自动跳过）
   }
 
   const updateShape = (id: string, patch: Partial<PidShape>) => {
@@ -3462,7 +3471,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }
 
-  // ---- 标注隔离点 ----
+  // ---- 标注隔离点（主数据选择 / 自由挂标双模式） ----
   const filteredMasters = useMemo(() => {
     const kw = markKeyword.trim().toLowerCase()
     if (!kw) return masterPoints
@@ -3473,8 +3482,22 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
   const pickMasterPoint = (mp: MasterPoint) => {
     setMarkDialogOpen(false)
-    setPlacingMark(mp)
+    setPlacingMark({ masterId: mp.id, code: mp.code, name: mp.name })
     toast({ title: '进入放置模式', description: `在画布上点击位置放置 ${mp.code}，Esc 取消` })
+  }
+
+  // 自由挂标：编码必填、本图内不可重码；与主数据同码允许放置（生成主数据时按编码自动关联）
+  const freeCodeTrimmed = freeMarkCode.trim()
+  const freeCodeOnDiagram = markedCodes.has(freeCodeTrimmed)
+  const freeCodeInMaster = masterPoints.some((mp) => mp.code === freeCodeTrimmed)
+  const freeMarkReady = freeCodeTrimmed.length > 0 && !freeCodeOnDiagram
+  const pickFreeMark = () => {
+    if (!freeMarkReady) return
+    setMarkDialogOpen(false)
+    setPlacingMark({ masterId: null, code: freeCodeTrimmed, name: freeMarkName.trim() })
+    toast({ title: '进入放置模式', description: `在画布上点击位置放置 ${freeCodeTrimmed}，Esc 取消` })
+    setFreeMarkCode('')
+    setFreeMarkName('')
   }
 
   // ---- 渲染：连线（路径实时推导，自动跟随） ----
@@ -3851,7 +3874,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               <Button
                 variant="outline"
                 className="h-10 w-10 border-teal-300 p-0 text-teal-700 hover:bg-teal-50"
-                title="标注隔离点"
+                title="标注隔离点：从主数据选择或自由挂标"
                 disabled={!activeId}
                 onClick={() => {
                   setMarkKeyword('')
@@ -5276,76 +5299,151 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       </AlertDialog>
 
       {/* 标注隔离点选择 */}
-      <Dialog open={markDialogOpen} onOpenChange={setMarkDialogOpen}>
+      <Dialog
+        open={markDialogOpen}
+        onOpenChange={(o) => {
+          setMarkDialogOpen(o)
+          if (o) { setMarkKeyword(''); setFreeMarkCode(''); setFreeMarkName(''); setMarkMode('master') }
+        }}
+      >
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>标注隔离点</DialogTitle>
-            <DialogDescription>从隔离点主数据中选择，随后在画布上点击位置放置菱形标注</DialogDescription>
+            <DialogDescription>
+              从主数据选择既有点位，或自由挂标先标后建——「生成主数据」会按编码建档并自动关联
+            </DialogDescription>
           </DialogHeader>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-            <Input
-              className="pl-8" placeholder="搜索编号 / 名称 / 管线"
-              value={markKeyword} onChange={(e) => setMarkKeyword(e.target.value)}
-            />
+          {/* 标注模式切换（分段控件，teal 语义延续隔离点配色） */}
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-stone-100 p-1" role="tablist" aria-label="标注模式">
+            <button
+              type="button" role="tab" aria-selected={markMode === 'master'}
+              onClick={() => setMarkMode('master')}
+              className={cn(
+                'h-7 rounded-md text-xs transition-colors',
+                markMode === 'master' ? 'bg-white font-medium text-stone-800 shadow-sm' : 'text-stone-500 hover:text-stone-700',
+              )}
+            >
+              从主数据选择
+            </button>
+            <button
+              type="button" role="tab" aria-selected={markMode === 'free'}
+              onClick={() => setMarkMode('free')}
+              className={cn(
+                'h-7 rounded-md text-xs transition-colors',
+                markMode === 'free' ? 'bg-white font-medium text-stone-800 shadow-sm' : 'text-stone-500 hover:text-stone-700',
+              )}
+            >
+              自由挂标
+            </button>
           </div>
-          <div className="max-h-96 overflow-y-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>编号</TableHead>
-                  <TableHead>名称</TableHead>
-                  <TableHead>所属管线</TableHead>
-                  <TableHead className="text-right">状态</TableHead>
-                </TableRow>
-              </TableHeader>
-              {masterLoading ? (
-                <TableBody>
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <TableRow key={i}>
-                      {Array.from({ length: 4 }).map((_, j) => (
-                        <TableCell key={j}><Skeleton className="h-4 w-full max-w-[110px]" /></TableCell>
-                      ))}
+          {markMode === 'master' ? (
+            <>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                <Input
+                  className="pl-8" placeholder="搜索编号 / 名称 / 管线"
+                  value={markKeyword} onChange={(e) => setMarkKeyword(e.target.value)}
+                />
+              </div>
+              <div className="max-h-96 overflow-y-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>编号</TableHead>
+                      <TableHead>名称</TableHead>
+                      <TableHead>所属管线</TableHead>
+                      <TableHead className="text-right">状态</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              ) : filteredMasters.length === 0 ? (
-                <TableBody>
-                  <TableRow>
-                    <TableCell colSpan={4}>
-                      <div className="py-8 text-center text-sm text-stone-400">
-                        没有匹配的隔离点，请先在「管线及隔离点主数据」中创建
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              ) : (
-                <TableBody>
-                  {filteredMasters.map((mp) => {
-                    const used = markedCodes.has(mp.code)
-                    return (
-                      <TableRow
-                        key={mp.id}
-                        className={cn(!used && 'cursor-pointer')}
-                        onClick={() => !used && pickMasterPoint(mp)}
-                      >
-                        <TableCell className="font-mono text-xs">{mp.code}</TableCell>
-                        <TableCell>{mp.name}</TableCell>
-                        <TableCell className="text-stone-500">{mp.pipelineName || '-'}</TableCell>
-                        <TableCell className="text-right">
-                          {used ? (
-                            <Badge variant="outline" className="border-stone-200 bg-stone-100 text-stone-500">已标注</Badge>
-                          ) : (
-                            <Badge variant="outline" className="border-teal-200 bg-teal-50 text-teal-700">可选择</Badge>
-                          )}
+                  </TableHeader>
+                  {masterLoading ? (
+                    <TableBody>
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <TableRow key={i}>
+                          {Array.from({ length: 4 }).map((_, j) => (
+                            <TableCell key={j}><Skeleton className="h-4 w-full max-w-[110px]" /></TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  ) : filteredMasters.length === 0 ? (
+                    <TableBody>
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <div className="py-8 text-center text-sm text-stone-400">
+                            没有匹配的隔离点——可切换「自由挂标」直接放置新点位（之后用「生成主数据」按编码建档）
+                          </div>
                         </TableCell>
                       </TableRow>
-                    )
-                  })}
-                </TableBody>
+                    </TableBody>
+                  ) : (
+                    <TableBody>
+                      {filteredMasters.map((mp) => {
+                        const used = markedCodes.has(mp.code)
+                        return (
+                          <TableRow
+                            key={mp.id}
+                            className={cn(!used && 'cursor-pointer')}
+                            onClick={() => !used && pickMasterPoint(mp)}
+                          >
+                            <TableCell className="font-mono text-xs">{mp.code}</TableCell>
+                            <TableCell>{mp.name}</TableCell>
+                            <TableCell className="text-stone-500">{mp.pipelineName || '-'}</TableCell>
+                            <TableCell className="text-right">
+                              {used ? (
+                                <Badge variant="outline" className="border-stone-200 bg-stone-100 text-stone-500">已标注</Badge>
+                              ) : (
+                                <Badge variant="outline" className="border-teal-200 bg-teal-50 text-teal-700">可选择</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  )}
+                </Table>
+              </div>
+            </>
+          ) : (
+            <div className="grid gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="free-mark-code">隔离点编码 <span className="text-rose-500">*</span></Label>
+                <Input
+                  id="free-mark-code" autoComplete="off"
+                  placeholder="如 IP-101-01（生成主数据时按此编码建档/关联）"
+                  value={freeMarkCode} onChange={(e) => setFreeMarkCode(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') pickFreeMark() }}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="free-mark-name">名称（可选）</Label>
+                <Input
+                  id="free-mark-name" autoComplete="off"
+                  placeholder="如 E-101 入口法兰隔离点"
+                  value={freeMarkName} onChange={(e) => setFreeMarkName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') pickFreeMark() }}
+                />
+              </div>
+              {freeCodeTrimmed.length > 0 && freeCodeOnDiagram && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  本图已有编码 <span className="font-mono font-medium">{freeCodeTrimmed}</span> 的挂标，同一张图内不可重复标注
+                </div>
               )}
-            </Table>
-          </div>
+              {freeCodeTrimmed.length > 0 && !freeCodeOnDiagram && freeCodeInMaster && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  主数据中已存在编码 <span className="font-mono font-medium">{freeCodeTrimmed}</span> 的隔离点——可直接放置，点击「生成主数据」时会自动关联该记录
+                </div>
+              )}
+              <Button
+                className="bg-teal-700 text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!freeMarkReady} onClick={pickFreeMark}
+              >
+                <MapPin className="mr-1 h-4 w-4" /> 进入放置模式
+              </Button>
+              <p className="text-xs text-stone-400">
+                放置后挂标暂不关联主数据；保存图纸后点击工具栏「生成主数据」即按编码自动建档/关联并回填绑定。
+              </p>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
