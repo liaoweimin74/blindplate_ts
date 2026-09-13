@@ -2667,3 +2667,25 @@ Stage Summary:
 - 「现场任务完成后在哪里查」闭环：任务 Tab（原有）+ 现场 Tab 新增「已完结记录」（本轮）双入口；已完结页提供需求摘要/关联票/交底次数/验收结论三查项完整回查，零新增 API（复用 work-requests/work-tickets/briefings/acceptances 四现有接口）
 - 现场人员主工作台不再「干完就消失」——完工记录可追溯，与桌面台账同步口径一致
 - 下阶段建议：①push 仍阻塞（token 空，本地 ahead 15）②候选在案：撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度③已完结页可扩展验收照片墙（attachments bizType=ACCEPTANCE bizCode=需求编号，附件挂 bizCode 维度需先核实存取键）
+
+---
+Task ID: 79
+Agent: Z.ai Code (主会话)
+Task: 用户需求「现场作业中被交底人员应该也是系统用户，交底人员录完信息以后，扫被交底人员二维码完成交底」——交底确认升级为实名名单+扫码签到
+
+Work Log:
+- 【开工处理】基线发现平台 UUID 快照抢提交（f66b82c 仅含 db/custom.db）→ reset --soft 重写为规范 chore(db) 9ab7780；dev server 死亡（E2E 时 ERR_CONNECTION_REFUSED）→ 双 fork 重启恢复
+- 【schema】Briefing 加 3 字段（db:push 无破坏）：briefedUserIds（被交底系统用户 ID JSON）、confirmedUserIds（已扫码签到用户 ID JSON）；briefedUsers 语义改为姓名快照（后端按 ID 查 users 回填「、」分隔，旧口径展示兼容）
+- 【后端 4 处】①POST /api/briefings：接受 briefedUserIds 数组 + 按 ID 查 user 回填 briefedUsers 姓名快照 ②PATCH：接受 briefedUserIds 更新，名单变更时同步剔除不在新名单的已签到用户 ③新端点 POST /api/briefings/[id]/sign（扫码签到）：校验 briefing 存在/PENDING/userId 在 briefedUserIds 名单内（防冒名 403）→ confirmedUserIds 去重追加 → 全员覆盖自动 PENDING→CONFIRMED（confirmedBy=末位签到人）+ GUARDIAN 通知 + STATUS_CHANGE 审计；部分签到记 SIGN 审计 ④confirm API：主动确认路径兼容，confirmedById 在名单内自动并入 confirmedUserIds
+- 【audit 语义修正】bizStatusLabel 把 briefing 的 PENDING/CONFIRMED 撞名映射为需求状态（「待执行→处置确认·待开票」）——sign/confirm 的 STATUS_CHANGE detail 改内联「待作业方确认 → 已确认」文案（confirm 存量同样修正），去 auditFlowDetail 依赖
+- 【前端 field-ops.tsx】①UserPicker 组件：/api/users 实名用户多选（搜索姓名/工号/部门，chips violet 高亮，票面 workers 姓名匹配自动预填，点击展开懒加载）②QrSignSheet 组件：底部弹层扫码签到——取景框+bp-scan-sweep 扫描线动画 1.1s、未签到成员列表点击模拟扫描其身份码（正式版 uniapp 相机扫码，演示以模拟识别代替）、手动输入身份码内容（BPID|id|name|role）或姓名兜底、进度条+已签到名单 chips ③BriefNewPage：被交底人从逗号分隔文本升级 UserPicker（必选校验），created 视图加扫码签到区（进度 0/N+开始/继续扫码按钮，CONFIRMED 后显示「全员签到完成交底已生效」）④BriefManagePage：UserPicker（editable 联动 disabled）+签到进度卡（teal=已生效/violet=进行中）+扫码入口 ⑤身份码编码口径常量 BP_ID_CODE_PREFIX='BPID|'（export 供对齐）
+- 【前端 mobile-preview.tsx】「我的」Tab 功能入口首位加「我的身份码」（QrCode icon teal）→ 底部弹层：QRCode.toDataURL 生成 480px 真二维码（BPID|<userId>|<name>|<role>）+姓名/角色/部门+用途说明（向交底人出示完成实名签到，全员签到后交底生效）
+- 【lint 三连修】set-state-in-effect ×2（UserPicker effect 内同步 setLoading/预填 onChange）→ 改为 toggleOpen 事件处理器内 loadUsers()，预填在异步回调中完成（prefilled useState 化）；refs 规则禁渲染期写 ref（latest-ref 模式被拦）→ 去 ref 改闭包；unused eslint-disable 清理
+- 【E2E 十项全绿（agent-browser+curl）】①我的身份码：二维码 img dataURL PNG 10KB+姓名+用途说明 ✓ ②BP-202609-017 去交底：UserPicker 预填票面 workers（张工）+9 用户列表 ✓ ③勾选王班长凑 2 人名单 → 上传照片（/api/attachments 真实附件）→ 提交 → created 视图进度 0/2 ✓ ④开始扫码签到 Sheet（取景框+2 成员）✓ ⑤模拟扫张工 1.1s 动画 → toast+进度 1/2 ✓ ⑥扫王班长 → 2/2 allDone → sheet 自动关闭+「全员签到完成交底已生效」✓ ⑦DB：Briefing 5 = {status:CONFIRMED, briefedUsers:"张工、王班长"（ID 回填）, briefedUserIds/confirmedUserIds 双 JSON 一致, confirmedBy:王班长} ✓ ⑧审计三连：CREATE→SIGN（张工 1/2）→STATUS_CHANGE（2/2 末位王班长）✓ ⑨通知：「现场交底待确认」+「现场交底已确认（2/2）」linkModule=mobile-preview ✓ ⑩边界 curl：名单外 403「赵师傅 不在该次交底的被交底名单内」/重复签到拦截/空参拦截/部分签到后 DELETE 撤回 ✓（测试 briefing id=7 已删无残留）
+- 【业务联动回归】交底 CONFIRMED 后现场 Tab 自动出现「待开工（交底已确认）」+ BP-202609-017「确认开工」按钮；票 BP-202609-017 仍 APPROVED、WR-202609-015 仍 TICKET_APPROVED——Task 76 一票一板门禁舞台完好
+
+Stage Summary:
+- 交底确认机制升级完成：被交底人从自由文本→系统实名用户多选；确认方式从「被交底人主动点确认」升级为「交底人扫被交底人身份码逐人实名签到」+保留原主动确认兼容路径（confirmedById 自动并入名单）；全员签到自动 CONFIRMED 解锁开工，形成「交底→签到→开工」业务闭环
+- 身份码体系落地：「我的-我的身份码」真二维码（BPID 编码口径前后端/两组件一致），演示环境扫码以模拟识别+手动输入兜底，正式版 uniapp 直通相机扫码
+- 舞台变化（记录）：WR-202609-015 的 BP-202609-017 现有 CONFIRMED 交底（Briefing 5，真实功能验证数据），原「无交底可测交底流」舞台升级为「待开工可测开工流」；如需重测交底流可先撤回开工或用其他 APPROVED 无交底票
+- 下阶段建议：①push 仍阻塞（token 空，本地 ahead 17）②候选在案：已完结页验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度③BriefNewPage 提交照片仍必填（API 层未强制）——按需决定是否 API 层加校验

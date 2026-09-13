@@ -66,6 +66,14 @@ export async function POST(req: NextRequest) {
       if (ticket.workRequestId !== wid) return jsonError('作业票不属于该作业需求')
     }
 
+    // 被交底系统用户名单：ID JSON 存储 + 姓名（逗号分隔）快照回填（便于旧口径展示）
+    const briefedIdList: string[] = Array.isArray(body.briefedUserIds) ? body.briefedUserIds.filter((x: unknown) => typeof x === 'string') : []
+    let briefedUsersText = str(body.briefedUsers) || null
+    if (briefedIdList.length > 0) {
+      const us = await db.user.findMany({ where: { id: { in: briefedIdList } }, select: { id: true, name: true } })
+      const names = briefedIdList.map((id) => us.find((u) => u.id === id)?.name ?? id)
+      briefedUsersText = names.join('、')
+    }
     const briefing = await db.briefing.create({
       data: {
         workRequestId: wid,
@@ -75,7 +83,8 @@ export async function POST(req: NextRequest) {
         pointLocation,
         briefingUser,
         briefingUserId: str(body.briefingUserId) || null,
-        briefedUsers: str(body.briefedUsers) || null,
+        briefedUsers: briefedUsersText,
+        briefedUserIds: briefedIdList.length > 0 ? JSON.stringify(briefedIdList) : null,
         content,
         status: 'PENDING',
       },
@@ -128,6 +137,17 @@ export async function PATCH(req: NextRequest) {
     const data: Record<string, unknown> = {}
     if (str(body.content)) data.content = str(body.content)
     if (body.briefedUsers !== undefined) data.briefedUsers = str(body.briefedUsers) || null
+    if (body.briefedUserIds !== undefined) {
+      data.briefedUserIds = Array.isArray(body.briefedUserIds) ? JSON.stringify(body.briefedUserIds) : null
+      // 名单变更时，已签到但不在新名单内的用户剔除
+      if (briefing.confirmedUserIds) {
+        try {
+          const signed = JSON.parse(briefing.confirmedUserIds) as string[]
+          const kept = Array.isArray(body.briefedUserIds) ? signed.filter((u) => (body.briefedUserIds as string[]).includes(u)) : []
+          data.confirmedUserIds = JSON.stringify(kept)
+        } catch { /* 存量脏数据忽略 */ }
+      }
+    }
     const updated = await db.briefing.update({ where: { id }, data })
     return NextResponse.json({ briefing: updated })
   } catch (e) {

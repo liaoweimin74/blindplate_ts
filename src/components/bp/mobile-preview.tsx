@@ -1,6 +1,7 @@
 'use client'
 // 移动端模拟器：uniapp + uView2 移动端交互演示（任务/扫码/消息/我的四个 Tab 均对接真实 API，消息与桌面铃铛同源）
 import { useEffect, useState, useRef } from 'react'
+import QRCode from 'qrcode'
 import { apiGet, apiPost, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import {
   ModuleProps, PLATE_STATUS_MAP, POINT_ACTION_MAP, ROLE_MAP, TASK_STATUS_MAP, TICKET_STATUS_MAP,
@@ -294,6 +295,9 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
 
   // 我的 Tab（个人中心：首页/系统公告子视图 + 修改密码弹层 + 退出确认）
   const [meView, setMeView] = useState<'home' | 'announcements'>('home')
+  const [idCodeOpen, setIdCodeOpen] = useState(false)
+  const [idCodeDataUrl, setIdCodeDataUrl] = useState('')
+  const [idCodeLoading, setIdCodeLoading] = useState(false)
   const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([])
   const [annLoading, setAnnLoading] = useState(false)
   const [expandedAnn, setExpandedAnn] = useState<number | null>(null)
@@ -357,7 +361,22 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
     } finally { setMarkingAll(false) }
   }
 
-  // ============ 我的：系统公告 / 修改密码 / 退出登录 ============
+  // ============ 我的：身份码 / 系统公告 / 修改密码 / 退出登录 ============
+  // 身份码内容口径（与 field-ops QrSignSheet 解析一致）：BPID|<userId>|<name>|<role>
+  const openIdCode = async () => {
+    setIdCodeOpen(true)
+    setIdCodeLoading(true)
+    try {
+      const payload = `BPID|${currentUser.id}|${currentUser.name}|${currentUser.role}`
+      const url = await QRCode.toDataURL(payload, { width: 480, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } })
+      setIdCodeDataUrl(url)
+    } catch {
+      setIdCodeDataUrl('')
+    } finally {
+      setIdCodeLoading(false)
+    }
+  }
+
   const loadAnnouncements = async () => {
     setAnnLoading(true)
     try {
@@ -1230,6 +1249,7 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
 
               {/* 功能入口（真实接口） */}
               <div className="rounded-2xl bg-white shadow-sm border border-stone-100 divide-y divide-stone-100 overflow-hidden">
+                <MeCell icon={QrCode} label="我的身份码" sub="现场交底扫码实名签到用" tone="teal" onClick={() => void openIdCode()} />
                 <MeCell icon={KeyRound} label="修改密码" sub="自助更换登录密码" onClick={openPwdSheet} />
                 <MeCell icon={Megaphone} label="系统公告" sub="管理员全员通知" tone="teal" onClick={openAnnouncements} />
               </div>
@@ -1426,6 +1446,61 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
                   {pwdSaving ? <><Loader2 className="w-4 h-4 animate-spin" />提交中…</> : '确认修改'}
                 </Button>
                 <p className="text-[10px] text-stone-400 text-center mt-2">修改成功后下次登录请使用新密码</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 我的身份码底部弹层（现场交底扫码实名签到用） */}
+        {idCodeOpen && (
+          <div className="absolute inset-0 z-30 flex flex-col justify-end">
+            <button aria-label="关闭身份码" onClick={() => setIdCodeOpen(false)} className="absolute inset-0 bg-stone-900/50" />
+            <div className="relative bg-white rounded-t-3xl shadow-2xl bp-fade-up max-h-[88%] flex flex-col">
+              <div className="px-4 pt-2.5 pb-3 border-b border-stone-100 shrink-0">
+                <div className="w-10 h-1 rounded-full bg-stone-200 mx-auto mb-3" />
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => setIdCodeOpen(false)} aria-label="返回"
+                    className="w-8 h-8 -ml-1 rounded-lg flex items-center justify-center text-stone-500 hover:bg-stone-100 active:bg-stone-200 transition-colors">
+                    <ArrowLeft className="w-4.5 h-4.5" />
+                  </button>
+                  <span className="text-sm font-bold text-stone-800 flex items-center gap-1.5">
+                    <QrCode className="w-4 h-4 text-teal-600" />我的身份码
+                  </span>
+                  <span className="ml-auto text-[11px] text-stone-400 font-mono">@{currentUser.username}</span>
+                </div>
+              </div>
+
+              <div className="px-4 py-4 space-y-3 overflow-y-auto flex flex-col items-center">
+                {idCodeLoading ? (
+                  <div className="w-52 h-52 rounded-2xl bg-stone-50 border border-stone-100 flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 text-stone-300 animate-spin" />
+                  </div>
+                ) : idCodeDataUrl ? (
+                  <div className="rounded-2xl border-4 border-teal-500 p-2 shadow-sm">
+                    <img src={idCodeDataUrl} alt={`${currentUser.name} 的身份二维码`} className="w-52 h-52 rounded-lg" />
+                  </div>
+                ) : (
+                  <div className="w-52 h-52 rounded-2xl bg-stone-50 border border-stone-100 flex flex-col items-center justify-center text-stone-400">
+                    <QrCode className="w-8 h-8 mb-2" />
+                    <p className="text-[11px]">二维码生成失败，请重试</p>
+                  </div>
+                )}
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-bold text-stone-800">{currentUser.name}</p>
+                  <p className="text-[11px] text-stone-400">{ROLE_MAP[currentUser.role]?.label ?? currentUser.role}{currentUser.department ? ` · ${currentUser.department}` : ''}</p>
+                </div>
+                <div className="w-full rounded-xl bg-teal-50 border border-teal-200 p-3 space-y-1">
+                  <p className="text-[11px] font-semibold text-teal-800 flex items-center gap-1"><ScanLine className="w-3 h-3" />用途说明</p>
+                  <p className="text-[10px] text-teal-700 leading-relaxed">
+                    现场交底时向交底人出示此码：交底人在「现场交底-扫码签到」中扫描，即可完成您的实名签到确认；全员签到后交底自动生效，作业票方可开工。
+                  </p>
+                </div>
+              </div>
+
+              <div className="px-4 pt-3 pb-6 shrink-0 border-t border-stone-100 bg-white rounded-b-none">
+                <Button className="w-full h-11 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white text-sm" onClick={() => setIdCodeOpen(false)}>
+                  完成
+                </Button>
               </div>
             </div>
           </div>

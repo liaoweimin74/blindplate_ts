@@ -459,11 +459,13 @@ model Briefing {
   pointLocation  String? // 隔离位置快照
   briefingUser   String // 交底人
   briefingUserId String? // 交底人 userId
-  briefedUsers   String? // 被交底作业方人员（逗号分隔）
+  briefedUsers   String? // 被交底作业方人员（逗号分隔；扫码签到模式下与 briefedUserIds 同源）
+  briefedUserIds String? // 被交底系统用户 ID JSON 数组（交底人选定的实名作业方）
   content        String // 交底要点（风险/措施/工艺要求）
-  status         String    @default("PENDING") // PENDING待作业方确认 | CONFIRMED作业方已确认
-  confirmedBy    String? // 作业方确认人
+  status         String    @default("PENDING") // PENDING待作业方确认 | CONFIRMED作业方已确认（含全员扫码签到完成）
+  confirmedBy    String? // 作业方确认人（全员签到完成时=全部已签到人名）
   confirmedById  String?
+  confirmedUserIds String? // 已扫码签到确认的用户 ID JSON 数组（逐人实名签到）
   confirmedAt    DateTime?
   confirmRemark  String? // 确认备注
   aiCheckResult  String? // 最新 AI 位置核对结论快照 CONSISTENT | INCONSISTENT | UNCERTAIN

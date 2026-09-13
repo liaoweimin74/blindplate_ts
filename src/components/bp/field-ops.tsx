@@ -1,7 +1,8 @@
 'use client'
-// 现场作业（移动端）：勘察拍照 / 工艺处置现场确认 / 现场交底（拍照+录音+作业方确认+AI位置核对） / 作业拍照核对 / 验收拍照核对
+// 现场作业（移动端）：勘察拍照 / 工艺处置现场确认 / 现场交底（拍照+录音+扫被交底人身份码签到+AI位置核对） / 作业拍照核对 / 验收拍照核对
 // 移动优先单列布局（真机全宽，桌面居中）；配色：AI=violet、teal 主操作、rose 不一致警告、amber 定位
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPatch, apiDelete, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import type { ModuleProps } from '@/lib/bp-types'
 import { URGENCY_MAP } from '@/lib/bp-types'
@@ -21,6 +22,7 @@ import {
   ChevronLeft, ChevronDown, MapPin, ClipboardCheck, Megaphone, HardHat, ListChecks, RefreshCw,
   Loader2, Camera, Mic, Sparkles, CircleCheck, AlertTriangle, ChevronRight,
   ClipboardList, ShieldCheck, PlayCircle, FileCheck2, Search, Settings2, Undo2, Archive,
+  QrCode, UserCheck, ScanLine, X,
 } from 'lucide-react'
 
 // ============ 类型 ============
@@ -48,11 +50,14 @@ interface BriefingRow {
   id: number; workRequestId: number; ticketId: number | null; ticketCode: string | null
   pointCode: string | null; pointLocation: string | null
   briefingUser: string; briefingUserId: string | null; briefedUsers: string | null
+  briefedUserIds: string | null; confirmedUserIds: string | null
   content: string; status: string
   confirmedBy: string | null; confirmedAt: string | null; confirmRemark: string | null
   aiCheckResult: string | null
   createdAt: string
 }
+interface UserLite { id: string; username: string; name: string; role: string; department?: string | null; active: boolean }
+interface SignResult { briefing: BriefingRow; signedCount: number; rosterCount: number; allDone: boolean }
 interface MasterPoint { id: number; code: string; name: string; location: string | null; pipelineId: number | null; pipeline?: { code: string; name: string } | null }
 interface DisposalStepRow {
   id: number; seq: number; method: string; detail: string; standard: string | null
@@ -496,6 +501,239 @@ function TodoTicketCard(props: { ticket: TicketLite; actionText: string; onClick
 }
 
 // ============ 页面壳（顶栏返回） ============
+// ============ 被交底人选择器（系统实名用户多选） ============
+function UserPicker(props: { value: string[]; onChange: (ids: string[]) => void; disabled?: boolean; prefillNames?: string }) {
+  const { value, onChange, disabled, prefillNames } = props
+  const [users, setUsers] = useState<UserLite[]>([])
+  const [kw, setKw] = useState('')
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [prefilled, setPrefilled] = useState(false)
+
+  // 加载用户列表（点击展开时调用；异步回调内 setState 与预填均合规）
+  const loadUsers = () => {
+    if (users.length > 0) return
+    setLoading(true)
+    apiGet<UserLite[]>('/api/users')
+      .then((us) => {
+        const actives = us.filter((u) => u.active)
+        setUsers(actives)
+        // 预填：按票面 workers 名字与系统用户姓名匹配自动勾选（仅首次）
+        if (!prefilled && prefillNames && value.length === 0) {
+          const names = prefillNames.split(/[,，、\s]+/).map((s) => s.trim()).filter(Boolean)
+          const ids = actives.filter((u) => names.includes(u.name)).map((u) => u.id)
+          if (ids.length) onChange(ids)
+        }
+        setPrefilled(true)
+      })
+      .catch(() => setUsers([]))
+      .finally(() => setLoading(false))
+  }
+
+  const toggleOpen = () => {
+    if (disabled) return
+    if (!open) loadUsers()
+    setOpen(!open)
+  }
+
+  const selected = users.filter((u) => value.includes(u.id))
+  const filtered = useMemo(
+    () => users.filter((u) => `${u.name} ${u.username} ${u.department ?? ''}`.toLowerCase().includes(kw.toLowerCase())),
+    [users, kw],
+  )
+  const toggle = (id: string) => {
+    if (disabled) return
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <button type="button" onClick={toggleOpen}
+        className="w-full min-h-[36px] rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-left flex items-center gap-1.5 flex-wrap hover:border-stone-300 transition-colors disabled:opacity-60"
+        disabled={disabled}>
+        {selected.length === 0
+          ? <span className="text-[11px] text-stone-400">从系统用户中选择被交底人员（实名签到）</span>
+          : selected.map((u) => (
+            <span key={u.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-[10px] text-violet-700 font-medium">
+              <UserCheck className="w-2.5 h-2.5" />{u.name}
+            </span>
+          ))}
+        <ChevronDown className={cn('w-3.5 h-3.5 text-stone-400 ml-auto shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="rounded-lg border border-stone-200 bg-white p-2 space-y-1.5 max-h-64 overflow-y-auto">
+          <div className="relative">
+            <Search className="w-3 h-3 text-stone-300 absolute left-2 top-1/2 -translate-y-1/2" />
+            <Input value={kw} onChange={(e) => setKw(e.target.value)} className="h-7 text-[11px] pl-6" placeholder="搜索姓名 / 工号 / 部门" />
+          </div>
+          {loading ? <p className="text-[11px] text-stone-400 py-2 text-center">加载用户中…</p>
+            : filtered.length === 0 ? <p className="text-[11px] text-stone-400 py-2 text-center">无匹配用户</p>
+              : filtered.map((u) => (
+                <button key={u.id} type="button" onClick={() => toggle(u.id)}
+                  className={cn('w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                    value.includes(u.id) ? 'bg-violet-50 border border-violet-200' : 'hover:bg-stone-50 border border-transparent')}>
+                  <span className={cn('w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0',
+                    value.includes(u.id) ? 'bg-violet-600 border-violet-600' : 'border-stone-300')}>
+                    {value.includes(u.id) && <CircleCheck className="w-2.5 h-2.5 text-white" />}
+                  </span>
+                  <span className="text-[11px] font-medium text-stone-700">{u.name}</span>
+                  <span className="text-[10px] text-stone-400 font-mono">@{u.username}</span>
+                  <span className="text-[10px] text-stone-400 ml-auto truncate max-w-[80px]">{u.department ?? ''}</span>
+                </button>
+              ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============ 扫码签到（交底人扫被交底人「我的身份码」，演示环境为模拟识别） ============
+/** 身份码编码口径（与 mobile-preview「我的身份码」一致）：BPID|<userId>|<name>|<role> */
+export const BP_ID_CODE_PREFIX = 'BPID|'
+function parseIdCode(raw: string): { userId: string; name: string } | null {
+  const parts = raw.trim().split('|')
+  if (parts.length >= 3 && parts[0] === 'BPID' && parts[1] && parts[2]) return { userId: parts[1], name: parts[2] }
+  return null
+}
+
+function QrSignSheet(props: {
+  briefing: BriefingRow
+  onClose: () => void
+  onUpdated: (b: BriefingRow) => void
+  currentUser: ModuleProps['currentUser']
+}) {
+  const { briefing, onClose, onUpdated, currentUser } = props
+  const { toast } = useToast()
+  const rosterIds = useMemo(() => {
+    try { return briefing.briefedUserIds ? (JSON.parse(briefing.briefedUserIds) as string[]) : [] } catch { return [] }
+  }, [briefing.briefedUserIds])
+  const signedIds = useMemo(() => {
+    try { return briefing.confirmedUserIds ? (JSON.parse(briefing.confirmedUserIds) as string[]) : [] } catch { return [] }
+  }, [briefing.confirmedUserIds])
+  const [users, setUsers] = useState<UserLite[]>([])
+  const [phase, setPhase] = useState<'idle' | 'scanning'>('idle')
+  const [manual, setManual] = useState('')
+  const [signing, setSigning] = useState(false)
+
+  const remaining = useMemo(() => rosterIds.filter((id) => !signedIds.includes(id)), [rosterIds, signedIds])
+  const userName = (id: string) => users.find((u) => u.id === id)?.name ?? briefing.briefedUsers?.split(/[,，、]/)?.find((n) => n.trim()) ?? id
+
+  useEffect(() => {
+    apiGet<UserLite[]>('/api/users').then((us) => setUsers(us.filter((u) => u.active))).catch(() => setUsers([]))
+  }, [])
+
+  // 扫码动画：1.1s 扫描线后由调用方决定识别结果（模拟识别 → 取景框内出现身份码）
+  const doSign = async (userId: string, name: string) => {
+    if (signing) return
+    setSigning(true)
+    try {
+      const r = await apiPost<SignResult>(`/api/briefings/${briefing.id}/sign`, {
+        userId, name,
+        __actorId: currentUser?.id, __actorName: currentUser?.name,
+      })
+      onUpdated(r.briefing)
+      if (r.allDone) {
+        toast({ title: '全员签到完成', description: `交底生效（${r.signedCount}/${r.rosterCount}），该作业票具备开工条件` })
+        onClose()
+      } else {
+        toast({ title: `${name} 已签到`, description: `进度 ${r.signedCount}/${r.rosterCount}，请扫描下一位` })
+      }
+    } catch (e) {
+      toast({ variant: 'destructive', title: '签到失败', description: e instanceof Error ? e.message : '请重试' })
+    } finally {
+      setSigning(false)
+      setPhase('idle')
+    }
+  }
+
+  // 模拟识别：演示环境从「未签到名单」中选一位（等同于该被交底人出示身份码被扫到）
+  const simulateScan = (userId: string) => {
+    if (phase === 'scanning' || signing) return
+    setPhase('scanning')
+    setTimeout(() => {
+      const name = userName(userId)
+      void doSign(userId, name)
+    }, 1100)
+  }
+
+  // 手动输入身份码（BPID|userId|name|role）或直接输入姓名匹配
+  const manualSign = () => {
+    const raw = manual.trim()
+    if (!raw) return
+    const parsed = parseIdCode(raw)
+    if (parsed) { void doSign(parsed.userId, parsed.name); setManual(''); return }
+    const byName = users.find((u) => u.name === raw)
+    if (byName) { void doSign(byName.id, byName.name); setManual(''); return }
+    toast({ variant: 'destructive', title: '身份码无法识别', description: '请扫描「我的-我的身份码」二维码或输入正确姓名' })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60" onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-2xl bg-stone-100 p-4 space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
+          <QrCode className="w-4 h-4 text-violet-600" />
+          <p className="text-sm font-bold text-stone-800">扫码签到确认交底</p>
+          <span className="ml-auto text-[11px] text-stone-500 tabular-nums">已签到 {signedIds.length}/{rosterIds.length}</span>
+          <button onClick={onClose} className="w-7 h-7 rounded-full bg-white border border-stone-200 flex items-center justify-center" aria-label="关闭扫码签到">
+            <X className="w-3.5 h-3.5 text-stone-500" />
+          </button>
+        </div>
+
+        {/* 进度条 */}
+        <div className="h-1.5 rounded-full bg-stone-200 overflow-hidden">
+          <div className="h-full bg-teal-500 transition-all" style={{ width: rosterIds.length ? `${(signedIds.length / rosterIds.length) * 100}%` : '0%' }} />
+        </div>
+
+        {/* 取景框（演示：点击未签到成员模拟其出示身份码） */}
+        <div className="rounded-xl bg-stone-900 p-4 space-y-3">
+          <div className="relative mx-auto w-40 h-40 rounded-xl border-2 border-stone-600 overflow-hidden">
+            <ScanLine className={cn('absolute left-1/2 -translate-x-1/2 w-full h-0.5 text-teal-300 shadow-[0_0_12px_2px_rgba(94,234,212,0.8)]',
+              phase === 'scanning' ? 'bp-scan-sweep top-0' : 'top-1/2 -translate-y-1/2')} />
+            {phase === 'idle' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-stone-400">
+                <QrCode className="w-8 h-8 mb-1.5" />
+                <p className="text-[10px] text-center px-3 leading-relaxed">请被交底人出示「我的-我的身份码」<br />点击下方成员模拟扫到其身份码</p>
+              </div>
+            )}
+            {phase === 'scanning' && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 text-teal-300 animate-spin" />
+              </div>
+            )}
+          </div>
+          <p className="text-[10px] text-stone-400 text-center">正式版 uniapp 调用相机扫码；演示环境以模拟识别代替</p>
+        </div>
+
+        {/* 未签到名单（模拟识别入口） */}
+        <div className="rounded-xl bg-white p-3 space-y-1.5">
+          <p className="text-[10px] font-semibold text-stone-500">未签到成员（点击模拟扫描其身份码）</p>
+          {remaining.length === 0 ? (
+            <p className="text-[11px] text-teal-600 flex items-center gap-1 py-1"><CircleCheck className="w-3 h-3" />全部签到完成</p>
+          ) : remaining.map((id) => (
+            <button key={id} type="button" onClick={() => simulateScan(id)} disabled={phase === 'scanning' || signing}
+              className="w-full flex items-center gap-2 rounded-lg border border-stone-200 px-2.5 py-2 text-left hover:border-teal-300 hover:bg-teal-50/50 transition-colors disabled:opacity-60">
+              <QrCode className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+              <span className="text-[11px] font-medium text-stone-700">{userName(id)}</span>
+              <span className="ml-auto text-[10px] text-teal-600">出示身份码 <ChevronRight className="w-3 h-3 inline" /></span>
+            </button>
+          ))}
+        </div>
+
+        {/* 手动输入（身份码内容或姓名） */}
+        <div className="rounded-xl bg-white p-3 space-y-1.5">
+          <p className="text-[10px] font-semibold text-stone-500">无法扫码时手动输入身份码内容或姓名</p>
+          <div className="flex gap-1.5">
+            <Input value={manual} onChange={(e) => setManual(e.target.value)} className="h-8 text-[11px] font-mono" placeholder="BPID|… 或 姓名" />
+            <Button size="sm" className="h-8 px-3 bg-teal-600 hover:bg-teal-700 text-white text-xs" onClick={manualSign} disabled={signing || !manual.trim()}>
+              签到
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PageShell(props: { title: string; sub?: string; onBack: () => void; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
@@ -879,7 +1117,7 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
   const { toast } = useToast()
   const [ticket, setTicket] = useState<TicketLite | null>(null)
   const [content, setContent] = useState('')
-  const [briefedUsers, setBriefedUsers] = useState('')
+  const [briefedIds, setBriefedIds] = useState<string[]>([])
   const [photos, setPhotos] = useState<AttachmentDto[]>([])
   const [audio, setAudio] = useState<AttachmentDto | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -887,18 +1125,19 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
   const [check, setCheck] = useState<PhotoCheckDto | null>(null)
   const [checkError, setCheckError] = useState<string | null>(null)
   const [created, setCreated] = useState<BriefingRow | null>(null)
+  const [signOpen, setSignOpen] = useState(false)
 
   useEffect(() => {
     void (async () => {
       const t = await apiGet<TicketLite>(`/api/work-tickets/${ticketId}`)
       setTicket(t)
       setContent(t.safetyMeasures ?? '')
-      setBriefedUsers(t.workers ?? '')
     })()
   }, [ticketId])
 
   const submit = async () => {
     if (!content.trim()) { toast({ variant: 'destructive', title: '交底内容不能为空' }); return }
+    if (briefedIds.length === 0) { toast({ variant: 'destructive', title: '请从系统用户中选择被交底人员', description: '选定的作业方将出示「我的身份码」供您扫码实名签到' }); return }
     if (photos.length === 0) { toast({ variant: 'destructive', title: '请至少拍摄 1 张交底位置照片', description: 'AI 将用它与勘察照片核对位置一致性' }); return }
     setSubmitting(true)
     try {
@@ -907,7 +1146,8 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
         ticketId,
         briefingUser: currentUser?.name ?? '交底人',
         briefingUserId: currentUser?.id ?? null,
-        briefedUsers: briefedUsers || null,
+        briefedUserIds: briefedIds,
+        briefedUsers: null, // 名单以后端按用户 ID 回填为准（sign 提交时由名单映射）
         content,
         photoIds: photos.map((p) => p.id),
         audioIds: audio ? [audio.id] : [],
@@ -943,15 +1183,18 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
   }
 
   if (created) {
+    const roster = (() => { try { return created.briefedUserIds ? (JSON.parse(created.briefedUserIds) as string[]) : [] } catch { return [] } })()
+    const signed = (() => { try { return created.confirmedUserIds ? (JSON.parse(created.confirmedUserIds) as string[]) : [] } catch { return [] } })()
     return (
       <PageShell title="交底已提交" sub={ticket?.code} onBack={onBack}>
         <div className="rounded-xl bg-white p-4 space-y-3">
           <div className="flex items-center gap-2 text-emerald-600">
             <CircleCheck className="w-5 h-5" />
-            <p className="text-sm font-semibold">交底完成，等待作业方确认</p>
+            <p className="text-sm font-semibold">交底已提交，等待被交底人扫码签到</p>
           </div>
           <p className="text-[11px] text-stone-500 leading-relaxed">
-            作业方将在移动端「现场作业」查看交底内容（含 {photos.length} 张照片{audio ? '、1 段录音' : ''}）并确认。
+            请被交底人出示「我的-我的身份码」，由您在本页扫码逐人实名签到（含 {photos.length} 张照片{audio ? '、1 段录音' : ''}）。
+            全员签到后交底自动生效，作业票方可开工。
             {check?.result === 'INCONSISTENT' ? '注意：AI 核对提示位置不一致，请留意作业方反馈。' : ''}
           </p>
           <AiCheckCard check={check} loading={checking} compact />
@@ -959,6 +1202,30 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
             <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2.5">{checkError}</p>
           )}
           {check?.result === 'INCONSISTENT' && <InconsistentWarning show scene="BRIEFING_VS_SURVEY" />}
+
+          {/* 扫码签到区：显示进度 + 入口 */}
+          {roster.length > 0 && created.status === 'PENDING' && (
+            <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-violet-600" />
+                <p className="text-xs font-semibold text-stone-800">扫码实名签到</p>
+                <span className="ml-auto text-[11px] text-stone-500 tabular-nums">{signed.length}/{roster.length}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-violet-100 overflow-hidden">
+                <div className="h-full bg-violet-500 transition-all" style={{ width: `${(signed.length / roster.length) * 100}%` }} />
+              </div>
+              <Button size="sm" className="w-full h-9 bg-violet-600 hover:bg-violet-700 text-white text-xs"
+                onClick={() => setSignOpen(true)}>
+                <QrCode className="w-3.5 h-3.5 mr-1" />{signed.length === 0 ? '开始扫码签到' : '继续扫码签到'}
+              </Button>
+            </div>
+          )}
+          {created.status === 'CONFIRMED' && (
+            <p className="text-[11px] text-teal-700 bg-teal-50 border border-teal-200 rounded-lg p-2.5 flex items-center gap-1.5">
+              <UserCheck className="w-3.5 h-3.5" />全员签到完成（{signed.length}/{roster.length}），交底已生效
+            </p>
+          )}
+
           {onManage && created && (
             <Button variant="outline" className="w-full h-10 border-violet-200 text-violet-700 hover:bg-violet-50 text-sm"
               onClick={() => onManage(created.id)}>
@@ -967,6 +1234,9 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
           )}
           <Button className="w-full h-10 bg-teal-600 hover:bg-teal-700 text-white text-sm" onClick={onBack}>返回待办</Button>
         </div>
+        {signOpen && created && (
+          <QrSignSheet briefing={created} onClose={() => setSignOpen(false)} onUpdated={setCreated} currentUser={currentUser} />
+        )}
       </PageShell>
     )
   }
@@ -992,8 +1262,9 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
             <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={5} className="text-xs"
               placeholder="作业风险、安全措施、应急处置、作业范围边界等" />
             <div className="space-y-1">
-              <Label className="text-[10px] text-stone-500">被交底人员（作业方）</Label>
-              <Input value={briefedUsers} onChange={(e) => setBriefedUsers(e.target.value)} className="h-8 text-xs" placeholder="逗号分隔" />
+              <Label className="text-[10px] text-stone-500">被交底人员（系统实名用户 · 扫码签到）</Label>
+              <UserPicker value={briefedIds} onChange={setBriefedIds} prefillNames={ticket?.workers ?? ''} />
+              <p className="text-[10px] text-stone-400">已按票面作业人员自动预选（可增减）；提交后请出示此页扫各被交底人的「我的身份码」完成实名签到</p>
             </div>
           </div>
 
@@ -1033,7 +1304,7 @@ function BriefManagePage(props: { briefingId: number; currentUser: ModuleProps['
   const { toast } = useToast()
   const [briefing, setBriefing] = useState<BriefingRow | null>(null)
   const [content, setContent] = useState('')
-  const [briefedUsers, setBriefedUsers] = useState('')
+  const [briefedIds, setBriefedIds] = useState<string[]>([])
   const [photos, setPhotos] = useState<AttachmentDto[]>([])
   const [audios, setAudios] = useState<AttachmentDto[]>([])
   const [newAudio, setNewAudio] = useState<AttachmentDto | null>(null)
@@ -1042,13 +1313,15 @@ function BriefManagePage(props: { briefingId: number; currentUser: ModuleProps['
   const [saving, setSaving] = useState(false)
   const [checking, setChecking] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
+  const [signOpen, setSignOpen] = useState(false)
+  const [users, setUsers] = useState<UserLite[]>([])
 
   const load = useCallback(async () => {
     try {
       const b = await apiGet<BriefingRow>(`/api/briefings?id=${briefingId}`)
       setBriefing(b)
       setContent(b.content)
-      setBriefedUsers(b.briefedUsers ?? '')
+      try { setBriefedIds(b.briefedUserIds ? (JSON.parse(b.briefedUserIds) as string[]) : []) } catch { setBriefedIds([]) }
       const [atts, cs] = await Promise.all([
         apiGet<AttachmentDto[]>(`/api/attachments?bizType=BRIEFING&bizId=${b.id}`),
         apiGet<PhotoCheckDto[]>(`/api/photo-checks?workRequestId=${b.workRequestId}${b.ticketId ? `&ticketId=${b.ticketId}` : ''}&scene=BRIEFING_VS_SURVEY`),
@@ -1063,14 +1336,26 @@ function BriefManagePage(props: { briefingId: number; currentUser: ModuleProps['
 
   useEffect(() => { void load() }, [load])
 
+  // 用户名单（签到进度人名展示）
+  useEffect(() => {
+    apiGet<UserLite[]>('/api/users').then((us) => setUsers(us.filter((u) => u.active))).catch(() => setUsers([]))
+  }, [])
+
   const editable = briefing?.status === 'PENDING'
+  const rosterIds = useMemo(() => {
+    try { return briefing?.briefedUserIds ? (JSON.parse(briefing.briefedUserIds) as string[]) : [] } catch { return [] }
+  }, [briefing?.briefedUserIds])
+  const signedIds = useMemo(() => {
+    try { return briefing?.confirmedUserIds ? (JSON.parse(briefing.confirmedUserIds) as string[]) : [] } catch { return [] }
+  }, [briefing?.confirmedUserIds])
+  const idToName = (id: string) => users.find((u) => u.id === id)?.name ?? id
 
   const saveText = async () => {
     if (!briefing) return
     if (!content.trim()) { toast({ variant: 'destructive', title: '交底内容不能为空' }); return }
     setSaving(true)
     try {
-      await apiPatch('/api/briefings', { id: briefing.id, content, briefedUsers: briefedUsers || null })
+      await apiPatch('/api/briefings', { id: briefing.id, content, briefedUserIds: briefedIds })
       toast({ title: '交底要点已更新', description: '作业方确认前可见最新内容' })
       await load()
     } catch (e) {
@@ -1134,9 +1419,36 @@ function BriefManagePage(props: { briefingId: number; currentUser: ModuleProps['
         <Label className="text-xs">交底要点 {!editable && <span className="text-[10px] text-stone-400">（已确认只读）</span>}</Label>
         <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} className="text-xs" disabled={!editable} />
         <div className="space-y-1">
-          <Label className="text-[10px] text-stone-500">被交底人员（作业方）</Label>
-          <Input value={briefedUsers} onChange={(e) => setBriefedUsers(e.target.value)} className="h-8 text-xs" placeholder="逗号分隔" disabled={!editable} />
+          <Label className="text-[10px] text-stone-500">被交底人员（系统实名用户 · 扫码签到）</Label>
+          <UserPicker value={briefedIds} onChange={setBriefedIds} disabled={!editable} prefillNames={briefing.briefedUsers ?? ''} />
         </div>
+        {rosterIds.length > 0 && (
+          <div className={cn('rounded-lg p-2.5 space-y-1.5 border', briefing.status === 'CONFIRMED' ? 'bg-teal-50 border-teal-200' : 'bg-violet-50/60 border-violet-200')}>
+            <div className="flex items-center gap-2">
+              <QrCode className={cn('w-3.5 h-3.5', briefing.status === 'CONFIRMED' ? 'text-teal-600' : 'text-violet-600')} />
+              <p className="text-[11px] font-semibold text-stone-800">扫码签到进度</p>
+              <span className="ml-auto text-[11px] text-stone-500 tabular-nums">{signedIds.length}/{rosterIds.length}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-white/70 overflow-hidden">
+              <div className={cn('h-full transition-all', briefing.status === 'CONFIRMED' ? 'bg-teal-500' : 'bg-violet-500')}
+                style={{ width: `${rosterIds.length ? (signedIds.length / rosterIds.length) * 100 : 0}%` }} />
+            </div>
+            {signedIds.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {signedIds.map((id) => (
+                  <span key={id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white border border-teal-200 text-[10px] text-teal-700">
+                    <CircleCheck className="w-2.5 h-2.5" />{idToName(id)}
+                  </span>
+                ))}
+              </div>
+            )}
+            {editable && (
+              <Button size="sm" className="w-full h-8 bg-violet-600 hover:bg-violet-700 text-white text-xs" onClick={() => setSignOpen(true)}>
+                <QrCode className="w-3 h-3 mr-1" />{signedIds.length === 0 ? '开始扫码签到' : '继续扫码签到'}
+              </Button>
+            )}
+          </div>
+        )}
         {editable && (
           <Button size="sm" className="h-8 w-full bg-teal-600 hover:bg-teal-700 text-white text-xs" onClick={() => void saveText()} disabled={saving}>
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <ClipboardCheck className="w-3.5 h-3.5 mr-1" />}保存修改
@@ -1204,6 +1516,9 @@ function BriefManagePage(props: { briefingId: number; currentUser: ModuleProps['
           {withdrawing ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Undo2 className="w-4 h-4 mr-1" />}
           撤回交底（作业方确认前可撤回重做）
         </Button>
+      )}
+      {signOpen && briefing && (
+        <QrSignSheet briefing={briefing} onClose={() => setSignOpen(false)} onUpdated={setBriefing} currentUser={currentUser} />
       )}
     </PageShell>
   )

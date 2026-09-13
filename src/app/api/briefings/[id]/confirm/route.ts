@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { auditFlowDetail, extractActor, jsonError, logAudit, num, readBody, resolveActor, str } from '@/lib/bp-server-utils'
+import { extractActor, jsonError, logAudit, num, readBody, resolveActor, str } from '@/lib/bp-server-utils'
 import { pushNotifications } from '@/lib/bp-notify'
 
 export const dynamic = 'force-dynamic'
@@ -22,12 +22,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const confirmedBy = str(body.confirmedBy)
     if (!confirmedBy) return jsonError('确认人不能为空')
     const now = new Date()
+    const confirmedById = str(body.confirmedById) || null
+    // 扫码签到兼容：主动确认时若确认人在被交底名单内，自动并入已签到名单
+    let confirmedUserIds = briefing.confirmedUserIds
+    if (confirmedById) {
+      try {
+        const roster: string[] = briefing.briefedUserIds ? JSON.parse(briefing.briefedUserIds) : []
+        const signed: string[] = briefing.confirmedUserIds ? JSON.parse(briefing.confirmedUserIds) : []
+        if (roster.includes(confirmedById) && !signed.includes(confirmedById)) {
+          signed.push(confirmedById)
+          confirmedUserIds = JSON.stringify(signed)
+        }
+      } catch { /* 存量脏数据忽略 */ }
+    }
     const updated = await db.briefing.update({
       where: { id: bid },
       data: {
         status: 'CONFIRMED',
         confirmedBy,
-        confirmedById: str(body.confirmedById) || null,
+        confirmedById,
+        confirmedUserIds,
         confirmedAt: now,
         confirmRemark: str(body.confirmRemark) || null,
       },
@@ -40,7 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       entity: 'BRIEFING',
       entityId: bid,
       entityCode: briefing.ticketCode ?? '',
-      detail: auditFlowDetail(briefing.ticketCode ?? `交底#${bid}`, 'PENDING', 'CONFIRMED', `作业方确认交底（确认人：${confirmedBy}${briefing.pointCode ? `，隔离点 ${briefing.pointCode}` : ''}），该作业票具备开工条件`),
+      detail: `${briefing.ticketCode ?? `交底#${bid}`}：待作业方确认 → 已确认（作业方确认交底，确认人：${confirmedBy}${briefing.pointCode ? `，隔离点 ${briefing.pointCode}` : ''}，该作业票具备开工条件）`,
     })
     // 通知交底方/审批相关角色：交底已确认
     await pushNotifications({
