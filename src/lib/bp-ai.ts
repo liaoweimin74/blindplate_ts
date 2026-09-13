@@ -165,6 +165,47 @@ export async function bpVisionComplete(systemPrompt: string, imageDataUrl: strin
   return completion.choices[0]?.message?.content ?? ''
 }
 
+/**
+ * 多图理解统一出口（照片位置核对等场景）：system 纯文本 + user 消息按顺序携带多张 image_url。
+ * - DeepSeek：官方限制 image_url 仅允许出现在 user 消息（多块并列允许）
+ * - 内置 SDK：createVision 同样支持 user 消息内多 image_url 块
+ * imageDataUrls 顺序即语义顺序（调用方负责在 system prompt 里说明每张图的角色）
+ */
+export async function bpVisionCompleteMulti(systemPrompt: string, imageDataUrls: string[]): Promise<string> {
+  if (!imageDataUrls.length) throw new Error('未提供任何图片')
+  const imageBlocks = imageDataUrls.map((url) => ({ type: 'image_url' as const, image_url: { url } }))
+  const cfg = deepseekConfig()
+  if (resolveProvider() === 'deepseek') {
+    return deepseekFetch(cfg.baseUrl, cfg.apiKey, {
+      model: cfg.visionModel,
+      stream: false,
+      max_tokens: 32000,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: `共 ${imageDataUrls.length} 张图片，请严格按 system 指令依次识别并输出。` },
+            ...imageBlocks,
+          ],
+        },
+      ],
+    }, 180_000)
+  }
+  const zai = await getZai()
+  type VisionParam = Parameters<Awaited<ReturnType<typeof getZai>>['chat']['completions']['createVision']>[0]
+  const completion = await zai.chat.completions.createVision({
+    messages: [
+      {
+        role: 'user',
+        content: [{ type: 'text', text: systemPrompt }, ...imageBlocks],
+      },
+    ],
+    thinking: { type: 'disabled' },
+  } as unknown as VisionParam)
+  return completion.choices[0]?.message?.content ?? ''
+}
+
 /** 清洗对话消息：仅保留 user/assistant、字符串化、裁剪条数与单条长度 */
 export function sanitizeChatMessages(raw: unknown, maxCount = 20, maxLen = 4000): AiChatMessage[] {
   if (!Array.isArray(raw)) return []

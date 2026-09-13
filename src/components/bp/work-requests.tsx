@@ -40,6 +40,7 @@ import { exportCsv } from '@/lib/bp-export'
 import FlowTimeline from '@/components/bp/flow-timeline'
 import { MiniFlowProgress } from '@/components/bp/mini-flow-progress'
 import WrPrintDialog, { exportWrArchiveCsv } from '@/components/bp/wr-print'
+import { AttachmentWall, type AttachmentDto } from '@/components/bp/bp-media'
 
 // ============ 类型 ============
 interface Unit { id: number; code: string; name: string }
@@ -122,7 +123,7 @@ interface DispStep {
 interface Approval { id: number; bizType: string; bizCode?: string | null; action: string; operator: string; comment?: string | null; createdAt: string }
 interface Detail extends WRow {
   unit: Unit | null
-  survey: { surveyor: string; surveyDate: string; siteCondition: string; pipelineVerify?: string | null; hazardPoints?: string | null; pointRefs?: string | null; isSafe: boolean; suggestion?: string | null } | null
+  survey: { id: number; surveyor: string; surveyDate: string; siteCondition: string; pipelineVerify?: string | null; hazardPoints?: string | null; pointRefs?: string | null; isSafe: boolean; suggestion?: string | null } | null
   jsa: { leader: string; members?: string | null; analysisDate: string; riskLevel: string; residualRisk?: string | null; pointRefs?: string | null; steps: JsaStep[] } | null
   isolationScheme: { id: number; code: string; preparedBy: string; status: string; comment?: string | null; reviewedBy?: string | null; preparedAt?: string | null; reviewedAt?: string | null; points: IsoPoint[] } | null
   disposalScheme: { id: number; code: string; preparedBy: string; status: string; comment?: string | null; reviewedBy?: string | null; preparedAt?: string | null; reviewedAt?: string | null; steps: DispStep[] } | null
@@ -130,7 +131,7 @@ interface Detail extends WRow {
   ticket: { id: number; code: string; plannedStart: string; plannedEnd: string; guardian: string; workers: string; issuer: string; safetyMeasures: string; status: string; comment?: string | null; createdAt?: string | null; approvedAt?: string | null; approvedBy?: string | null; startedAt?: string | null; finishedAt?: string | null; closedAt?: string | null } | null
   tickets: { id: number; code: string; pointId?: number | null; pointCode?: string | null; pointLocation?: string | null; blindSpec?: string | null; blindType?: string | null; action?: string | null; plannedStart: string; plannedEnd: string; guardian: string; workers: string; issuer: string; safetyMeasures: string; status: string; comment?: string | null; approvedBy?: string | null; approvedAt?: string | null; startedAt?: string | null; finishedAt?: string | null; closedAt?: string | null }[]
   task: { code: string; status: string } | null
-  acceptance: { acceptor: string; acceptedAt: string; leakCheck: boolean; restoreCheck: boolean; ledgerCheck: boolean; conclusion: string; problems?: string | null; remarks?: string | null } | null
+  acceptance: { id: number; acceptor: string; acceptedAt: string; leakCheck: boolean; restoreCheck: boolean; ledgerCheck: boolean; conclusion: string; problems?: string | null; remarks?: string | null } | null
   approvals: Approval[]
 }
 
@@ -273,6 +274,8 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
 
   // 详情
   const [detail, setDetail] = useState<Detail | null>(null)
+  const [surveyPhotos, setSurveyPhotos] = useState<AttachmentDto[]>([])
+  const [acceptPhotos, setAcceptPhotos] = useState<AttachmentDto[]>([])
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   // 作业票隔离点位 PID 定位查看弹窗（null = 关闭，否则为当前定位点位下标）
@@ -358,11 +361,23 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
       ])
       setDetail(d)
       setPointStatus(ps)
+      loadDetailPhotos(d)
     } catch (e) {
       toast({ title: '加载详情失败', description: e instanceof Error ? e.message : '', variant: 'destructive' })
       setDetailOpen(false)
     } finally { setDetailLoading(false) }
   }, [toast, fetchOccupancy])
+
+  // 现场照片（勘察/验收，Task 74 移动端上传；失败不阻断详情）
+  const loadDetailPhotos = useCallback((d: Detail) => {
+    setSurveyPhotos([]); setAcceptPhotos([])
+    if (d.survey) {
+      apiGet<AttachmentDto[]>(`/api/attachments?bizType=SITE_SURVEY&bizId=${d.survey.id}`).then(setSurveyPhotos).catch(() => null)
+    }
+    if (d.acceptance) {
+      apiGet<AttachmentDto[]>(`/api/attachments?bizType=ACCEPTANCE&bizId=${d.acceptance.id}`).then(setAcceptPhotos).catch(() => null)
+    }
+  }, [])
 
   // focusId 联动：全局搜索/统计分析下钻携带 focusId 导航进来时，自动打开对应需求详情
   const lastFocusRef = useRef<number | undefined>(undefined)
@@ -381,6 +396,7 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
       ])
       setDetail(d)
       setPointStatus(ps)
+      loadDetailPhotos(d)
       void fetchOccupancy(id)
     } catch { /* ignore */ }
   }, [fetchOccupancy])
@@ -452,7 +468,7 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
     }
   }
 
-  const saveSurvey = async (s: NonNullable<Detail['survey']>, pointRefs: PointRef[]) => {
+  const saveSurvey = async (s: Omit<NonNullable<Detail['survey']>, 'id'>, pointRefs: PointRef[]) => {
     if (!detail) return
     if (!s.surveyor || !s.siteCondition) {
       toast({ title: '请完善勘察信息', description: '勘察人与现场条件为必填', variant: 'destructive' }); return
@@ -1084,6 +1100,10 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                           <PointRefChips refs={surveyRefs} />
                         </div>
                       )}
+                      <div className="col-span-2 md:col-span-3">
+                        <div className="text-[11px] text-stone-400 mb-1">现场照片（{surveyPhotos.length}，移动端拍摄；AI 交底/作业/验收位置核对的基准）</div>
+                        <AttachmentWall photos={surveyPhotos} emptyText="无勘察照片" compact />
+                      </div>
                     </div>
                   ) : canEng ? (
                     <SurveyForm detail={detail} busy={busy} pipelines={pipelines} pointMasters={pointMasters} editing={!!detail.survey} onCancel={detail.survey ? () => setEditSurvey(false) : undefined} onSave={saveSurvey} />
@@ -1360,6 +1380,10 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                         <Info label="台账更新" value={detail.acceptance.ledgerCheck ? '✓ 已确认' : '✗ 未确认'} />
                         {detail.acceptance.problems && <div className="col-span-2"><Info label="发现问题" value={detail.acceptance.problems} /></div>}
                         <div className="col-span-2"><Info label="验收意见" value={detail.acceptance.remarks} /></div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-stone-400 mb-1">验收照片（{acceptPhotos.length}，移动端拍摄）</div>
+                        <AttachmentWall photos={acceptPhotos} emptyText="" compact />
                       </div>
                     </div>
                   ) : canAcceptRole ? (
@@ -1728,7 +1752,7 @@ function SurveyForm({ detail, busy, pipelines, pointMasters, editing, onCancel, 
   pointMasters: PointMaster[]
   editing?: boolean
   onCancel?: () => void
-  onSave: (s: NonNullable<Detail['survey']>, pointRefs: PointRef[]) => void
+  onSave: (s: Omit<NonNullable<Detail['survey']>, 'id'>, pointRefs: PointRef[]) => void
 }) {
   // 编辑已有勘察记录时回显（含 pointRefs chips 反显）
   const [f, setF] = useState(() => ({

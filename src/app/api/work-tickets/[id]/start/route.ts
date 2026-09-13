@@ -42,6 +42,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         { status: 409 }
       )
     }
+    // 安全硬约束③：开工前必须完成现场交底且作业方已确认（交底含照片/录音，AI 已与勘察照片核对位置）
+    const briefings = await db.briefing.findMany({
+      where: { OR: [{ ticketId: tid }, { workRequestId: ticket.workRequestId, ticketId: null }] },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!briefings.length) {
+      return NextResponse.json(
+        {
+          error: `开工被拒绝：作业票 ${ticket.code} 尚未进行现场交底——请交底方在移动端「现场作业」完成交底（拍照+录音）并经作业方确认后方可开工`,
+          briefingRequired: true,
+        },
+        { status: 409 }
+      )
+    }
+    if (!briefings.some((b) => b.status === 'CONFIRMED')) {
+      return NextResponse.json(
+        {
+          error: `开工被拒绝：现场交底已完成但作业方尚未确认——请作业方在移动端「现场作业」查看交底内容（含照片/录音）并确认后方可开工`,
+          briefingRequired: true,
+        },
+        { status: 409 }
+      )
+    }
     // 提取操作人（body 可为空：无 __actor 时回落任务负责人快照）
     const extracted = extractActor(await readBody(req))
     const now = new Date()

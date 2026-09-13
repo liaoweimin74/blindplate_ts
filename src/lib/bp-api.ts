@@ -31,6 +31,22 @@ export const apiPut = <T = unknown,>(path: string, body?: unknown) =>
   api<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) })
 export const apiDelete = <T = unknown,>(path: string) => api<T>(path, { method: 'DELETE' })
 
+/** multipart 上传（不要手动设 Content-Type，浏览器自动带 boundary） */
+export async function apiUpload<T = unknown,>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(path, { method: 'POST', body: form, cache: 'no-store' })
+  let body: unknown = null
+  try {
+    body = await res.json()
+  } catch {
+    /* 空响应体 */
+  }
+  if (!res.ok) {
+    const errObj = (body && typeof body === 'object' ? body : {}) as { error?: unknown }
+    throw new Error((typeof errObj.error === 'string' && errObj.error) || `上传失败(${res.status})`)
+  }
+  return body as T
+}
+
 /** 从本地缓存读取当前登录用户（登录时写入 bp_current_user），供审计日志等场景使用 */
 export function getStoredUser(): { id: string; name: string; role?: string } | null {
   try {

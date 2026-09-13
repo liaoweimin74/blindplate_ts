@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { auditFlowDetail, extractActor, jsonError, logAudit, parseId, readBody, resolveActor, str, toDate } from '@/lib/bp-server-utils'
+import { bindAttachments } from '@/lib/bp-attachments'
 
 export const dynamic = 'force-dynamic'
 
-/** POST /api/work-requests/[id]/survey 保存现场勘察（upsert），需求状态 → SURVEYED */
+/** POST /api/work-requests/[id]/survey 保存现场勘察（upsert），需求状态 → SURVEYED；photoIds 绑定勘察照片 */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
@@ -36,6 +37,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       create: { workRequestId: rid, ...data },
       update: data,
     })
+    // 绑定移动端上传的勘察照片（上传时 bizType=SITE_SURVEY、bizId 空占位；pointCode 已在上传时标记）
+    const photoIds: string[] = Array.isArray(body.photoIds) ? body.photoIds : []
+    if (photoIds.length) await bindAttachments(photoIds, 'SITE_SURVEY', survey.id, request.code)
     const updatedRequest = await db.workRequest.update({
       where: { id: rid },
       data: { status: 'SURVEYED' },

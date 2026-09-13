@@ -57,6 +57,12 @@ export async function POST(req: NextRequest) {
       create: { workRequestId: wid, ...data },
       update: data,
     })
+    // 绑定移动端上传的处置确认现场照片（上传时 bizType=DISPOSAL_CONFIRM、bizId 空占位）
+    const photoIds: string[] = Array.isArray(body.photoIds) ? body.photoIds : []
+    if (photoIds.length) {
+      const { bindAttachments } = await import('@/lib/bp-attachments')
+      await bindAttachments(photoIds, 'DISPOSAL_CONFIRM', confirmation.id, request.code)
+    }
 
     if (result === 'QUALIFIED') {
       const updatedRequest = await db.workRequest.update({

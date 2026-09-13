@@ -426,6 +426,72 @@ model PidDiagram {
   unit      Unit?    @relation(fields: [unitId], references: [id])
 }
 
+// ============ 移动端现场作业（Task 74）：附件 / 现场交底 / AI 照片核对 ============
+
+/// 通用附件（移动端现场照片/录音；文件落盘 uploads/ 目录，元数据入库）
+model Attachment {
+  id           String   @id @default(cuid())
+  bizType      String // SITE_SURVEY现场勘察 | DISPOSAL_CONFIRM工艺处置确认 | BRIEFING现场交底 | EXECUTION作业执行 | ACCEPTANCE作业验收
+  bizId        Int? // 业务记录 id（survey/confirmation/briefing/ticket/acceptance 主键）
+  bizCode      String? // 业务编号快照（WR-/BP- 等）
+  pointCode    String? // 关联隔离点编码（勘察按点位拍照分组用）
+  kind         String   @default("PHOTO") // PHOTO照片 | AUDIO录音
+  fileName     String // 原始文件名
+  mimeType     String // image/jpeg | audio/webm 等
+  size         Int // 字节数
+  storageKey   String // uploads/ 下相对路径
+  label        String? // 照片角度/用途标签（正面/侧面/远照 等）
+  uploadedBy   String // 上传人姓名快照
+  uploadedById String? // 上传人 userId
+  createdAt    DateTime @default(now())
+
+  @@index([bizType, bizId])
+  @@index([pointCode])
+}
+
+/// 现场交底（开票后、开工前的强制环节：交底方拍照+录音 → 作业方确认；AI 自动与勘察照片核对位置一致性）
+model Briefing {
+  id             Int       @id @default(autoincrement())
+  workRequestId  Int
+  ticketId       Int? // 关联作业票（一票一板：每票一次交底）
+  ticketCode     String? // 票号快照
+  pointCode      String? // 隔离点编码快照
+  pointLocation  String? // 隔离位置快照
+  briefingUser   String // 交底人
+  briefingUserId String? // 交底人 userId
+  briefedUsers   String? // 被交底作业方人员（逗号分隔）
+  content        String // 交底要点（风险/措施/工艺要求）
+  status         String    @default("PENDING") // PENDING待作业方确认 | CONFIRMED作业方已确认
+  confirmedBy    String? // 作业方确认人
+  confirmedById  String?
+  confirmedAt    DateTime?
+  confirmRemark  String? // 确认备注
+  aiCheckResult  String? // 最新 AI 位置核对结论快照 CONSISTENT | INCONSISTENT | UNCERTAIN
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([workRequestId])
+  @@index([ticketId])
+  @@index([status])
+}
+
+/// AI 照片位置核对记录（交底vs勘察 / 作业vs交底 / 验收vs作业：同一位置一致性判定）
+model PhotoCheck {
+  id            Int      @id @default(autoincrement())
+  scene         String // BRIEFING_VS_SURVEY交底vs勘察 | EXECUTION_VS_BRIEFING作业vs交底 | ACCEPTANCE_VS_EXEC验收vs作业
+  workRequestId Int
+  ticketId      Int?
+  result        String // CONSISTENT位置一致 | INCONSISTENT位置不一致 | UNCERTAIN无法确定
+  confidence    Int? // 置信度 0-100
+  reason        String? // AI 判定理由摘要
+  detail        String? // JSON 逐图对比明细
+  photos        String? // JSON 参与比对的附件 id { baseIds: string[], checkIds: string[] }
+  createdAt     DateTime @default(now())
+
+  @@index([scene, workRequestId])
+  @@index([ticketId])
+}
+
 /// 自定义图元库（用户在图元编辑器中用基础图形/已有图元组合构建，保存后出现在左侧设备图元列表）
 model PidSymbol {
   id        Int      @id @default(autoincrement())

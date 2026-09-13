@@ -65,6 +65,12 @@ export async function POST(req: NextRequest) {
       create: { workRequestId: wid, ...data },
       update: data,
     })
+    // 绑定移动端上传的验收照片（上传时 bizType=ACCEPTANCE、bizId 空占位）
+    const photoIds: string[] = Array.isArray(body.photoIds) ? body.photoIds : []
+    if (photoIds.length) {
+      const { bindAttachments } = await import('@/lib/bp-attachments')
+      await bindAttachments(photoIds, 'ACCEPTANCE', acceptance.id, request.code)
+    }
     let updatedRequest = request
     if (conclusion === 'PASS') {
       updatedRequest = await db.workRequest.update({
