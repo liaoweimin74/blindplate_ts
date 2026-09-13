@@ -2589,3 +2589,23 @@ Stage Summary:
 - AI 位置核对经真实 VLM 三场景实证（同场景一致/异场景不一致/占位回退），自相矛盾输出有重试+透明调和治理
 - 用户本地 pull 回归点：现场作业模块（真机浏览器访问即可用，capture 调相机）、桌面详情照片墙、开工门禁新提示
 - 下阶段建议：①录音在真实手机浏览器实测（沙箱 headless 无麦克风，MediaRecorder 错误路径已优雅处理）②交底撤回/补录 UI（API 已支持 PATCH/DELETE）③在案候选不变（挂接图元属性面板显示所属管线、真实图纸 AI 导入验证、体检周检 cron、SSE 进度）
+
+---
+Task ID: 75
+Agent: Z.ai Code (主会话)
+Task: 下一阶段三件套——①PID 挂接图元属性面板显示所属管线+手动解除按钮（Task 73 在案）②交底撤回/补录 UI（Task 74 在案，PATCH/DELETE 接前端）③桌面端作业需求详情交底记录卡片可视化（Task 74 补全）
+
+Work Log:
+- 【开工 QA 揪出 P0 环境事故并修复】登录页点击「登录」无任何 API 请求 → 溯源链：验证码输入框被组件清空（400 后「一次性」语义刷新）→ 实际首次点击已发出 POST /api/auth/login 且 500 → dev.log 取证 `SqliteError extended_code 1032 = SQLITE_READONLY_DBMOVED`（db/custom.db 在 dev server 打开期间被替换）→ 进程级铁证：`/proc/6442/fd` 三个 fd 均指向 `db/custom.db (deleted)`，磁盘 inode 174962 mtime 13:30:20（恰为巡检 cron :30 触发时刻；reflog 无记录 ⇒ path 级 `git checkout -- db/` 或快照还原所致，HEAD 级操作才会进 reflog）→ SELECT 正常 READ 全走旧句柄、写全部 500 的表现完全吻合 → 处置：按双 fork 铁律重启 dev server（kill 6428/6430/6442 → `( nohup bunx next dev -p 3000 > dev.log 2>&1 < /dev/null & )`）→ 重启后浏览器全流程登录成功（写路径恢复：登录内含 db.user.update 失败计数清零写）。运维规则新增：**任何 git/快照操作触及 db/custom.db 后必须重启 dev server**（详见 Stage Summary）
+- 【E2E 登录流技巧沉淀】①本页登录按钮被动态角色说明框顶位，坐标点击易漂移——JS 直接 `.click()`（普通 button 非 Radix 可用）②React 受控输入仍须原生 value setter+dispatchEvent（var 链式 eval 在 agent-browser 偶发 SyntaxError `<anonymous>:1:1`，IIFE+return 形式稳定）③填验证码与点登录应同批执行防组件重渲染清空
+- 【① PID 挂接属性面板（pid-config.tsx 3 处）】a) lucide 增 Unlink；b) 新增 `unmountSelectedShape`（紧邻 resolveMountAfterDrag）：unmountShapeFromPipe 合并两段 → 过滤残留段（与拖离/删除级联同语义）→ rotation 复位 → mutate 落 dirty；c) 属性面板类型徽章下新增「管线挂接状态」块：isMountableShape 才渲染——无管线段（含仅有普通连线 pipeIds=0 的边界）→ stone 提示「可挂接图元 · 未挂接管线（拖到已绑定管线的连线上自动旋转对齐并串接）」；有管线段 → teal 信息盒「{pipe.code} · {pipe.name}｜管线已在图元处断开并与两端粘合（N 段 · 旋转 X°）」+ rose outline「解除挂接」按钮（window.confirm 防误触）。多段归属不一致（≥2 个不同 pipelineId）显示警示文案
+- 【② 交底撤回/补录（field-ops.tsx + bp-api.ts）】View 增 brief-manage；新组件 BriefManagePage（③b）：状态徽章（amber 待作业方确认·可补录/撤回 / emerald 已确认·只读 editable=status==='PENDING'）+ 交底要点/被交底人员可编辑+保存（apiPatch 新助手 PATCH /api/briefings）+ PhotoPicker 补拍（meta.bizId=briefing.id 即时绑定，angleTags 复用）+ 录音列表逐条删除（fetch DELETE /attachments/:id）+ VoiceRecorder 独立 newAudio 槽（避免「最后一条」传参导致误删旧录音——VoiceRecorder.remove 会真删服务器附件）+ AiCheckCard/InconsistentWarning + 「重新 AI 核对」+ rose「撤回交底」（DELETE /api/briefings?id=，confirm 弹窗）。入口三处：待办「待作业方确认·点击管理/补录」卡点击进管理页（原 disabled 埋点位激活）；交底提交完成页增「管理交底」按钮（onManage prop）；BriefConfirmPage 不动
+- 【③ 桌面详情交底卡（work-requests.tsx）】BriefingLite 接口+briefings/briefAtts state；loadDetailPhotos 并行拉 `/api/briefings?workRequestId=`（失败不阻断详情）+ 每条 `/api/attachments?bizType=BRIEFING&bizId=`；作业票 SectionCard 之后、验收之前插入「现场交底」卡：badge「N 条 · 交底后作业方确认方可开工」，每条 = 票号+状态徽章（emerald 已确认/amber 待确认）+AI 徽章（violet 位置一致/rose 不一致/stone 无法确定，读 aiCheckResult 快照）+位置/被交底/确认人行+violet 要点摘要(line-clamp-4)+AttachmentWall 照片墙+🎙️录音 N 段徽章+确认意见
+- 【E2E 舞台与走查】.zscripts/e2e-task75-prep.ts（复用 Task 74 walkToTicketApproved 全链路：需求→勘察2照→JSA→隔离→处置→逐步确认→开票→批准，POST PENDING 交底#4 带 brief_A3 照片）产出 WR-202609-015/票 BP-202609-017/交底#4。UI 走查（agent-browser）：a) 待办卡「待作业方确认·点击管理/补录」→ 管理页 amber 徽章渲染 → upload 直传补录照片（1→2 张+缩略图）→ 原生 setter 改要点+保存修改 → **DB 复核 content 已更新、status=PENDING** → 重新 AI 核对（一次真实 VLM）→ **DB 复核 PhotoCheck#15 INCONSISTENT conf95 且理由点名「图4 纯色背景占位符与基准不符」（AI 精准识别合成图）、briefing.aiCheckResult 回写** → UI rose AiCheckCard+「⚠️ AI 核对发现位置不一致！」警告条渲染 → 撤回（window.confirm 覆写为 true 后点击）→ **DB briefing#4 行删除** + 票卡回「去交底」态；b) PID 图 27（T73内联挂接验证，图元4/连线3）：SVG 画布 g 元素 React props 直调 onClick 选中 FV-101（合成 PointerEvent/MouseEvent dispatchEvent 不生效——React 16+ 未见调用，原因未深究，props 直调为可靠路径）→ 属性面板 teal「所属管线 PL-771 · 进料线（2 段粘合）」+ rose 解除挂接 → 点击（confirm 覆写）→ toast「已解除管线挂接/管线两端自动闭合」+ **连线 3→2** + 重选面板转 stone「未挂接」提示 → **不保存刷新还原演示数据**（脏态仅在内存）；c) 全局搜索 WR-202609-014 → 详情「现场交底」卡（1 条/BP-202609-016/作业方已确认/AI 位置一致/交底照片 1 张渲染/要点摘要/确认人时间）插于作业票与验收之间顺序正确
+- 【验证】lint 0 / tsc(src) 0 / dev.log 无错误 / HTTP 200；测试痕迹：WR-202609-015（T75 舞台：票 BP-202609-017 APPROVED 无交底，可复用测交底流）+ PhotoCheck#15 + 2 张孤儿 BRIEFING 附件（bizId=4 交底已撤回，附件按设计不级联删——生产可考虑撤回时清理，本版保留可审计）；图 27 未保存还原
+
+Stage Summary:
+- 三件套交付：①PID 挂接图元有了完整可视管理闭环（面板看归属+手动解除=拖离的镜像操作，补齐 Task 73 拼图）②交底确认前全生命周期可管理（补录照片/录音/改要点/重新核对/撤回重做），作业方确认后自动转只读 ③桌面端管理者无需进移动端即可审阅交底全貌（照片墙+AI 结论+确认链）
+- **新运维铁律（P0 教训）**：SQLite DB 文件被 git/快照替换 inode 后旧连接 READ-only（SQLITE_READONLY_DBMOVED=1032），表现为 GET 正常+写全 500——凡 git checkout/reset 涉及 db/custom.db 或平台快照还原后必须双 fork 重启 dev server；判据 `ls -la /proc/$(pgrep -f next-server)/fd | grep deleted`
+- agent-browser 新坑：①合成事件 dispatchEvent 对该 React 树 onClick 不可靠，SVG 元素用 __reactProps 直调 ②window.confirm 需先覆写 `window.confirm=()=>true` ③登录页动态角色框会顶位按钮，坐标点击易漂移用 JS click
+- 下阶段建议：①撤回交底时级联清理其附件（当前留孤儿，2 张已留档）②管理页「重新核对」后可考虑自动刷新作业方确认页缓存 ③在案候选：录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度、push（token 仍空，本地 ahead 11）

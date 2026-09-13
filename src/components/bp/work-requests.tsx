@@ -32,7 +32,7 @@ import { useToast } from '@/hooks/use-toast'
 import {
   ClipboardList, Plus, Search, Send, Ban, Eye, MapPin, FileText, ShieldCheck,
   Stamp, Ticket as TicketIcon, CheckCircle2, Loader2, Trash2, XCircle, ChevronRight, Download, History, Printer, Factory,
-  X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert,
+  X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert, Megaphone,
 } from 'lucide-react'
 import { ISO_STATE_STYLE, IsoState } from '@/components/bp/pid-config'
 import { PidLocateDialog, toLocatePoints, type LocatePoint } from '@/components/bp/pid-locate'
@@ -121,6 +121,16 @@ interface DispStep {
   masterPointId?: number | null; masterCode?: string | null
 }
 interface Approval { id: number; bizType: string; bizCode?: string | null; action: string; operator: string; comment?: string | null; createdAt: string }
+/** 现场交底记录（移动端交底方提交；Task 75-c 桌面端可视化） */
+interface BriefingLite {
+  id: number; ticketId: number | null; ticketCode: string | null
+  pointCode: string | null; pointLocation: string | null
+  briefingUser: string; briefedUsers: string | null
+  content: string; status: string
+  confirmedBy: string | null; confirmedAt: string | null; confirmRemark: string | null
+  aiCheckResult: string | null
+  createdAt: string
+}
 interface Detail extends WRow {
   unit: Unit | null
   survey: { id: number; surveyor: string; surveyDate: string; siteCondition: string; pipelineVerify?: string | null; hazardPoints?: string | null; pointRefs?: string | null; isSafe: boolean; suggestion?: string | null } | null
@@ -276,6 +286,8 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
   const [detail, setDetail] = useState<Detail | null>(null)
   const [surveyPhotos, setSurveyPhotos] = useState<AttachmentDto[]>([])
   const [acceptPhotos, setAcceptPhotos] = useState<AttachmentDto[]>([])
+  const [briefings, setBriefings] = useState<BriefingLite[]>([])
+  const [briefAtts, setBriefAtts] = useState<Record<number, AttachmentDto[]>>({})
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   // 作业票隔离点位 PID 定位查看弹窗（null = 关闭，否则为当前定位点位下标）
@@ -371,12 +383,22 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
   // 现场照片（勘察/验收，Task 74 移动端上传；失败不阻断详情）
   const loadDetailPhotos = useCallback((d: Detail) => {
     setSurveyPhotos([]); setAcceptPhotos([])
+    setBriefings([]); setBriefAtts({})
     if (d.survey) {
       apiGet<AttachmentDto[]>(`/api/attachments?bizType=SITE_SURVEY&bizId=${d.survey.id}`).then(setSurveyPhotos).catch(() => null)
     }
     if (d.acceptance) {
       apiGet<AttachmentDto[]>(`/api/attachments?bizType=ACCEPTANCE&bizId=${d.acceptance.id}`).then(setAcceptPhotos).catch(() => null)
     }
+    // 现场交底记录 + 每条交底的附件（Task 75-c 桌面端可视化；失败不阻断详情）
+    apiGet<BriefingLite[]>(`/api/briefings?workRequestId=${d.id}`).then(async (bs) => {
+      setBriefings(bs)
+      const pairs = await Promise.all(bs.map(async (b) => {
+        const atts = await apiGet<AttachmentDto[]>(`/api/attachments?bizType=BRIEFING&bizId=${b.id}`).catch(() => [] as AttachmentDto[])
+        return [b.id, atts] as const
+      }))
+      setBriefAtts(Object.fromEntries(pairs))
+    }).catch(() => null)
   }, [])
 
   // focusId 联动：全局搜索/统计分析下钻携带 focusId 导航进来时，自动打开对应需求详情
@@ -1365,6 +1387,59 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                 </SectionCard>
                 )
               })()}
+
+              {/* 现场交底（移动端交底方提交；作业方确认后方可开工，Task 75-c 桌面端可视化） */}
+              {briefings.length > 0 && (
+                <SectionCard icon={<Megaphone className="w-4 h-4" />} title="现场交底"
+                  badge={<Badge variant="outline" className="ml-1 text-[10px] border-violet-200 bg-violet-50 text-violet-700">{briefings.length} 条 · 交底后作业方确认方可开工</Badge>}>
+                  <div className="space-y-2">
+                    {briefings.map((b) => {
+                      const atts = briefAtts[b.id] ?? []
+                      const bPhotos = atts.filter((a) => a.kind === 'PHOTO')
+                      const bAudios = atts.filter((a) => a.kind === 'AUDIO')
+                      const ai = b.aiCheckResult
+                      return (
+                        <div key={b.id} className="rounded-lg border border-stone-200 bg-white px-3 py-2 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Megaphone className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+                            <span className="font-mono text-xs font-semibold text-stone-700">{b.ticketCode ?? '需求级交底'}</span>
+                            {b.status === 'CONFIRMED'
+                              ? <Badge variant="outline" className="text-[10px] h-5 border-emerald-200 bg-emerald-50 text-emerald-700">作业方已确认</Badge>
+                              : <Badge variant="outline" className="text-[10px] h-5 border-amber-200 bg-amber-50 text-amber-700">待作业方确认</Badge>}
+                            {ai && (
+                              <Badge variant="outline" className={cn('text-[10px] h-5 gap-0.5',
+                                ai === 'CONSISTENT' ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                  : ai === 'INCONSISTENT' ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                    : 'border-stone-200 bg-stone-50 text-stone-500')}>
+                                <Sparkles className="w-3 h-3" />AI {ai === 'CONSISTENT' ? '位置一致' : ai === 'INCONSISTENT' ? '位置不一致' : '无法确定'}
+                              </Badge>
+                            )}
+                            <span className="ml-auto text-[10px] text-stone-400">{fmtDateTime(b.createdAt)} · 交底人 {b.briefingUser}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-stone-500">
+                            {b.pointLocation && <span className="min-w-0 truncate">位置：{b.pointLocation}</span>}
+                            {b.briefedUsers && <span>被交底：{b.briefedUsers}</span>}
+                            {b.status === 'CONFIRMED' && b.confirmedBy && <span>确认人 {b.confirmedBy}{b.confirmedAt ? ` · ${fmtDateTime(b.confirmedAt)}` : ''}</span>}
+                          </div>
+                          <div className="text-[11px] text-stone-600 bg-violet-50/60 border border-violet-100 rounded-md px-2 py-1.5 leading-relaxed whitespace-pre-wrap line-clamp-4">{b.content}</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] text-stone-400 mb-1">交底照片（{bPhotos.length}，移动端拍摄；AI 与勘察照片核对位置）</div>
+                              <AttachmentWall photos={bPhotos} emptyText="无交底照片" compact />
+                            </div>
+                            {bAudios.length > 0 && (
+                              <div className="text-[11px] text-violet-600 border border-violet-200 bg-violet-50 rounded-md px-2 py-1.5 shrink-0">
+                                🎙️ 录音 {bAudios.length} 段（移动端查看/回放）
+                              </div>
+                            )}
+                          </div>
+                          {b.status === 'CONFIRMED' && b.confirmRemark && <div className="text-[11px] text-stone-500">确认意见：{b.confirmRemark}</div>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </SectionCard>
+              )}
 
               {/* 验收 */}
               {(detail.acceptance || detail.status === 'PENDING_ACCEPTANCE') && (

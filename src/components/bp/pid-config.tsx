@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Eye, EyeOff, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, Move, MoveDiagonal, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
-  TicketCheck, Trash2, Triangle, Wand2, Workflow, X as CloseIcon,
+  TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
 } from 'lucide-react'
 import { ModuleProps, entryActionEventName } from '@/lib/bp-types'
 import {
@@ -3077,6 +3077,22 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }
 
+  /** 属性面板「解除挂接」（Task 75）：与 resolveMountAfterDrag 解除分支同语义——两段合并闭合管线、清除残留段、旋转复位（带确认防误触） */
+  const unmountSelectedShape = (shapeId: string) => {
+    const ct = contentRef.current
+    const cur = ct.shapes.find((x) => x.id === shapeId)
+    if (!cur || !isMountableShape(cur)) return
+    const ownSegs = ct.connections.filter((c) => c.fromShape === shapeId || c.toShape === shapeId)
+    if (ownSegs.length === 0) return
+    const u = unmountShapeFromPipe({ shapes: ct.shapes, connections: ct.connections }, shapeId, polylineOfRef.current)
+    mutate((prev) => ({
+      ...prev,
+      shapes: prev.shapes.map((x) => (x.id === shapeId ? { ...x, rotation: undefined } : x)),
+      connections: u.content.connections.filter((c) => c.fromShape !== shapeId && c.toShape !== shapeId),
+    }))
+    toast({ title: '已解除管线挂接', description: '管线两端自动闭合，图元旋转已复位' })
+  }
+
   // ---- 拖拽移动（图元 / 标注） ----
   const startDragShape = (e: React.PointerEvent<SVGElement>, s: PidShape) => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
@@ -4751,6 +4767,37 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                           {typeLabel(selectedShape.type)}
                         </Badge>
                       </div>
+
+                      {/* 管线挂接状态（Task 75）：可挂接图元显示所属管线 + 手动解除（拖拽挂接的镜像操作） */}
+                      {isMountableShape(selectedShape) && (() => {
+                        const segs = content.connections.filter((c) => c.fromShape === selectedShape.id || c.toShape === selectedShape.id)
+                        const pipeIds = [...new Set(segs.map((c) => c.pipelineId).filter((v): v is number => v != null))]
+                        const pipe = pipeIds.length === 1 ? pipeOptions.find((p) => p.id === pipeIds[0]) ?? null : null
+                        return segs.length === 0 || pipeIds.length === 0 ? (
+                          <div className="rounded-md border border-stone-200 bg-stone-50 px-2.5 py-2 text-[11px] leading-relaxed text-stone-500">
+                            可挂接图元 · 未挂接管线
+                            <div className="text-stone-400">拖到已绑定管线的连线上自动旋转对齐并串接</div>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <Label className="text-[11px] text-stone-500">所属管线</Label>
+                            <div className="rounded-md border border-teal-200 bg-teal-50 p-2 text-[11px] leading-relaxed text-teal-800">
+                              <span className="font-medium">{pipe ? `${pipe.code} · ${pipe.name}` : pipeIds.length === 1 ? `#${pipeIds[0]}` : '多段归属不一致'}</span>
+                              <div className="text-teal-600">管线已在图元处断开并与两端粘合（{segs.length} 段{selectedShape.rotation ? ` · 旋转 ${selectedShape.rotation}°` : ''}）</div>
+                            </div>
+                            <Button
+                              variant="outline"
+                              className="h-8 w-full border-rose-200 text-rose-600 hover:bg-rose-50"
+                              title="解除挂接：两段连线合并闭合、图元旋转复位"
+                              onClick={() => {
+                                if (window.confirm('解除该图元的管线挂接？管线将在原位自动闭合。')) unmountSelectedShape(selectedShape.id)
+                              }}
+                            >
+                              <Unlink className="h-3.5 w-3.5" /> 解除挂接
+                            </Button>
+                          </div>
+                        )
+                      })()}
 
                       {/* 绑定设备（保存图后与连线绑定管线联动回写管线起止设备） */}
                       <div className="space-y-1.5">

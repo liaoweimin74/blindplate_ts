@@ -2,7 +2,7 @@
 // 现场作业（移动端）：勘察拍照 / 工艺处置现场确认 / 现场交底（拍照+录音+作业方确认+AI位置核对） / 作业拍照核对 / 验收拍照核对
 // 移动优先单列布局（真机全宽，桌面居中）；配色：AI=violet、teal 主操作、rose 不一致警告、amber 定位
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { apiGet, apiPost, fmtDate, fmtDateTime } from '@/lib/bp-api'
+import { apiGet, apiPost, apiPatch, apiDelete, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import type { ModuleProps } from '@/lib/bp-types'
 import { URGENCY_MAP } from '@/lib/bp-types'
 import { cn } from '@/lib/utils'
@@ -20,7 +20,7 @@ import {
 import {
   ChevronLeft, MapPin, ClipboardCheck, Megaphone, HardHat, ListChecks, RefreshCw,
   Loader2, Camera, Mic, Sparkles, CircleCheck, AlertTriangle, ChevronRight,
-  ClipboardList, ShieldCheck, PlayCircle, FileCheck2, Search,
+  ClipboardList, ShieldCheck, PlayCircle, FileCheck2, Search, Settings2, Undo2,
 } from 'lucide-react'
 
 // ============ 类型 ============
@@ -63,6 +63,7 @@ type View =
   | { kind: 'confirm'; reqId: number }
   | { kind: 'brief-new'; ticketId: number }
   | { kind: 'brief-confirm'; briefingId: number }
+  | { kind: 'brief-manage'; briefingId: number }
   | { kind: 'exec'; ticketId: number }
   | { kind: 'accept'; reqId: number }
 
@@ -186,13 +187,13 @@ export default function FieldOpsModule({ currentUser }: ModuleProps) {
                     {briefNewTodos.map((t) => {
                       const pending = briefings.find((b) => b.ticketId === t.id && b.status === 'PENDING')
                       return (
-                        <button key={t.id} onClick={() => !pending && setView({ kind: 'brief-new', ticketId: t.id })}
-                          disabled={!!pending}
-                          className={cn('w-full text-left rounded-lg border p-3 bg-white space-y-1', pending ? 'opacity-70' : 'hover:border-violet-300 transition-colors')}>
+                        <button key={t.id}
+                          onClick={() => pending ? setView({ kind: 'brief-manage', briefingId: pending.id }) : setView({ kind: 'brief-new', ticketId: t.id })}
+                          className={cn('w-full text-left rounded-lg border p-3 bg-white space-y-1', pending ? 'hover:border-violet-300 transition-colors' : 'hover:border-violet-300 transition-colors')}>
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-mono text-stone-500">{t.code}</span>
                             {pending
-                              ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">待作业方确认</span>
+                              ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">待作业方确认 · 点击管理/补录</span>
                               : <span className="text-[10px] text-violet-600 flex items-center">去交底 <ChevronRight className="w-3 h-3" /></span>}
                           </div>
                           <p className="text-xs font-medium text-stone-800 truncate">{t.pointCode ? `[${t.pointCode}] ` : ''}{t.pointLocation ?? ''}</p>
@@ -257,7 +258,8 @@ export default function FieldOpsModule({ currentUser }: ModuleProps) {
 
         {view.kind === 'survey' && <SurveyPage reqId={view.reqId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'confirm' && <DisposalConfirmPage reqId={view.reqId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
-        {view.kind === 'brief-new' && <BriefNewPage ticketId={view.ticketId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
+        {view.kind === 'brief-new' && <BriefNewPage ticketId={view.ticketId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} onManage={(id) => setView({ kind: 'brief-manage', briefingId: id })} />}
+        {view.kind === 'brief-manage' && <BriefManagePage briefingId={view.briefingId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'brief-confirm' && <BriefConfirmPage briefingId={view.briefingId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'exec' && <ExecPage ticketId={view.ticketId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'accept' && <AcceptPage reqId={view.reqId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
@@ -701,8 +703,8 @@ function DisposalConfirmPage(props: { reqId: number; currentUser: ModuleProps['c
 }
 
 // ============ ③ 现场交底页（交底方） ============
-function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['currentUser']; onBack: () => void }) {
-  const { ticketId, currentUser, onBack } = props
+function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['currentUser']; onBack: () => void; onManage?: (briefingId: number) => void }) {
+  const { ticketId, currentUser, onBack, onManage } = props
   const { toast } = useToast()
   const [ticket, setTicket] = useState<TicketLite | null>(null)
   const [content, setContent] = useState('')
@@ -786,6 +788,12 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
             <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2.5">{checkError}</p>
           )}
           {check?.result === 'INCONSISTENT' && <InconsistentWarning show scene="BRIEFING_VS_SURVEY" />}
+          {onManage && created && (
+            <Button variant="outline" className="w-full h-10 border-violet-200 text-violet-700 hover:bg-violet-50 text-sm"
+              onClick={() => onManage(created.id)}>
+              <Settings2 className="w-4 h-4 mr-1" /> 管理交底（补录照片/录音 · 撤回）
+            </Button>
+          )}
           <Button className="w-full h-10 bg-teal-600 hover:bg-teal-700 text-white text-sm" onClick={onBack}>返回待办</Button>
         </div>
       </PageShell>
@@ -843,6 +851,188 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
             提交交底（照片 {photos.length} 张{audio ? ' + 录音' : ''}）
           </Button>
         </>
+      )}
+    </PageShell>
+  )
+}
+
+// ============ ③b 交底管理页（交底方：补录照片/录音 · 改要点 · 重新 AI 核对 · 撤回） ============
+function BriefManagePage(props: { briefingId: number; currentUser: ModuleProps['currentUser']; onBack: () => void }) {
+  const { briefingId, currentUser, onBack } = props
+  const { toast } = useToast()
+  const [briefing, setBriefing] = useState<BriefingRow | null>(null)
+  const [content, setContent] = useState('')
+  const [briefedUsers, setBriefedUsers] = useState('')
+  const [photos, setPhotos] = useState<AttachmentDto[]>([])
+  const [audios, setAudios] = useState<AttachmentDto[]>([])
+  const [newAudio, setNewAudio] = useState<AttachmentDto | null>(null)
+  const [checks, setChecks] = useState<PhotoCheckDto[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [withdrawing, setWithdrawing] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const b = await apiGet<BriefingRow>(`/api/briefings?id=${briefingId}`)
+      setBriefing(b)
+      setContent(b.content)
+      setBriefedUsers(b.briefedUsers ?? '')
+      const [atts, cs] = await Promise.all([
+        apiGet<AttachmentDto[]>(`/api/attachments?bizType=BRIEFING&bizId=${b.id}`),
+        apiGet<PhotoCheckDto[]>(`/api/photo-checks?workRequestId=${b.workRequestId}${b.ticketId ? `&ticketId=${b.ticketId}` : ''}&scene=BRIEFING_VS_SURVEY`),
+      ])
+      setPhotos(atts.filter((a) => a.kind === 'PHOTO'))
+      setAudios(atts.filter((a) => a.kind === 'AUDIO'))
+      setChecks(cs)
+    } finally {
+      setLoading(false)
+    }
+  }, [briefingId])
+
+  useEffect(() => { void load() }, [load])
+
+  const editable = briefing?.status === 'PENDING'
+
+  const saveText = async () => {
+    if (!briefing) return
+    if (!content.trim()) { toast({ variant: 'destructive', title: '交底内容不能为空' }); return }
+    setSaving(true)
+    try {
+      await apiPatch('/api/briefings', { id: briefing.id, content, briefedUsers: briefedUsers || null })
+      toast({ title: '交底要点已更新', description: '作业方确认前可见最新内容' })
+      await load()
+    } catch (e) {
+      toast({ variant: 'destructive', title: '保存失败', description: e instanceof Error ? e.message : '请重试' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const recheck = async () => {
+    if (!briefing) return
+    if (photos.length === 0) { toast({ variant: 'destructive', title: '暂无交底照片，无法核对' }); return }
+    setChecking(true)
+    try {
+      const r = await apiPost<{ check: PhotoCheckDto }>('/api/ai/photo-check', {
+        scene: 'BRIEFING_VS_SURVEY',
+        workRequestId: briefing.workRequestId,
+        ticketId: briefing.ticketId,
+        briefingId: briefing.id,
+      })
+      setChecks((prev) => [r.check, ...prev])
+      toast({ title: 'AI 核对完成', description: r.check.result === 'CONSISTENT' ? '交底位置与勘察位置一致' : r.check.result === 'INCONSISTENT' ? '位置不一致，请留意' : '图片信息不足，无法确定' })
+    } catch (e) {
+      toast({ variant: 'destructive', title: 'AI 核对失败', description: e instanceof Error ? e.message : '请重试' })
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const withdraw = async () => {
+    if (!briefing) return
+    if (!window.confirm('确定撤回该交底？撤回后作业方将不可见，需重新交底。')) return
+    setWithdrawing(true)
+    try {
+      await apiDelete(`/api/briefings?id=${briefing.id}`)
+      toast({ title: '交底已撤回', description: '可重新发起现场交底' })
+      onBack()
+    } catch (e) {
+      toast({ variant: 'destructive', title: '撤回失败', description: e instanceof Error ? e.message : '请重试' })
+      setWithdrawing(false)
+    }
+  }
+
+  if (loading || !briefing) return <PageShell title="交底管理" onBack={onBack}><Skeleton className="h-64 rounded-xl" /></PageShell>
+  const latestCheck = checks[0] ?? null
+
+  return (
+    <PageShell title="交底管理" sub={briefing.ticketCode ?? '需求级交底'} onBack={onBack}>
+      <div className="rounded-xl bg-white p-3 space-y-1">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-stone-800">交底人：{briefing.briefingUser}</span>
+          {editable
+            ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">待作业方确认 · 可补录/撤回</span>
+            : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">作业方已确认 · 只读</span>}
+        </div>
+        <InfoRow label="交底时间" value={fmtDateTime(briefing.createdAt)} />
+        <InfoRow label="隔离点" value={briefing.pointLocation} />
+      </div>
+
+      <div className="rounded-xl bg-white p-3 space-y-2">
+        <Label className="text-xs">交底要点 {!editable && <span className="text-[10px] text-stone-400">（已确认只读）</span>}</Label>
+        <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} className="text-xs" disabled={!editable} />
+        <div className="space-y-1">
+          <Label className="text-[10px] text-stone-500">被交底人员（作业方）</Label>
+          <Input value={briefedUsers} onChange={(e) => setBriefedUsers(e.target.value)} className="h-8 text-xs" placeholder="逗号分隔" disabled={!editable} />
+        </div>
+        {editable && (
+          <Button size="sm" className="h-8 w-full bg-teal-600 hover:bg-teal-700 text-white text-xs" onClick={() => void saveText()} disabled={saving}>
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <ClipboardCheck className="w-3.5 h-3.5 mr-1" />}保存修改
+          </Button>
+        )}
+      </div>
+
+      <div className="rounded-xl bg-white p-3 space-y-2">
+        <Label className="text-xs font-semibold text-stone-700 flex items-center gap-1">
+          <Camera className="w-3.5 h-3.5 text-violet-600" />交底照片（{photos.length} 张）{editable && <span className="text-[10px] font-normal text-stone-400">· 可继续补拍</span>}
+        </Label>
+        <PhotoPicker
+          photos={photos} onChange={setPhotos} disabled={!editable}
+          meta={{ bizType: 'BRIEFING', bizId: briefing.id, bizCode: briefing.ticketCode, pointCode: briefing.pointCode, uploadedBy: currentUser?.name ?? '未知', uploadedById: currentUser?.id ?? null }}
+          angleTags={['作业位置', '周边环境', '安全设施']} compact
+        />
+      </div>
+
+      <div className="rounded-xl bg-white p-3 space-y-2">
+        <Label className="text-xs font-semibold text-stone-700 flex items-center gap-1"><Mic className="w-3.5 h-3.5 text-violet-600" />交底录音（{audios.length} 段）</Label>
+        {audios.map((a) => (
+          <div key={a.id} className="rounded-lg border border-stone-200 p-2 space-y-1">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-stone-500">{a.label ?? '录音'} · {fmtDateTime(a.createdAt)}</p>
+              {editable && (
+                <button type="button" className="text-[10px] text-rose-500 hover:text-rose-600"
+                  onClick={() => {
+                    setAudios((prev) => prev.filter((x) => x.id !== a.id))
+                    fetch(`/api/attachments/${a.id}`, { method: 'DELETE' }).catch(() => null)
+                  }}>
+                  删除
+                </button>
+              )}
+            </div>
+            <audio controls preload="none" className="w-full h-8" src={`/api/attachments/${a.id}/raw`} />
+          </div>
+        ))}
+        {audios.length === 0 && <p className="text-[10px] text-stone-400">暂无录音{editable ? '，可在下方补录' : ''}</p>}
+        {editable && (
+          <VoiceRecorder
+            audio={newAudio}
+            onChange={(a) => {
+              if (a) {
+                setNewAudio(a)
+                setAudios((prev) => (prev.some((x) => x.id === a.id) ? prev : [...prev, a]))
+              } else {
+                if (newAudio) setAudios((prev) => prev.filter((x) => x.id !== newAudio.id))
+                setNewAudio(null)
+              }
+            }}
+            meta={{ bizType: 'BRIEFING', bizId: briefing.id, bizCode: briefing.ticketCode, pointCode: briefing.pointCode, uploadedBy: currentUser?.name ?? '未知', uploadedById: currentUser?.id ?? null }}
+          />
+        )}
+      </div>
+
+      <AiCheckCard check={latestCheck} loading={checking} compact />
+      {latestCheck?.result === 'INCONSISTENT' && <InconsistentWarning show scene="BRIEFING_VS_SURVEY" />}
+      <Button variant="outline" className="w-full h-10 border-violet-200 text-violet-700 hover:bg-violet-50 text-sm" onClick={() => void recheck()} disabled={checking}>
+        {checking ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Sparkles className="w-4 h-4 mr-1 text-violet-500" />}
+        重新 AI 核对（与勘察照片）
+      </Button>
+
+      {editable && (
+        <Button variant="outline" className="w-full h-10 border-rose-200 text-rose-600 hover:bg-rose-50 text-sm" onClick={() => void withdraw()} disabled={withdrawing}>
+          {withdrawing ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Undo2 className="w-4 h-4 mr-1" />}
+          撤回交底（作业方确认前可撤回重做）
+        </Button>
       )}
     </PageShell>
   )

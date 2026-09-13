@@ -29,6 +29,8 @@ export const apiPost = <T = unknown,>(path: string, body?: unknown) =>
   api<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
 export const apiPut = <T = unknown,>(path: string, body?: unknown) =>
   api<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) })
+export const apiPatch = <T = unknown,>(path: string, body?: unknown) =>
+  api<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) })
 export const apiDelete = <T = unknown,>(path: string) => api<T>(path, { method: 'DELETE' })
 
 /** multipart 上传（不要手动设 Content-Type，浏览器自动带 boundary） */
