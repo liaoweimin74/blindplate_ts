@@ -2414,3 +2414,22 @@ Stage Summary:
 - 工程基线升级：git 远程仓库接入（origin/main=用户本地权威版），沙箱旧历史保全于 backup/sandbox-task55 分支；.env 永久出库+模板入库
 - 待用户拍板：①沙箱 push 权限（HTTPS 匿名只读，需 fine-grained PAT 仅授权本仓库 Contents 读写，或由用户本地应用 patch）【已拍板项：业务数据 db/dev.db 保留入库（用户确认测试数据不敏感）；.zscripts/dev.pid 与 dev.log.bak-23a 运行时杂物已出库；仓库公开态用户已知悉维持】
 - 下一阶段建议：①PDF 修复合入用户本地后回归实测 ②在案候选（体检周检 cron、SSE 进度、按报告修复草稿等）
+
+---
+Task ID: 71
+Agent: Z.ai Code (主会话)
+Task: 用户拍板「不用特殊字体，用系统字体」——去除捆绑字体 + TTC 死刑复核推翻 + PAT 接入 push 通道
+
+Work Log:
+- 【TTC 死刑复核（源码级+实测，公开更正 Task 70 结论）】读 pdfkit 0.20.2 源码：PDFFontFactory.open 三通道（路径/Buffer→fontkit.create；fontkit 字体对象直传 typeof src?.layout==='function'）；fontkit base.js create(buffer) 不带 postscriptName 对 .ttc 返回 TrueTypeCollection（无 layout/createSubset）→ 路径直传必崩属实；但 TrueTypeCollection.getFont(psName)/fonts[0] 返回真 TTFFont（createSubset 存在于 TTFFont.js:429）→ 「先取单字体再传对象」全链路实测 PASS：wqy-zenhei.ttc（3 字体集合）→ WenQuanYiZenHei → 含生僻字/工程符号中文渲染 → %PDF 12864B。【更正】Task 70「TTC 容器实测不可用，已全面剔除」范围过宽，精确表述应为「.ttc 路径直传不可用；fontkit 对象通道可用」——微软雅黑/宋体/noto-cjk/文泉驿/苹方全部可用了
+- 【纯系统字体改造】bp-audit-pdf.ts 重写字体段：候选链升为 .ttf/.otf/.ttc 全格式（Windows msyh.ttc/simsun.ttc/simhei/Deng 优先，Linux noto-cjk/wqy .ttc + fc-match 兜底不再拒 ttcf，macOS 苹方/宋体）；openFontObject 归一化（单字体直返，.ttc 按 TTC_PREFERRED_NAMES 选字面如 NotoSerifCJKsc，回退 fonts[0]）；registerCnFont 预开验证 + registerFont 后探针实开（registerFont 仅登记，实开在首次 font()——源码级确认）失败自动降级；删除捆绑子集字体，assets/fonts 转为可选手工放置目录（gitignore）；fontkit 2.0.4 显式入 dependencies + src/types/fontkit.d.ts 最小声明；报错文案升级（apt install fonts-noto-cjk 现在真实有效——此前文案与 ttcf 拒绝逻辑自相矛盾）
+- 【验证链】lint 0/tsc(src) 0；候选链断言 5/5（系统命中/assets TTC 优先/PDF_FONT_DIR 覆盖/env 清除恢复）；renderAuditPdf 生产路径双场景 PASS（无捆绑→系统 Noto 81109B 内嵌 NotoSerifSC；assets 放 wqy-zenhei.ttc→68972B 内嵌 WenQuanYiZenHei——用户 Windows 上 msyh.ttc 将走同一通道）；UI E2E（张工/验证码 VGMG 截图直读）：FAST 体检 AUDIT-20260913-MTZ47KUL（4E/54W/18I 与基线一致）→「下载 PDF」真实落地 133721B %PDF-1.3 内嵌 NotoSerifSC-Regular/Bold；dev.log「字体命中 /usr/share/fonts/truetype/noto-serif-sc/…」2 行、ENOENT=0
+- 【git 历史重写】3 提交未 push 窗口期内重写：backup/task70-font-bundled 备份旧 3 提交（含字体，仅本地）→ reset --soft origin/main → git rm 字体（相对基线=从未添加）→ 重组三笔（5940774 fix 纯系统字体 / 630b4b2 chore 治理 / 1e789b1 docs Task 70 worklog）；rev-list+cat-file 取证：增量最大对象 450KB（worklog），30MB/6MB 字体从未进入可推送历史
+- 【PAT 接入与 403 取证】用户提供 fine-grained PAT（写入 .env 不入库，.env* gitignore 确认）；push 403 → API 取证：/user=liaoweimin74 ✓、repo permissions admin/push 全 true ✓、Contents:read 200 ✓，但 refs 响应头 **x-accepted-github-permissions: contents=read** ——Contents 权限只读，push 需 contents=write；结论：token 创建时 Contents 未开 Read and write
+- 【诚实披露】Windows C:\Windows\Fonts 实机未测（沙箱无 Windows），msyh.ttc 机制与 wqy-zenhei.ttc 实测同构（同为 TTC 集合→fonts[0]→对象直传）；macOS PingFang/Songti 的 TTC_PREFERRED postscriptName 未经实测（取自 Apple 字体命名惯例，未命中自动回退 fonts[0]，不致失败）
+
+Stage Summary:
+- 仓库不再捆绑任何字体文件（较初版全量 30MB/子集 5.8MB → 0MB），PDF 字体完全由系统提供：Windows 直接用微软雅黑/宋体（观感较 Noto 宋体变为黑体系），Linux 裸机 apt install fonts-noto-cjk 即可（此前该建议因 ttcf 拒绝而无效，现已真实可用）
+- push 通道阻塞在 token 权限开关：用户在 GitHub → Settings → Developer settings → Fine-grained tokens → 该 token → Repository permissions → Contents 改为 Read and write（token 字符串不变、即时生效），改完沙箱直接重推 main（3 提交已就绪）
+- 用户本地 pull 指引（推送成功后）：①git pull ②bun install（fontkit 新依赖）③.bak 文件与 dev.pid 会被移除（无害）④.env 不受影响（远程从未追踪）
+- 下一阶段建议：①Contents 权限开通后推送+用户本地回归 PDF 导出 ②在案候选（体检周检 cron、SSE 进度、按报告修复草稿、装置管理行内体检按钮）
