@@ -2689,3 +2689,24 @@ Stage Summary:
 - 身份码体系落地：「我的-我的身份码」真二维码（BPID 编码口径前后端/两组件一致），演示环境扫码以模拟识别+手动输入兜底，正式版 uniapp 直通相机扫码
 - 舞台变化（记录）：WR-202609-015 的 BP-202609-017 现有 CONFIRMED 交底（Briefing 5，真实功能验证数据），原「无交底可测交底流」舞台升级为「待开工可测开工流」；如需重测交底流可先撤回开工或用其他 APPROVED 无交底票
 - 下阶段建议：①push 仍阻塞（token 空，本地 ahead 17）②候选在案：已完结页验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度③BriefNewPage 提交照片仍必填（API 层未强制）——按需决定是否 API 层加校验
+
+---
+Task ID: 80
+Agent: Z.ai Code (主会话)
+Task: 用户报障「BP-202609-018 的现场交底过程中两张勘察和交底我上传的是同一张照片，但核查不通过，看看是什么原因？」——AI 位置核对误判排查与根治
+
+Work Log:
+- 【证据先行排查（DB 取证链）】①票 BP-202609-018=id24/WR26（WR-202609-010，T74 UI走查舞台，用户实测数据）；②4 份附件（勘察 1 + 交底 3）fileName 全部相同（454455bad7c4f27e90c68506f21f4c0f.jpeg）、size 全部 74340 字节——用户「上传的是同一张照片」描述属实，同一文件的多份拷贝；③PhotoCheck 六条记录两种失败形态：id20/21/23 = UNCERTAIN + conf0 + reason=null + detail items=[]（无理由不通过）；id22 = conf100 + reason 明确说「完全一致，确认为同一作业位置」+ 两图 matchesBase=true 但 result=UNCERTAIN（自相矛盾）；而同样单张照片的 id18/19 = CONSISTENT conf100——证明照片本身核对无问题
+- 【根因一（VLM 输出格式漂移，主因）】临时脚本直调 bpVisionCompleteMulti 三轮实测：模型对同一组图稳定输出 `"result": "一 致"`（中文枚举！），并非 prompt 要求的 CONSISTENT——旧 normResult 只认英文枚举，把「一致」静默归为 UNCERTAIN → 这就是「照片明明一致却判不通过」的直接来源；输出漂移随输入图数增多而加剧
+- 【根因二（核对照片集累积历史交底）】resolveScenePhotos 的 briefingIdsOf() 取该票最近 5 条交底的全部照片做待核对集：briefing#9 核对时把 #8 的照片也拉进来（同图 2 份拷贝）、#10 时 3 份——前端明明传了 briefingId（本次交底）后端却没用它过滤，重复图稀释 VLM 注意力并诱发输出漂移
+- 【根因三（无效输出静默入库）】旧 callVisionOnce 只验 parsed.result truthy——模型残缺输出（无 reason/detail/confidence）被当有效判定写库（conf0/无理由记录）；矛盾调和分支有漏洞：重试若返回无效输出（reason 空），assertSame(retry.reason)=false 三分支全不命中 → 保持首轮「理由说一致但结论 UNCERTAIN」的矛盾原样入库（id22 成因）
+- 【修复（route.ts 六处 + bp-media 一处）】①parseResult 归一化宽容化：英文枚举精确匹配 + 中文同义词映射（先判否定再判肯定防「不一致」误命中「一致」子串：不一致/不符/冲突→INCONSISTENT；一致/相同/同一→CONSISTENT；不确定/信息不足→UNCERTAIN；无法识别返回 null 走重试）；②callVisionOnce 严格校验：result 必须可归一化且 reason 非空，否则视为无效响应；③首轮无效自动重试一次，两轮均无效才 throw（不再写脏记录，前端收到可重试错误）；④briefingId 精确过滤：scene=BRIEFING_VS_SURVEY 且传了 briefingId → check 集=该 briefing 自己的照片（本次交底语义），未传保留按票回源兜底；⑤dedupePhotos 内容去重（fileName+size 键，storageKey 每次上传唯一不可用），photos 留痕与实际送模型图集一致；⑥confidence 宽容解析（"100%"/"约95" 提取数字）；⑦矛盾调和补全：重试自洽判 UNCERTAIN（理由未断定同一位置）→ 采用重试结果，重试无有效响应 → 按首轮理由调和 CONSISTENT（透明记录 reconcileNote）；⑧AiCheckCard reason=null 兜底文案「AI 未返回判定理由（响应异常），建议重新核对」（旧版空白）
+- 【修复验证（API 级实测）】briefing#10 重核 → PhotoCheck#25 CONSISTENT conf100、checkIds 仅本次 1 张（briefingId 过滤+去重生效）；briefing#9 稳定性两轮 → CONSISTENT conf100/id28 conf0（暴露 conf 非数字漂移→⑥修复）→ 最终轮 CONSISTENT conf100；briefing#9/#10 的 aiCheckResult 均回写 CONSISTENT
+- 【用户并发操作佐证（重要发现）】排查期间 DB 数据被推进（非本会话所为，判断为用户本人实时重试）：briefing#11（16:11）创建并确认，自动核对 PhotoCheck#24 = CONSISTENT conf100 → 票24 开工（16:12）→ 作业照片上传（同图）+ EXECUTION_VS_BRIEFING 核对 PhotoCheck#26 = CONSISTENT conf100 → 完工（16:15）→ WR26 进入 PENDING_ACCEPTANCE——修复后用户实际业务链（重试交底→签到→开工→作业核对→完工）全部走通
+- 【E2E 只读走查（agent-browser）】移动端现场 Tab：WR-202609-010 在「作业验收」分组渲染「去验收」卡（未点击，避免误提交验收）；桌面端全局搜索 WR-202609-010 → 详情「现场交底」卡 4 条记录全部渲染「AI 位置一致」徽章+照片墙+确认链；dev.log 唯一错误为修复中间态（v1 严格校验拦截中文输出报 500 可重试，v2 已根治），此后无错误；lint 0 / tsc(src) 0
+
+Stage Summary:
+- 「同一张照片核查不通过」根因闭环：非用户操作问题、非照片问题，是 AI 解析层三重缺陷叠加——①VLM 输出中文枚举「一致」被静默判为 UNCERTAIN（主因）②核对照片集累积历史交底致重复图诱发输出漂移 ③无效/矛盾输出静默入库致用户查不到不通过理由
+- 解析层从「严格白名单」转为「宽容归一化+无效重试+透明调和」三层防线：中文同义词映射根治枚举漂移，briefingId 过滤+内容去重稳定模型输入，严格校验+自动重试消灭无理由脏记录
+- 测试痕迹：PhotoCheck#25/27/28/29（重核验证）、briefing#9/#10 aiCheckResult 翻案为 CONSISTENT；WR26/票24 已被用户推进至待验收（FINISHED），验收环节（ACCEPTANCE_VS_EXEC，基准=作业照 bizId=24 已就绪）用户可继续实测
+- 下阶段建议：①push 仍阻塞（GITHUB_TOKEN 空，本地 ahead 18）②验收环节用户即将实测，注意观察 ACCEPTANCE_VS_EXEC 场景③在案候选：已完结页验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度④其他 photo-check 场景（作业/验收）同样受益于本轮 parseResult/严格校验/去重修复（共用同一 POST 主流程），无需额外改造

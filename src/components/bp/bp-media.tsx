@@ -419,7 +419,9 @@ export function AiCheckCard(props: {
           <span className="text-[10px] shrink-0 opacity-80">置信度 {check.confidence}%</span>
         </div>
       )}
-      {check.reason && <p className="text-[11px] leading-relaxed opacity-90">{check.reason}</p>}
+      {check.reason
+        ? <p className="text-[11px] leading-relaxed opacity-90">{check.reason}</p>
+        : <p className="text-[11px] leading-relaxed opacity-70">AI 未返回判定理由（响应异常），建议点击「重新核对」再试一次</p>}
       <div className="flex items-center justify-between gap-2 pt-0.5">
         <span className="text-[9px] opacity-60">{fmtDateTime(check.createdAt)}</span>
         {onRun && (
