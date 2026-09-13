@@ -2561,3 +2561,31 @@ Stage Summary:
 - 自由挂标通道打通：标注弹窗双模式（主数据选择照旧 / 自由挂标先标后建），Task 73「生成主数据」工作流的前置死锁解除——先画图标码、后一键建档关联的完整链路 E2E 闭环
 - 4 个本地待推提交累积中（81ebec3/7fd045c/e6c511b/本提交），token 仍空（长度 0 实测）继续跳过 push
 - 下阶段建议：①挂接图元属性面板显示所属管线+手动解除按钮（Task 73 在案）②自由挂标后未生成主数据的挂标可在图上给「未关联」角标提示（可选打磨）③真实图纸 AI 导入验证 inlineSymbols
+
+---
+Task ID: 74
+Agent: Z.ai Code (主会话)
+Task: 用户需求——移动端现场作业闭环：①移动端现场勘察（确定隔离点位置+多角度拍照）②工艺处置方案移动端现场确认 ③开票后盲板作业前现场交底（交底方移动端：拍照+录音+作业方确认；AI 自动与勘察照片核对）④盲板作业拍照，AI 与交底照片核对位置一致性 ⑤验收拍照核对，不一致警告用户
+
+Work Log:
+- 【数据模型（3 新模型）】Attachment（cuid 主键，bizType 五枚举 SITE_SURVEY/DISPOSAL_CONFIRM/BRIEFING/EXECUTION/ACCEPTANCE + bizId/bizCode/pointCode/kind PHOTO|AUDIO/label，文件落盘 uploads/ 时间戳随机名防注入，gitignore 入库）；Briefing（一票一板：ticketId 关联，PENDING→CONFIRMED 两态，aiCheckResult 快照）；PhotoCheck（scene 三枚举 BRIEFING_VS_SURVEY/EXECUTION_VS_BRIEFING/ACCEPTANCE_VS_EXEC，result/confidence/reason/detail/photos 证据全存）。db:push 一次通过
+- 【附件基础设施】/api/attachments GET（bizType/bizId/pointCode/kind 过滤）+ POST（multipart formData，类型白名单校验，照片 10MB/录音 25MB 上限，扩展名白名单 .jpg/.jpeg/.png/.webp/.gif/.webm/.mp3/.wav…）；/api/attachments/[id] GET/DELETE（路径穿越防护：storageKey 禁 / 与 ..）；/[id]/raw 文件流（Content-Type/Disposition inline，img/audio src 直连）；bp-attachments.ts 助手（toAttachmentDto 脱敏/attachmentDataUrls 转 VLM dataURL/bindAttachments 创建后回填绑定）
+- 【多图 VLM】bp-ai.ts 新增 bpVisionCompleteMulti（DeepSeek 通道 user 消息多 image_url 块并列/内置 SDK createVision 同构；图片顺序即语义顺序，system prompt 说明每张角色）
+- 【AI 位置核对 API】/api/ai/photo-check POST：scene 自动回源照片集（勘察=survey.id 绑定照；交底=briefing.id 绑定照——按票/需求定位 briefing；作业=ticket.id；验收=acceptance.id，验收记录未建时回退 bizCode 占位照片）；支持显式 baseIds/checkIds 覆盖与 attachmentIds 先绑后核；/api/photo-checks GET 查询留痕
+- 【AI 判定质量两轮实证迭代（重要工程发现）】①首版 prompt 实测：同场景多角度照片被判 UNCERTAIN 但 reason 明确「确认为同一作业位置」（点名 PL-101/绿色法兰）——自相矛盾输出；②升级 rubric（核对特征清单①位号牌②管线走向涂装③法兰螺栓④背景构筑物⑤地面 + 判定规则：两项以上特征对应必须 CONSISTENT/仅模糊无共同特征才 UNCERTAIN/明确冲突才 INCONSISTENT/confidence 与 result 自洽）后多次实测 CONSISTENT 稳定；③仍偶发自相矛盾 → 代码层治理：UNCERTAIN 且 assertSame(reason) 正则命中（同一作业位置/完全一致等）→ 重试一次；仍矛盾按模型理由调和为 CONSISTENT，detail JSON 透明记录 reconciled:true+reconcileNote（可审计不掩盖）；④实测陷阱：dev server 对 route 改动有编译延迟，改后首次请求可能仍走旧代码——验证 prompt 修复必须等 HMR 稳定后复测
+- 【交底 API】/api/briefings GET（id 单条/workRequestId/ticketId/status）POST（状态门禁 TICKET_APPROVED|IN_PROGRESS，票归属校验，photoIds/audioIds 绑定，审计留痕+OPERATOR 通知）/PATCH（仅 PENDING 可改）/DELETE（仅 PENDING 撤回）；/api/briefings/[id]/confirm（PENDING→CONFIRMED，审计+GUARDIAN 通知）
+- 【开工硬门禁（安全约束③）】work-tickets/[id]/start 增第三重校验：无交底记录→409 briefingRequired「请交底方在移动端完成交底」；有交底未确认→409「请作业方确认后方可开工」（与既有管线占用①、同管线互斥②并列，交底查询含票级+需求级兜底）
+- 【勘察/处置确认/验收照片挂接】三个既有 POST 路由增 photoIds 绑定（survey→SITE_SURVEY、disposal-confirmations→DISPOSAL_CONFIRM、acceptances→ACCEPTANCE）
+- 【共享媒体组件 bp-media.tsx】PhotoPicker（capture=environment 真机直调后置相机/桌面退化文件选择；canvas 压缩≤1280px JPEG 0.82（<200KB 直传）；多角度快选标签 正面/侧面/近照/远照 等；缩略图+角标+删除）；VoiceRecorder（MediaRecorder audio/webm，录音波形动画+计时+<audio>回放+删除，getUserMedia 失败优雅 toast）；AttachmentWall 只读墙（照片+录音）；AiCheckCard（violet AI 卡：结果徽章/置信度条/reason/重新核对）；InconsistentWarning（rose 警告条 role=alert）
+- 【现场作业模块 field-ops.tsx（1200+ 行）】移动优先单列 max-w-md（真机全宽/桌面居中）；按角色聚合待办流（勘察 ENGINEER/处置确认 ENGINEER/交底创建 GUARDIAN+ENGINEER/交底确认 OPERATOR+GUARDIAN/作业 OPERATOR…/验收 ACCEPTOR+MANAGER，ADMIN 全可见）；六个视图：待办列表（渐变状态条+分区卡片）/勘察页（隔离点 chips 多选+按点位分组拍照+环境全貌+表单）/处置确认页（步骤逐项合格/异常+气体检测三项+现场拍照+总体确认）/交底页（要点预填安全措施+被交底人员预填 workers+拍照必填+录音可选→提交后自动 AI 核对结果卡）/交底确认页（内容+照片墙+录音回放+AI 卡+「我已知晓并确认」）/作业页（交底要点回顾+作业位置拍照+AI 核对按钮+不一致警告+完工）/验收页（三检查项开关+拍照+AI 核对+不一致时提交拦截确认弹窗「返回复核/仍要提交」自动记录差异）
+- 【桌面端集成】侧边栏「现场作业」模块（HardHat 图标，移动端预览之前）+ MODULE_META + BP_ENTRY_CATALOG（AI 助手可引导）；作业需求详情勘察卡/验收卡各挂 AttachmentWall（openDetail/reloadDetail 并行拉附件，失败不阻断）
+- 【E2E·API 级 22/22 PASS】PIL 生成可控场景图（场景A管线法兰区 PL-101/场景B泵房，双角度基准+同场景第三角度+异场景）；全链路：新建需求→勘察（2 照片绑定）→JSA→隔离方案→处置方案→步骤逐项确认→总体确认→开票批准→【开工门禁 409 briefingRequired ✓】→交底（1 照片）→AI 核对① CONSISTENT conf95（点名 PL-101/储罐特征）→aiCheckResult 回写 ✓→作业方确认 ✓→开工成功 ✓→作业照片（异场景）AI 核对② INCONSISTENT conf95（点名泵体 vs 管线储罐冲突）→完工→验收照片 AI 核对③ CONSISTENT（bizCode 占位回退路径 ✓）+③b 异场景 INCONSISTENT ✓→验收提交闭环 COMPLETED ✓→附件回读/raw 流 ✓。管线占用门禁在调试中实弹拦截过中断遗留票（既有特性顺带验证）；音频 wav 上传（mimeType/白名单）✓
+- 【E2E·UI 级（agent-browser 414×896 真机视口）】登录（验证码 B8P2 放大裁剪直读）→抽屉导航「现场作业」→待办 2 项分区正确→勘察页（chips 多选 IP-E101-01→按点位拍照区出现→upload 命令真传 2 张+角度标签→现场条件受控输入原生 setter→提交→待办 2→1 自动返回）→交底页（预填验证→传照片→提交→AI 核对中→CONSISTENT emerald 卡）→交底确认页（照片墙+AI 卡+确认按钮→确认→待开工分区）→确认开工→作业中→作业页（交底回顾+照片墙→传异场景照片→AI 核对→INCONSISTENT rose 卡+「⚠️ 位置不一致」警告条 UI 实证）→完工→验收页（三开关+传照片→AI 核对 CONSISTENT→提交验收（通过）→toast「验收通过，流程闭环」→待办 0 空态）；桌面 1440px：侧栏高亮+详情照片墙（现场照片 2+验收照片 1 渲染）；溢出检查 scrollW=clientW=414 无横向溢出
+- 【E2E 揪出并修复 2 个真 bug（UI 级走查价值实证）】①SurveyPage masters.filter is not a function——/api/iso-point-masters 返回 {list} 壳，解包修复；②PhotoPicker 上传计数泄漏——setUpdating 惰性 updater 在 input.value='' 清空 FileList 后读 files.length 得 0，uploading 永不归零→「上传中」spinner 残留+拍照按钮永久禁用（真机同样会触发），先固化 count 修复
+- 【验证】lint 0 / tsc(src) 0 / dev.log 无错误 / HTTP 200；测试痕迹保留为演示数据：WR-202609-008/009（API 级全链路，含三种 AI 核对记录）/WR-202609-013（勘察 2 照片）/WR-202609-014（UI 级全流程闭环 8/8，Briefing#1#2+PhotoCheck 多条+Attachment 9 张）；E2E 脚本在 .zscripts/（已 gitignore，含舞台数据 prep 脚本可复用）
+
+Stage Summary:
+- 移动端现场作业五环节全部闭环交付：勘察多角度拍照（按隔离点分组）→处置现场确认（步骤逐项+气体检测+拍照）→现场交底（拍照+录音+作业方确认+AI 与勘察照片核对）→作业拍照（AI 与交底照片核对+不一致警告）→验收拍照（AI 核对+不一致警告+拦截确认弹窗）；开工硬门禁（无确认交底不得开工）落为系统安全约束③
+- AI 位置核对经真实 VLM 三场景实证（同场景一致/异场景不一致/占位回退），自相矛盾输出有重试+透明调和治理
+- 用户本地 pull 回归点：现场作业模块（真机浏览器访问即可用，capture 调相机）、桌面详情照片墙、开工门禁新提示
+- 下阶段建议：①录音在真实手机浏览器实测（沙箱 headless 无麦克风，MediaRecorder 错误路径已优雅处理）②交底撤回/补录 UI（API 已支持 PATCH/DELETE）③在案候选不变（挂接图元属性面板显示所属管线、真实图纸 AI 导入验证、体检周检 cron、SSE 进度）
