@@ -63,3 +63,5 @@ dev.log.bak-*
 
 # 字体目录（纯系统字体方案：仓库不捆绑字体；如需手工放置字体文件放这里，不入库）
 assets/fonts/
+/uploads/
+/.zscripts/
