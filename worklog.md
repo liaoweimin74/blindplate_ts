@@ -2525,3 +2525,20 @@ Stage Summary:
 - 挂接核心语义经两轮 E2E 修正定型为「每次拖动落定→闭合→重新判定」——与用户原文「移动或删除阀门时管线自动闭合」逐字吻合，且消除引入段贴附导致的判定死角
 - 用户本地 pull 回归点：PID 组态四项新交互 + AI 导入含内联符号的图纸（VLM prompt 已扩展，识别质量待真实图纸检验）
 - 下一阶段建议：①窄屏 12 列步骤行响应式堆叠（Task 72 在案）②挂接图元属性面板显示所属管线+手动解除按钮 ③真实 PID 图纸跑一轮 AI 导入验证 inlineSymbols 识别率 ④在案候选不变（体检周检 cron、SSE 进度、按报告修复草稿）
+
+---
+Task ID: 73-b
+Agent: Z.ai Code (主会话)
+Task: 用户指令「push」——Task 73 推送状态核验 + 沙箱重置后遗症治理
+
+Work Log:
+- 【核心结论（三重证据）】Task 73 全部成果已在远程：本地 main = origin/main(ref) = git ls-remote 实时协议查询 = 0c5d1f5（feat(pid) 四项增强）+ a5b8ecc（chore(db) 测试痕迹）；reflog 证实 05:19:06 fetch 从远程 fast-forward 拉下 0c5d1f5——fetch 只能带回远程真实存在的提交，坐实上轮会话在截断前已完成 UUID 快照 25fc69f 重写与推送（先例同 Task 72-b：HEAD reflog 可见 25fc69f/2580331 → reset to origin/main → 重提交 a5b8ecc/0c5d1f5）
+- 【沙箱重置后遗症（重置发生于 05:55 前后，证据）】①.env 被平台重生成：用户手工添加的 GITHUB_TOKEN 行整行消失（mtime 05:55:42，键名清点仅剩 DATABASE_URL）②279 个文件权限位 100644→100755：逐类抽样 diff 全部为 old mode/new mode 行，numstat 全量核验零内容级差异（唯 .zscripts/dev.pid 1 行 PID 运行时痕迹；此前观察到的 M db/custom.db 亦为二进制权限位噪音，同字节数）③skills/ 平台技能库目录出现（未跟踪，ASR/LLM/TTS/agent-browser 等脚手架）④平台自拉 dev server（PID 1194/1207，05:55 启动）僵死：ss Recv-Q=97 连接堆积不 accept、60s 探针零响应、12 分钟 wall time 烧 12:54 CPU 分钟——Task 73 同款僵死特征
+- 【治理】core.fileMode=false 治理权限位噪音（status 从 280 项缩至 dev.pid 1 行 + skills/）；杀僵死实例 → 绕过 Tee-Object 坏 script 用 bunx next dev -p 3000 直接启动 → HTTP 200 / 7.6s 冷编译
+- 【本轮提交】.gitignore 补 /skills/ 整目录忽略（原仅忽略 /skills/tool-results/）；worklog Task 73-b
+- 【push 受阻（待用户动作）】.env 无 GITHUB_TOKEN → 新提交无凭据可推。GIT_TERMINAL_PROMPT=0 安全试探失败留证（匿名 push 被拒）。需用户在 GitHub 重新生成 fine-grained PAT（Contents: read+write）并追加到 .env：GITHUB_TOKEN=github_pat_xxx；注意 .env 属平台重生成文件，沙箱重置会再次抹掉手工键（已知风险）
+
+Stage Summary:
+- 远程 main = Task 73 完整成果（PID 四项增强），用户本地 git pull 即可回归
+- 本地待推送：.gitignore(skills/) + worklog Task 73-b 两个提交，token 补回后一键 push + fetch 三方验证
+- 下阶段建议：token 补回后 push 收尾；PID 增强后续（挂接图元属性面板显示所属管线+手动解除按钮、真实图纸 AI 导入 inlineSymbols 识别率检验）；在案候选不变（体检周检 cron、SSE 进度、按报告修复草稿）
