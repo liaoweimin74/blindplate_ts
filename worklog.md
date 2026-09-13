@@ -2501,3 +2501,27 @@ Stage Summary:
 - 仓库远程 main = Task 72 全部成果（登录页正式化 + 步骤列表溢出/悬浮修复 + worklog + db 痕迹收尾提交 4481113）
 - 用户本地待办不变：git pull → bun install（fontkit 依赖）→ 登录页新交互与长内容步骤编辑回归
 - 下阶段建议沿用 Task 72：窄屏 12 列步骤行响应式堆叠、移动端编辑器专项；在案候选（体检周检 cron、SSE 进度、按报告修复草稿）不变
+
+---
+Task ID: 73
+Agent: Z.ai Code (主会话)
+Task: 用户需求——PID 组态四项增强：①阀门/管件/在线仪表/泵挂接管线（自动旋转对齐+断开粘合+移动/删除自动闭合）②PID 图生成主数据按钮 ③导入 PID 图自动挂接管线内联符号 ④查看模式隔离点文字显示/隐藏+悬停信息浮层
+
+Work Log:
+- 【架构探索】PID 组态为纯手写 SVG + Pointer Events（pid-config.tsx 约 5300 行），管线=两设备图元间连线（PidConn 只存锚点归属，折线实时推导），隔离点=PidMark 挂标，图元原本无 rotation 字段；STD 内建库 126 符号按前缀 vl-/in-/pp-/eq-/el- 分类
+- 【需求1 管线挂接】新建 src/lib/bp-pid-mount.ts 纯函数几何库（编辑器/导入端共用）：可挂接判定（pump/valve 类型 + std 前缀 vl-/in-/pp- 且排除 in-sig-* 信号线、pp-line-* 管道线、pp-flow-arrow 箭头）、findMountTarget（图元中心→最近已绑定管线折线段 ≤36px，距折线端点 22px 内不吸防退化）、mountShapeOnConn（旋转对齐 0°/90° + 管线断开两段粘合两端锚点，段1 保留原 conn id 保徽章引用，labelT 按弧长比例折算）、unmountShapeFromPipe（两段合并闭合，labelT 逆折算还原，pipelineId 校验）、autoMountInlineShapes（批量，逐个重算支持一管多阀串联 n+1 段）、layoutPolylineOf（导入端简化正交路由）
+- 【rotation 基建】PidShape 加 rotation?: number（前端类型+bp-types 服务端同步）；anchorPoint 改为旋转感知（inset box 锚点绕图元中心旋转）；新增 physAnchor（锚点名→物理朝向，routeConnection 的 H/V 路由判定按物理朝向）——全部 10 处 routeConnection 调用点接入；ShapeBody 拆分 shapeBodyInner + 外壳 rotate(g) 变换；泛型 <S,C extends MountShape/MountConn> 保证 PidShape/PidConn 类型透传不丢失
+- 【挂接交互语义（E2E 实测修正两次）】首版 ownHit 判定「是否仍在自身段上」存在结构性缺陷：连线引入段永远贴阀门（锚点距中心恒 w/2=22px<36 阈值）→ 拖离永不解除（实测连线恒 2）；重读用户原文「移动或删除阀门时管线会自动闭合」改为干净语义：挂接态图元每次拖动落定→先 unmount 闭合→再按新落点重新判定（在管线上→重新旋转+断开；不在→保持闭合+旋转复位）——沿管滑动/跨拐角/换管/拖离全部为干净状态；第二次修正：初版误加「未挂接 early return」导致未挂接图元拖到管线上不触发挂接（实测阀门贴线连线仍 1），去除后统一「闭合(若有)→重新判定」
+- 【需求2 生成主数据】新建 /api/pid-diagrams/[id]/generate-master（POST 事务）：设备=工艺图元 label 首词位号正则提取（T-101/P201A），幂等建 Equipment 回填 equipmentId（已存在复用），type 按图元类型/stdId 关键词映射；管线=两端已绑定设备的连线，code=「起点位号-终点位号」冲突加序号，创建回写起止设备+回填 pipelineId；隔离点=挂标 code 幂等建 IsoPointMaster，所属管线按挂标到各管线折线最近距离（≤120）推导（复用 mount 库 layoutPolylineOf+distToSegment）；回填后 content 写回组态图；前端工具条 Database 按钮（title 精确「生成主数据：」开头，防误中 AI 导入按钮 title 含同名子串）+ 结果弹窗（新建/关联/跳过分组明细）
+- 【需求3 导入自动挂接】extract 的 VLM prompt 增补 inlineSymbols 识别段（kind 枚举 valve/fitting/instrument/pump + pipelineCode 归属 + 归一化坐标 + 大型独立设备排除说明），LIMITS 加 inlineSymbols:24，normalizeResult 新增 normInline（kind 白名单+pipelineCode 防幻觉+去重）；import route 接收 inlineSymbols：INLINE_SPEC 映射 std 图元（valve→vl-gate 44×20 / fitting→pp-flange / instrument→in-field / pump→eq-pump-c），有 pipelineCode 定向投影挂接（中心投影到该管线各段最近点后 findMountTarget 命中），无管线码走 autoMountInlineShapes 几何兜底，响应统计 inlineSymbols/inlineMounted
+- 【需求4 文字开关】MarkGlyph 加 hideText prop（查看态隐藏状态 chip 与 code，仅留状态色菱形——图标颜色即状态）；工具条查看分支加切换按钮（EyeOff/Eye + teal 激活态 + aria-pressed）；renderMarks 查看态 onPointerEnter/Move/Leave 驱动 markHover state；HTML fixed 浮层（pointer-events-none 防拦截画布）：编号 mono 大字+名称+状态色点+关联单据（作业需求/处置方案/作业票/盲板编号，来自 statusMap 的 StatusPoint）+「暂无进行中作业」兜底+档案入口提示，屏幕坐标 clientX/Y+视口边缘 clamp；编辑态不受影响
+- 【验证】bun 一次性脚本 30/30 PASS（可挂接判定 10 项/水平挂接断开粘合 labelT 折算/竖直 rotation=90+物理朝向/两阀串联 3 段/锚点旋转 270° 往返，脚本已删）；agent-browser E2E：登录（快选张工+验证码 824H）→ 生成主数据按钮（seed 图全绑定幂等跳过 15/18=正确）→ API 级新建路径（图 26：E-101 复用关联/T-201 新建/管线 E-101-T-201 生成起止回写/IP-T73-01 所属管线自动推导成功，content 回填全对）→ 拖拽挂接（agent-browser mouse move/down/up 真实指针序列：连线 1→2+toast「已挂接管线 E-101-T-201 已在图元处断开」）→ 拖离闭合（连线 2→1+toast「已解除管线挂接」）→ 重新挂接 → Delete 删除闭合（图元 3→2 连线 2→1 管线贯通）→ 需求4（隐藏前状态chip+code 齐全/隐藏后仅状态色菱形+按钮 teal 激活/hover 浮层显示 IP-T73-01+T73验证点+常通+单据区）→ 需求3 API（图 27：shapeCount=4 connCount=3 inlineMounted=2/2，断开 3 段锚点全部正确 c-p40 泵→FV-101.left / c-i3 FV-101→FT-102 / c-i4 FT-102→V-301，全段 pipe=40，rotation=0）
+- 【工程发现（重要）】dev server 卡死根因：package.json dev script 为「next dev -p 3000 2>&1 | Tee-Object dev.log」——Tee-Object 是 PowerShell 命令，Linux bash 下不存在→broken pipe→next-server 事件循环阻塞（ss 显示 LISTEN Recv-Q=20 堆积不 accept，老连接 keep-alive 轮询仍活，新连接全部超时）；修复=绕过 dev script 直接 bunx next dev -p 3000 > dev.log 2>&1（用户 Windows 本地不受影响，script 保留）；另：agent-browser fill 不触发 React 受控输入 onChange（表单 state 未更新），必须用快选（React onClick）或原生 value setter+dispatchEvent('input')
+- 【E2E 工具经验】Radix 组件（Select option/Tabs trigger）合成 el.click() 部分无效，agent-browser mouse move/down/up 真实指针序列可靠；SVG 坐标→屏幕用 createSVGPoint+getScreenCTM（注意选画布 svg 而非 lucide 图标 svg——viewBox 含 1200 判别）；挂接拖拽验证用 mouse 序列完美替代 snapshot（避开 snapshot 挂起风险）
+- 【验证】lint 0 / tsc(src) 0 / dev.log 无真实错误（grep 命中为 failedAttempts 字段名查询非报错）/ dev HTTP 200；测试痕迹：图 26（T73挂接验证图）/图 27（T73内联挂接验证）+Equipment P-201(49)/T-201(48)+Pipeline E-101-T-201(39)/PL-771(40)+IsoPoint IP-T73-01(32)/IP-T73-77(33) 保留为演示数据
+
+Stage Summary:
+- PID 组态四项增强全部交付并 E2E 实证：管线挂接（旋转对齐/断开粘合/移动/拖离/删除自动闭合）、生成主数据按钮（位号提取+幂等+管线号自动编码+隔离点管线归属推导）、导入自动挂接（VLM 内联符号识别+定向投影挂接+几何兜底）、隔离点文字开关+悬停信息浮层（隐藏时图标颜色即状态）
+- 挂接核心语义经两轮 E2E 修正定型为「每次拖动落定→闭合→重新判定」——与用户原文「移动或删除阀门时管线自动闭合」逐字吻合，且消除引入段贴附导致的判定死角
+- 用户本地 pull 回归点：PID 组态四项新交互 + AI 导入含内联符号的图纸（VLM prompt 已扩展，识别质量待真实图纸检验）
+- 下一阶段建议：①窄屏 12 列步骤行响应式堆叠（Task 72 在案）②挂接图元属性面板显示所属管线+手动解除按钮 ③真实 PID 图纸跑一轮 AI 导入验证 inlineSymbols 识别率 ④在案候选不变（体检周检 cron、SSE 进度、按报告修复草稿）

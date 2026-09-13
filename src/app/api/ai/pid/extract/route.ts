@@ -19,7 +19,7 @@ const TYPE_ALIAS: Record<string, string> = {
   容器: 'VESSEL', 分液罐: 'VESSEL', 回流罐: 'VESSEL', 缓冲罐: 'VESSEL', 气液分离器: 'VESSEL', 分离器: 'VESSEL',
 }
 
-const LIMITS = { equipments: 24, pipelines: 30, isoPoints: 24 } as const
+const LIMITS = { equipments: 24, pipelines: 30, isoPoints: 24, inlineSymbols: 24 } as const
 
 const SYSTEM_PROMPT = `你是石化工艺 PID（管道仪表流程图）图纸识别专家。请仔细读图，提取图纸中的设备、管线连接关系与隔离点信息，输出严格的 JSON 对象（不要输出任何 JSON 以外的文字）。
 
@@ -29,7 +29,8 @@ const SYSTEM_PROMPT = `你是石化工艺 PID（管道仪表流程图）图纸�
   "unitName": "装置/车间名称（图签中，读不到给空字符串）",
   "equipments": [{ "code": "设备位号(如 T-101/P-201/E-301/V-101，必须照图原样)", "name": "设备中文名称(读不到给空字符串)", "type": "设备类型", "x": 12.5, "y": 30, "w": 6, "h": 18 }],
   "pipelines": [{ "code": "管线号(图上管线标注，如 PL-101/PG-0101，照图原样；该管线上没有编号标注时给空字符串)", "name": "管线名称(读不到给空字符串)", "medium": "管内介质(图上标注，读不到给空字符串)", "spec": "管径规格(如 DN200，读不到给空字符串)", "fromEquipment": "起点设备位号(必须与 equipments 中某设备位号一致)", "toEquipment": "终点设备位号(同上)" }],
-  "isoPoints": [{ "code": "隔离点编号(图上盲板/隔离点标注，没有编号给空字符串)", "name": "隔离点名称/位置描述(如 泵出口法兰)", "pipelineCode": "所属管线号(必须与 pipelines 中某管线号一致，不确定给空字符串)", "location": "具体位置描述(读不到给空字符串)" }]
+  "isoPoints": [{ "code": "隔离点编号(图上盲板/隔离点标注，没有编号给空字符串)", "name": "隔离点名称/位置描述(如 泵出口法兰)", "pipelineCode": "所属管线号(必须与 pipelines 中某管线号一致，不确定给空字符串)", "location": "具体位置描述(读不到给空字符串)" }],
+  "inlineSymbols": [{ "kind": "valve|fitting|instrument|pump", "pipelineCode": "符号所在管线号(必须与 pipelines 中某管线号一致，不确定给空字符串)", "x": 45.5, "y": 30, "label": "符号旁标注文字(读不到给空字符串)" }]
 }
 
 设备 type 只能从以下枚举选择：COLUMN(塔器) | REACTOR(反应器) | EXCHANGER(换热器) | FURNACE(加热炉) | PUMP(泵) | COMPRESSOR(压缩机) | TANK(储罐) | VESSEL(容器/回流罐/分液罐) | OTHER(其他)。
@@ -44,6 +45,11 @@ const SYSTEM_PROMPT = `你是石化工艺 PID（管道仪表流程图）图纸�
 2. fromEquipment/toEquipment 是后续自动画连线的唯一依据：请沿着每条管线的线条走向追踪两端连接到哪台设备（就近的设备位号）；箭头指向的一端是 toEquipment，另一端是 fromEquipment；无箭头时按工艺常识判断（如泵排出→换热器→塔进料）；
 3. 只要线条在图上连续可见，就必须给出 fromEquipment/toEquipment；仅当线条在图上中断/被遮挡无法追踪时才给空字符串；
 4. 文字信息（管线号/介质/规格）看不清时给空字符串即可，但连接关系必须尽力给全。
+
+管线内联符号识别（导入后会自动挂接到所在管线上并断开管线）：
+1. 画在管线线条上的串联符号必须逐个识别为 inlineSymbols：kind 枚举 valve(阀门：闸阀/截止阀/球阀/止回阀/调节阀/安全阀等) | fitting(管件：法兰/三通/过滤器/视镜/膨胀节/盲板等) | instrument(在线仪表：流量计/压力表/温度计/液位计等圆圈符号) | pump(画在管线上的小型管道泵符号)；
+2. pipelineCode = 该符号所在的管线号（沿线条就近归属）；x/y = 符号中心归一化坐标（同设备规则，必须给出）；
+3. 大型独立设备（有壳体尺寸的泵/压缩机等，由管线连接而非串在管线上）不属内联符号，仍输出到 equipments；
 
 识别纪律（必须遵守）：
 1. 只提取图上真实可见的信息，严禁编造或推测不存在的位号；看不清的字段给空字符串；
@@ -212,7 +218,33 @@ function normalizeResult(raw: Record<string, unknown>) {
     if (isoPoints.length >= LIMITS.isoPoints) break
   }
 
-  return { diagramName, unitName, equipments, pipelines, isoPoints }
+  return { diagramName, unitName, equipments, pipelines, isoPoints, inlineSymbols: normInline(raw, seenPipe) }
+}
+
+/** 内联符号清洗（管线上的阀门/管件/仪表/泵）：kind 白名单 + pipelineCode 防幻觉 + 位置归一化 */
+const INLINE_KINDS = ['valve', 'fitting', 'instrument', 'pump'] as const
+function normInline(raw: Record<string, unknown>, seenPipe: Set<string>) {
+  const inlineSymbols: { kind: string; pipelineCode: string; x: number | null; y: number | null; label: string }[] = []
+  const seen = new Set<string>()
+  for (const item of Array.isArray(raw.inlineSymbols) ? (raw.inlineSymbols as RawItem[]) : []) {
+    const kind = cleanCode(item.kind)
+    if (!(INLINE_KINDS as readonly string[]).includes(kind)) continue
+    const x = normPos(item.x)
+    const y = normPos(item.y)
+    const key = `${kind}@${Math.round(x ?? -1)},${Math.round(y ?? -1)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const pc = cleanCode(item.pipelineCode)
+    inlineSymbols.push({
+      kind,
+      pipelineCode: seenPipe.has(pc) ? pc : '',
+      x,
+      y,
+      label: cleanCode(item.label).slice(0, 30),
+    })
+    if (inlineSymbols.length >= LIMITS.inlineSymbols) break
+  }
+  return inlineSymbols
 }
 
 /**

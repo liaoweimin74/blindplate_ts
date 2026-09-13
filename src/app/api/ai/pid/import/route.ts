@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { buildPidLayout } from '@/lib/bp-pid-layout'
+import { autoMountInlineShapes, findMountTarget, layoutPolylineOf, mountShapeOnConn, type MountContent, type MountShape } from '@/lib/bp-pid-mount'
 import { normalizePidContent } from '@/lib/bp-types'
 import { jsonError, num, readBody, str } from '@/lib/bp-server-utils'
 
@@ -9,6 +10,17 @@ export const maxDuration = 60
 
 /** 设备类型白名单（与 bp-types EQUIP_TYPE_MAP 一致） */
 const EQUIP_TYPES = ['COLUMN', 'REACTOR', 'EXCHANGER', 'FURNACE', 'PUMP', 'COMPRESSOR', 'TANK', 'VESSEL', 'OTHER']
+
+/** 内联符号规格（Task 73 需求 3）：VLM 识别的管线串联符号 → 内建库 std 图元（挂接时自动旋转） */
+const INLINE_SPEC: Record<string, { stdId: string; w: number; h: number; label: string }> = {
+  valve: { stdId: 'vl-gate', w: 44, h: 20, label: '阀' },
+  fitting: { stdId: 'pp-flange', w: 30, h: 26, label: '管件' },
+  instrument: { stdId: 'in-field', w: 28, h: 26, label: '仪表' },
+  pump: { stdId: 'eq-pump-c', w: 40, h: 40, label: '泵' },
+}
+/** 与 bp-pid-layout 画布尺寸保持一致（server 端不 import client 组件） */
+const CANVAS_W = 1200
+const CANVAS_H = 700
 
 /** 归一化坐标/尺寸清洗：数字或数字字符串 → clamp 0~100；另要求 >0（尺寸为 0 无意义）；无效置 null */
 function normPos(v: unknown): number | null {
@@ -67,6 +79,16 @@ export async function POST(req: NextRequest) {
       pipelineCode: str(p.pipelineCode).trim().slice(0, 40),
       location: str(p.location).trim().slice(0, 60),
     }))
+    // 内联符号（管线上的阀门/管件/在线仪表/泵）：不建主数据，作为 std 图元挂接断开（extract 已白名单清洗，此处二次防御）
+    const inlineSymbols = (Array.isArray(body.inlineSymbols) ? body.inlineSymbols : [])
+      .map((s: Record<string, unknown>) => ({
+        kind: str(s.kind).trim(),
+        pipelineCode: str(s.pipelineCode).trim().slice(0, 40),
+        x: normPos(s.x),
+        y: normPos(s.y),
+        label: str(s.label).trim().slice(0, 30),
+      }))
+      .filter((s: { kind: string }) => INLINE_SPEC[s.kind])
 
     if (equipments.length === 0 && pipelines.length === 0 && isoPoints.length === 0) {
       return jsonError('没有可导入的数据（设备/管线/隔离点均为空）')
@@ -186,7 +208,96 @@ export async function POST(req: NextRequest) {
         .filter((pt) => pt.code && pointIdByCode.has(pt.code))
         .map((pt) => ({ id: pointIdByCode.get(pt.code)!, code: pt.code, name: pt.name, pipelineCode: pt.pipelineCode || null }))
 
-      const content = buildPidLayout(layoutEquips, layoutPipes, layoutPoints)
+      // 内联符号将追加为可旋转图元（LayoutShape 无 rotation），放宽为 MountContent 结构处理
+      const content = buildPidLayout(layoutEquips, layoutPipes, layoutPoints) as unknown as MountContent & {
+        marks: ReturnType<typeof buildPidLayout>['marks']
+      }
+
+      // ---- 5b. 内联符号挂接（Task 73 需求 3）：管线上的阀门/管件/仪表/泵自动挂接断开 ----
+      let inlineMounted = 0
+      let inlineSeq = 0
+      if (inlineSymbols.length > 0) {
+        const polyOf = layoutPolylineOf((id) => content.shapes.find((s) => s.id === id))
+        const inlineIds: { id: string; pipelineCode: string }[] = []
+        for (const sym of inlineSymbols) {
+          const spec = INLINE_SPEC[sym.kind]
+          const pipeId = sym.pipelineCode ? pipelineIdByCode.get(sym.pipelineCode) ?? null : null
+          const targetConn = pipeId != null ? content.connections.find((c) => c.pipelineId === pipeId) : undefined
+          // 位置：VLM 归一化坐标 → 画布；无坐标且有目标管线 → 该管线折线中段；无目标 → 画布中部待几何兜底
+          let cx = sym.x != null ? (sym.x / 100) * CANVAS_W : targetConn ? NaN : CANVAS_W / 2
+          let cy = sym.y != null ? (sym.y / 100) * CANVAS_H : targetConn ? NaN : CANVAS_H / 2 - 40
+          if (Number.isNaN(cx) || Number.isNaN(cy)) {
+            const pts = targetConn ? polyOf(targetConn) : null
+            if (pts && pts.length >= 2) {
+              const mid = pts[Math.floor(pts.length / 2)]
+              cx = (pts[0][0] + mid[0]) / 2
+              cy = (pts[0][1] + mid[1]) / 2
+            } else {
+              cx = CANVAS_W / 2
+              cy = CANVAS_H / 2 - 40
+            }
+          }
+          const sid = `s-i${++inlineSeq}`
+          content.shapes.push({
+            id: sid, type: 'std', stdId: spec.stdId,
+            x: Math.round(cx - spec.w / 2), y: Math.round(cy - spec.h / 2),
+            w: spec.w, h: spec.h,
+            label: sym.label || `${spec.label}-${inlineSeq}`,
+          } as MountShape)
+          inlineIds.push({ id: sid, pipelineCode: sym.pipelineCode })
+        }
+        // 定向挂接：给了所属管线的符号，中心投影到该管线各段最近点后断开粘合（逐个处理，段随挂接演化）
+        for (const { id: sid, pipelineCode } of inlineIds) {
+          if (!pipelineCode) continue
+          const pipeId = pipelineIdByCode.get(pipelineCode)
+          if (pipeId == null) continue
+          const shape = content.shapes.find((s) => s.id === sid)
+          if (!shape) continue
+          const cx = shape.x + shape.w / 2
+          const cy = shape.y + shape.h / 2
+          let bestPt: { x: number; y: number } | null = null
+          let bestD = Infinity
+          for (const c of content.connections) {
+            if (c.pipelineId !== pipeId) continue
+            const pts = polyOf(c)
+            if (!pts || pts.length < 2) continue
+            for (let i = 0; i < pts.length - 1; i++) {
+              const [x1, y1] = pts[i]
+              const [x2, y2] = pts[i + 1]
+              const dx = x2 - x1
+              const dy = y2 - y1
+              const L2 = dx * dx + dy * dy
+              const t = L2 === 0 ? 0 : Math.max(0, Math.min(1, ((cx - x1) * dx + (cy - y1) * dy) / L2))
+              const px = x1 + t * dx
+              const py = y1 + t * dy
+              const d = Math.hypot(cx - px, cy - py)
+              if (d < bestD) {
+                bestD = d
+                bestPt = { x: Math.round(px), y: Math.round(py) }
+              }
+            }
+          }
+          if (!bestPt) continue
+          shape.x = bestPt.x - Math.round(shape.w / 2)
+          shape.y = bestPt.y - Math.round(shape.h / 2)
+          const hit = findMountTarget(content, sid, polyOf)
+          if (hit) {
+            const r = mountShapeOnConn(content, sid, hit, () => `c-i${++inlineSeq}`)
+            content.shapes = r.shapes
+            content.connections = r.connections
+            inlineMounted++
+          }
+        }
+        // 几何兜底：未给所属管线但位置贴线的符号自动吸附（挂接数 = 新增旋转图元数）
+        const rotatedBefore = content.shapes.filter((s) => (s as { rotation?: number }).rotation != null).length
+        const rest = autoMountInlineShapes(content, polyOf, () => `c-i${++inlineSeq}`)
+        content.shapes = rest.shapes
+        content.connections = rest.connections
+        const rotatedAfter = content.shapes.filter((s) => (s as { rotation?: number }).rotation != null).length
+        inlineMounted += rotatedAfter - rotatedBefore
+      }
+      const inlineTotal = inlineSymbols.length
+
       const normalized = normalizePidContent(content)
       if (!normalized) throw new Error('组态图 content 生成异常')
 
@@ -197,7 +308,7 @@ export async function POST(req: NextRequest) {
         data: { name: diagramName, unitId: theUnitId, content: normalized, createdBy: createdBy || null },
       })
 
-      return { unit, equipmentResults, pipelineResults, pointResults, diagram, unconnectedPipes }
+      return { unit, equipmentResults, pipelineResults, pointResults, diagram, unconnectedPipes, inlineTotal, inlineMounted }
     })
 
     return NextResponse.json(
@@ -213,6 +324,8 @@ export async function POST(req: NextRequest) {
           connCount: result.diagram.content ? JSON.parse(result.diagram.content).connections.length : 0,
           markCount: result.diagram.content ? JSON.parse(result.diagram.content).marks.length : 0,
           unconnectedPipes: result.unconnectedPipes,
+          inlineSymbols: result.inlineTotal,
+          inlineMounted: result.inlineMounted,
         },
       },
       { status: 201 },

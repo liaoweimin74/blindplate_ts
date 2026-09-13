@@ -7,8 +7,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Factory, Fan, FileSignature,
-  FlaskConical, History, Hourglass, ListChecks, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Eye, EyeOff, Factory, Fan, FileSignature,
+  FlaskConical, History, Hourglass, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, Move, MoveDiagonal, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
   TicketCheck, Trash2, Triangle, Wand2, Workflow, X as CloseIcon,
 } from 'lucide-react'
@@ -51,6 +51,17 @@ import {
   type StdMajor, type StdSymbol,
 } from '@/components/bp/std'
 import { contentInsetBox } from '@/lib/bp-pid-layout'
+import {
+  anchorNameForPhysical,
+  findMountTarget,
+  isMountableShape,
+  MOUNT_SNAP_DIST,
+  mountShapeOnConn,
+  rotateAnchorName,
+  unmountShapeFromPipe,
+  type MountTarget,
+  type PolylineOf,
+} from '@/lib/bp-pid-mount'
 
 // ============ 隔离点实时状态样式（与后端/演示数据一致，对外导出供大屏/看板复用） ============
 export type IsoState = 'idle' | 'planned' | 'approved' | 'working' | 'blinded' | 'opened'
@@ -90,6 +101,7 @@ export interface PidShape {
   designH?: number       // 设计空间高
   parts?: SymbolPart[]   // 组成部件快照（放置时固化，渲染时按 w/h 缩放）
   flip?: boolean         // 直线专用：false=包围盒\对角线（左上→右下），true=/对角线（左下→右上）；缺省 false 向后兼容旧数据
+  rotation?: number      // 挂接旋转角（度，90° 倍数）：管线挂接自动对齐产生（Task 73），渲染/锚点随中心旋转
 }
 
 /** 自定义图元组成部件（图元编辑器设计空间坐标；type 复用 PidShape 类型，支持工艺图元与基础图形组合） */
@@ -226,6 +238,11 @@ interface StatusResp {
   points: StatusPoint[]
   generatedAt?: string
 }
+
+/** 生成主数据响应（需求 2）：按图元/连线/挂标标识幂等生成设备/管线/隔离点并回填绑定 */
+interface GenMasterItem { code: string; id: number | null; created: boolean; note?: string }
+interface GenMasterGroup { created: number; linked: number; skipped: number; items: GenMasterItem[] }
+interface GenMasterResp { equipments: GenMasterGroup; pipelines: GenMasterGroup; isoPoints: GenMasterGroup }
 
 /** 点位作业全生命周期档案链（GET /api/point-dossier 返回） */
 interface DossierChain {
@@ -438,12 +455,26 @@ export const CONN_END_SNAP_DIST = 48
 /** 图元某锚点的绝对坐标：先内收到符号内容真实边界（消除留白悬空），再取四向中点：top=(x+w/2,y) right=(x+w,y+h/2) bottom=(x+w/2,y+h) left=(x,y+h/2) */
 export function anchorPoint(s: PidShape, a: Anchor): RoutePoint {
   const b = contentInsetBox(s)
-  switch (a) {
-    case 'top':    return { x: b.x + b.w / 2, y: b.y }
-    case 'bottom': return { x: b.x + b.w / 2, y: b.y + b.h }
-    case 'left':   return { x: b.x,           y: b.y + b.h / 2 }
-    case 'right':  return { x: b.x + b.w,     y: b.y + b.h / 2 }
-  }
+  const base: RoutePoint =
+    a === 'top' ? { x: b.x + b.w / 2, y: b.y }
+    : a === 'bottom' ? { x: b.x + b.w / 2, y: b.y + b.h }
+    : a === 'left' ? { x: b.x, y: b.y + b.h / 2 }
+    : { x: b.x + b.w, y: b.y + b.h / 2 }
+  const rot = s.rotation ?? 0
+  if (!rot) return base
+  // 挂接旋转（90° 倍数，Task 73）：锚点绕图元中心旋转
+  const cx = s.x + s.w / 2
+  const cy = s.y + s.h / 2
+  const rad = (rot * Math.PI) / 180
+  const dx = base.x - cx
+  const dy = base.y - cy
+  return { x: cx + dx * Math.cos(rad) - dy * Math.sin(rad), y: cy + dx * Math.sin(rad) + dy * Math.cos(rad) }
+}
+
+/** 挂接旋转后的物理锚点名：routeConnection 的水平/垂直路由判定按物理朝向（非锚点名） */
+function physAnchor(s: PidShape | undefined, a: Anchor): Anchor {
+  const rot = s?.rotation ?? 0
+  return rot ? rotateAnchorName(a, rot) : a
 }
 
 /** 锚点向外延伸 d 像素（自环绕行用） */
@@ -701,11 +732,13 @@ export function autoLayoutContent(ct: PidContent): PidContent {
     if (!fp || !tp) return null
     const fa = useNew ? (newAnchors.get(c.id)?.[0] ?? c.fromAnchor) : c.fromAnchor
     const ta = useNew ? (newAnchors.get(c.id)?.[1] ?? c.toAnchor) : c.toAnchor
-    const a = anchorPoint({ ...f, x: fp.x, y: fp.y }, fa)
-    const b = anchorPoint({ ...t, x: tp.x, y: tp.y }, ta)
+    const fs = { ...f, x: fp.x, y: fp.y }
+    const ts = { ...t, x: tp.x, y: tp.y }
+    const a = anchorPoint(fs, fa)
+    const b = anchorPoint(ts, ta)
     return routeConnection(
-      { x: a.x, y: a.y, anchor: fa },
-      { x: b.x, y: b.y, anchor: ta },
+      { x: a.x, y: a.y, anchor: physAnchor(fs, fa) },
+      { x: b.x, y: b.y, anchor: physAnchor(ts, ta) },
       c.fromShape === c.toShape,
       useNew ? undefined : c.midOverride,
     )
@@ -815,7 +848,15 @@ function StdLibCell({ sym, active, onPick, onEnter, onLeave }: {
 }
 
 // ============ 图元绘制（工艺图元 + 基础图形；fill/stroke 可由属性面板自定义） ============
+/** 图元绘制外壳：挂接旋转（90° 倍数）时整体绕图元中心旋转，锚点/连线随 anchorPoint/physAnchor 同步适配（Task 73） */
 export function ShapeBody({ s }: { s: PidShape }) {
+  const inner = shapeBodyInner(s)
+  const rot = s.rotation ?? 0
+  if (!rot) return inner
+  return <g transform={`rotate(${rot} ${s.x + s.w / 2} ${s.y + s.h / 2})`}>{inner}</g>
+}
+
+function shapeBodyInner(s: PidShape) {
   const { x, y, w, h } = s
   const stroke = s.stroke || STROKE
   const fill = s.fill || '#fff'
@@ -925,7 +966,8 @@ export function ShapeBody({ s }: { s: PidShape }) {
 }
 
 /** 隔离点标注：编辑态 rose 菱形 + code；查看态按实时状态着色 + stateLabel chip（svg text + 双层 rect 底色） */
-export function MarkGlyph({ m, edit, state, stateLabel }: { m: PidMark; edit: boolean; state: IsoState; stateLabel: string }) {
+/** hideText：查看态「隐藏隔离点文字」开关生效时仅绘状态色菱形（图标颜色即状态），文字信息改由悬停浮层展示；编辑态不受影响 */
+export function MarkGlyph({ m, edit, state, stateLabel, hideText }: { m: PidMark; edit: boolean; state: IsoState; stateLabel: string; hideText?: boolean }) {
   const d = 7
   const diamond = `${m.x},${m.y - d} ${m.x + d},${m.y} ${m.x},${m.y + d} ${m.x - d},${m.y}`
   if (edit) {
@@ -946,11 +988,15 @@ export function MarkGlyph({ m, edit, state, stateLabel }: { m: PidMark; edit: bo
   return (
     <g>
       <polygon points={diamond} fill={style.fill} stroke={style.stroke} strokeWidth={1.6} />
-      <rect x={m.x - chipW / 2} y={m.y + 11} width={chipW} height={16} rx={3} fill={style.fill} stroke={style.stroke} strokeWidth={0.8} />
-      <text x={m.x} y={m.y + 22.5} textAnchor="middle" fontSize={10} fill={style.line}>{label}</text>
-      <text x={m.x} y={m.y + 40} textAnchor="middle" fontSize={10.5} fill="#78716c" stroke="#fff" strokeWidth={3} paintOrder="stroke">
-        {m.code}
-      </text>
+      {!hideText && (
+        <>
+          <rect x={m.x - chipW / 2} y={m.y + 11} width={chipW} height={16} rx={3} fill={style.fill} stroke={style.stroke} strokeWidth={0.8} />
+          <text x={m.x} y={m.y + 22.5} textAnchor="middle" fontSize={10} fill={style.line}>{label}</text>
+          <text x={m.x} y={m.y + 40} textAnchor="middle" fontSize={10.5} fill="#78716c" stroke="#fff" strokeWidth={3} paintOrder="stroke">
+            {m.code}
+          </text>
+        </>
+      )}
     </g>
   )
 }
@@ -1931,6 +1977,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [canvasW, setCanvasW] = useState(0) // 浮动工具条定位 clamp 用
   const suppressClickAtRef = useRef(0) // 平移拖拽结束时刻：吞掉紧随 pointerup 的 click，防误点挂标/误取消选中
 
+  // ---- 查看态隔离点：文字显示/隐藏开关（隐藏时仅显示状态色菱形，状态由图标颜色承载；悬停浮层展示编号/状态/关联单据） ----
+  const [markTextHidden, setMarkTextHidden] = useState(false)
+  const [markHover, setMarkHover] = useState<{ id: string; x: number; y: number } | null>(null)
+
   // ---- 俯瞰图（工具栏开关，画布右下角显示：整图缩略 + 当前视口框，点击/拖拽快速定位） ----
   const [minimapOpen, setMinimapOpen] = useState(false)
   const minimapNavRef = useRef(false) // 俯瞰图按下拖拽导航中（pointer capture 保证移动/抬起事件回到缩略图）
@@ -1947,6 +1997,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
   // ---- 管线号标注沿线拖动（labelT 归一化弧长参数；拖拽中连线徽章高亮） ----
   const [draggingLabelId, setDraggingLabelId] = useState<string | null>(null)
+
+  // ---- 管线挂接（Task 73）：可挂接图元拖到管线上自动旋转对齐并断开粘合；mountHint = 拖拽中的吸附预览高亮连线 id ----
+  const [mountHint, setMountHint] = useState<string | null>(null)
 
   // ---- 连线交互增强：中段拖拽（竖线横向/横线纵向）+ 端点拖拽改接锚点 ----
   const [draggingConnSeg, setDraggingConnSeg] = useState<string | null>(null)
@@ -1996,6 +2049,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   }, [readOnly])
   const [newForm, setNewForm] = useState<{ name: string; unitId: string }>({ name: '', unitId: 'none' })
   const [creating, setCreating] = useState(false)
+  // ---- 生成主数据（需求 2）：按图元/连线/挂标标识幂等生成设备/管线/隔离点并回填绑定 ----
+  const [genMasterBusy, setGenMasterBusy] = useState(false)
+  const [genMasterOpen, setGenMasterOpen] = useState(false)
+  const [genMasterResult, setGenMasterResult] = useState<GenMasterResp | null>(null)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameVal, setRenameVal] = useState('')
   const [renaming, setRenaming] = useState(false)
@@ -2438,6 +2495,31 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }
 
+  /** 生成主数据（需求 2）：基于已保存的图内容，按标识幂等生成/关联设备、管线、隔离点，回填绑定后重新载入 */
+  const runGenerateMaster = async () => {
+    if (!activeId || genMasterBusy) return
+    if (dirtyRef.current) {
+      toast({ title: '请先保存图', description: '生成主数据基于已保存的图内容，请先点击右上角保存', variant: 'destructive' })
+      return
+    }
+    setGenMasterBusy(true)
+    try {
+      const r = await apiPost<GenMasterResp>(`/api/pid-diagrams/${activeId}/generate-master`, {})
+      setGenMasterResult(r)
+      setGenMasterOpen(true)
+      await loadBindOptions()
+      await selectDiagram(activeId) // 重新载入回填后的 content（图元/连线/挂标与主数据一一对应）
+      toast({
+        title: '主数据生成完成',
+        description: `设备：新建 ${r.equipments.created}/关联 ${r.equipments.linked} · 管线：新建 ${r.pipelines.created}/关联 ${r.pipelines.linked} · 隔离点：新建 ${r.isoPoints.created}/关联 ${r.isoPoints.linked}`,
+      })
+    } catch (err) {
+      toast({ title: '生成主数据失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setGenMasterBusy(false)
+    }
+  }
+
   const switchMode = async (m: 'edit' | 'view') => {
     if (m === mode) return
     if (dirtyRef.current && activeIdRef.current) {
@@ -2571,8 +2653,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const a = anchorPoint(from, c.fromAnchor)
       const b = anchorPoint(to, c.toAnchor)
       const pts = routeConnection(
-        { x: a.x, y: a.y, anchor: c.fromAnchor },
-        { x: b.x, y: b.y, anchor: c.toAnchor },
+        { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
+        { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
         c.fromShape === c.toShape,
         c.midOverride,
       )
@@ -2727,12 +2809,18 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const deleteSelection = (sel: Selection) => {
     if (!activeIdRef.current) return
     if (sel.kind === 'shape') {
-      // 删除图元时级联删除其上所有连线
-      mutate((prev) => ({
-        shapes: prev.shapes.filter((s) => s.id !== sel.id),
-        connections: prev.connections.filter((c) => c.fromShape !== sel.id && c.toShape !== sel.id),
-        marks: prev.marks,
-      }))
+      // 删除图元时级联删除其上所有连线；挂接态图元（Task 73）先合并两段闭合管线，再清除残留连线
+      mutate((prev) => {
+        const s = prev.shapes.find((x) => x.id === sel.id)
+        const connsAfterMerge = s && isMountableShape(s)
+          ? unmountShapeFromPipe(prev, sel.id, polylineOfRef.current).content.connections
+          : prev.connections
+        return {
+          shapes: prev.shapes.filter((x) => x.id !== sel.id),
+          connections: connsAfterMerge.filter((c) => c.fromShape !== sel.id && c.toShape !== sel.id),
+          marks: prev.marks,
+        }
+      })
     } else if (sel.kind === 'conn') {
       mutate((prev) => ({ ...prev, connections: prev.connections.filter((c) => c.id !== sel.id) }))
     } else {
@@ -2924,6 +3012,62 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }))
   }
 
+  /** 连线折线提供器（挂接几何用，Task 73）：与渲染同源（anchorPoint 旋转感知 + physAnchor + routeConnection） */
+  const polylineOf: PolylineOf = useCallback((c) => {
+    const ct = contentRef.current
+    const f = ct.shapes.find((x) => x.id === c.fromShape)
+    const t = ct.shapes.find((x) => x.id === c.toShape)
+    if (!f || !t) return null
+    const a = anchorPoint(f, c.fromAnchor)
+    const b = anchorPoint(t, c.toAnchor)
+    return routeConnection(
+      { x: a.x, y: a.y, anchor: physAnchor(f, c.fromAnchor) },
+      { x: b.x, y: b.y, anchor: physAnchor(t, c.toAnchor) },
+      c.fromShape === c.toShape,
+      c.midOverride,
+    )
+  }, [])
+  const polylineOfRef = useRef(polylineOf)
+  polylineOfRef.current = polylineOf
+
+  /**
+   * 可挂接图元拖拽结束（Task 73 挂接语义——「移动或删除阀门时管线自动闭合」）：
+   * 挂接态图元每次拖动落定 → 先解除挂接（两段合并闭合管线）→ 再按新落点重新判定：
+   * 落点在某条管线上 → 重新旋转对齐并断开粘合（沿管滑动/跨拐角/换管均为干净状态）；
+   * 落点不在管线上 → 保持闭合、旋转复位。
+   */
+  const resolveMountAfterDrag = (shapeId: string) => {
+    const ct = contentRef.current
+    const cur = ct.shapes.find((x) => x.id === shapeId)
+    if (!cur || !isMountableShape(cur)) return
+    // 1. 若挂接态先闭合：两段合并恢复原管线（单侧残段一并清除）；未挂接则跳过
+    const ownSegs = ct.connections.filter((c) => c.fromShape === shapeId || c.toShape === shapeId)
+    let conns = ct.connections
+    let wasMounted = false
+    if (ownSegs.length > 0) {
+      const u = unmountShapeFromPipe({ shapes: ct.shapes, connections: ct.connections }, shapeId, polylineOfRef.current)
+      conns = u.content.connections.filter((c) => c.fromShape !== shapeId && c.toShape !== shapeId)
+      wasMounted = true
+    }
+    // 2. 按新落点判定挂接（自身已无连线段，findMountTarget 天然不会吸附到旧段）
+    const hit = findMountTarget({ shapes: ct.shapes, connections: conns }, shapeId, polylineOfRef.current)
+    if (hit) {
+      const r = mountShapeOnConn({ shapes: ct.shapes, connections: conns }, shapeId, hit, () => uid('c'))
+      mutate((prev) => ({ ...prev, shapes: r.shapes, connections: r.connections }))
+      const pipe = pipeOptionsRef.current.find((p) => p.id === hit.conn.pipelineId)
+      toast({ title: '已挂接管线', description: `${pipe?.code ?? '管线'} 已在图元处断开并与两端粘合；拖离或删除图元时管线自动闭合` })
+      return
+    }
+    if (wasMounted) {
+      mutate((prev) => ({
+        ...prev,
+        connections: conns,
+        shapes: prev.shapes.map((x) => (x.id === shapeId ? { ...x, rotation: undefined } : x)),
+      }))
+      toast({ title: '已解除管线挂接', description: '管线两端自动闭合，图元旋转已复位' })
+    }
+  }
+
   // ---- 拖拽移动（图元 / 标注） ----
   const startDragShape = (e: React.PointerEvent<SVGElement>, s: PidShape) => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
@@ -2944,11 +3088,27 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         ...prev,
         shapes: prev.shapes.map((sh) => (sh.id === s.id ? { ...sh, x: nx, y: ny } : sh)),
       }))
+      // 挂接吸附预览（Task 73）：可挂接图元拖动时检测落点管线，命中则高亮该连线
+      if (isMountableShape(s)) {
+        const probe = { ...s, x: nx, y: ny }
+        const ct = contentRef.current
+        const others = ct.connections.filter((c) => c.fromShape !== s.id && c.toShape !== s.id)
+        const hit = findMountTarget(
+          { shapes: ct.shapes.map((sh) => (sh.id === s.id ? probe : sh)), connections: others },
+          s.id,
+          polylineOfRef.current,
+        )
+        setMountHint(hit ? hit.conn.id : null)
+      }
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
-      if (moved) setDirty(true)
+      setMountHint(null)
+      if (moved) {
+        setDirty(true)
+        if (isMountableShape(s)) resolveMountAfterDrag(s.id)
+      }
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -2999,8 +3159,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const a = anchorPoint(from, c.fromAnchor)
     const b = anchorPoint(to, c.toAnchor)
     const pts = routeConnection(
-      { x: a.x, y: a.y, anchor: c.fromAnchor },
-      { x: b.x, y: b.y, anchor: c.toAnchor },
+      { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
+      { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
       c.fromShape === c.toShape,
     )
     let moved = false
@@ -3326,8 +3486,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const a = anchorPoint(from, c.fromAnchor)
       const b = anchorPoint(to, c.toAnchor)
       const pts = routeConnection(
-        { x: a.x, y: a.y, anchor: c.fromAnchor },
-        { x: b.x, y: b.y, anchor: c.toAnchor },
+        { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
+        { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
         c.fromShape === c.toShape,
         c.midOverride,
       )
@@ -3351,6 +3511,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
             markerStart={arrowStart}
             markerEnd={arrowEnd}
           />
+          {/* 挂接吸附预览（Task 73）：可挂接图元拖到该管线上时 emerald 高亮提示即将断开粘合 */}
+          {mountHint === c.id && (
+            <polyline points={ptsAttr} fill="none" stroke="#10b981" strokeWidth={6} opacity={0.35}
+              strokeLinecap="round" pointerEvents="none" />
+          )}
           {mode === 'edit' && (
             <polyline
               points={ptsAttr} fill="none" stroke="transparent" strokeWidth={12} className="cursor-pointer"
@@ -3394,8 +3559,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const a = anchorPoint(from, c.fromAnchor)
       const b = anchorPoint(to, c.toAnchor)
       const pts = routeConnection(
-        { x: a.x, y: a.y, anchor: c.fromAnchor },
-        { x: b.x, y: b.y, anchor: c.toAnchor },
+        { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
+        { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
         c.fromShape === c.toShape,
         c.midOverride,
       )
@@ -3512,24 +3677,28 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       )
     })
 
-  // ---- 渲染：隔离点标注（编辑态可拖拽选中；查看态可点击打开作业档案抽屉） ----
+  // ---- 渲染：隔离点标注（编辑态可拖拽选中；查看态可点击打开作业档案抽屉 + 悬停浮层） ----
   const renderMarks = () =>
     content.marks.map((m) => {
       const st = statusMap.get(m.id)
       const state = normalizeState(st?.state)
       const isSel = selected?.kind === 'mark' && selected.id === m.id
+      const hideText = mode !== 'edit' && markTextHidden
       return (
         <g
           key={m.id}
           onPointerDown={(e) => startDragMark(e, m)}
           onClick={(e) => handleMarkClick(e, m.id)}
+          onPointerEnter={mode !== 'edit' ? (e) => setMarkHover({ id: m.id, x: e.clientX, y: e.clientY }) : undefined}
+          onPointerMove={mode !== 'edit' ? (e) => setMarkHover((prev) => (prev?.id === m.id ? { id: m.id, x: e.clientX, y: e.clientY } : prev)) : undefined}
+          onPointerLeave={mode !== 'edit' ? () => setMarkHover((prev) => (prev?.id === m.id ? null : prev)) : undefined}
           className={mode === 'edit' ? 'cursor-move' : 'cursor-pointer'}
         >
-          {mode !== 'edit' && <title>点击查看该点位盲板作业全生命周期档案</title>}
+          {mode !== 'edit' && !markTextHidden && <title>点击查看该点位盲板作业全生命周期档案</title>}
           {isSel && mode === 'edit' && (
             <circle cx={m.x} cy={m.y} r={11} fill="none" stroke={TEAL} strokeWidth={1.2} strokeDasharray="3 2" />
           )}
-          <MarkGlyph m={m} edit={mode === 'edit'} state={state} stateLabel={st?.stateLabel ?? ''} />
+          <MarkGlyph m={m} edit={mode === 'edit'} state={state} stateLabel={st?.stateLabel ?? ''} hideText={hideText} />
           {/* 编辑态：挂标当前所属管线号小徽章（自动计算/确认更新后实时可见） */}
           {mode === 'edit' && m.masterPointId != null && (() => {
             const mp = masterById.get(m.masterPointId)
@@ -3702,6 +3871,15 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               <Button
                 variant="outline"
                 className="h-10 w-10 p-0"
+                title="生成主数据：按图元位号/连线两端/挂标编码，自动生成并关联设备、管线、隔离点主数据（幂等：已存在的直接复用；需先保存图）"
+                disabled={!activeId || genMasterBusy}
+                onClick={() => void runGenerateMaster()}
+              >
+                {genMasterBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 w-10 p-0"
                 title="自动布局：按管线连接关系自左向右分层排列图元（未连线图元在下方网格排列），连线锚点自动适配，隔离点标注跟随所在管线"
                 disabled={!activeId || content.shapes.length === 0}
                 onClick={() => setLayoutConfirmOpen(true)}
@@ -3728,6 +3906,19 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 onClick={() => setStatusTick((t) => t + 1)}
               >
                 <RefreshCw className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className={cn('h-9 w-9 p-0', markTextHidden && 'border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100')}
+                title={markTextHidden
+                  ? '显示隔离点文字：恢复显示状态标签与点位编号'
+                  : '隐藏隔离点文字：仅显示状态色图标（颜色即状态），悬停图标查看编号与状态详情'}
+                aria-pressed={markTextHidden}
+                aria-label={markTextHidden ? '显示隔离点文字' : '隐藏隔离点文字'}
+                disabled={!activeId}
+                onClick={() => setMarkTextHidden((v) => !v)}
+              >
+                {markTextHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
               </Button>
             </div>
           )}
@@ -4118,8 +4309,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       const a = anchorPoint(from, selectedConn.fromAnchor)
                       const b = anchorPoint(to, selectedConn.toAnchor)
                       const pts = routeConnection(
-                        { x: a.x, y: a.y, anchor: selectedConn.fromAnchor },
-                        { x: b.x, y: b.y, anchor: selectedConn.toAnchor },
+                        { x: a.x, y: a.y, anchor: physAnchor(from, selectedConn.fromAnchor) },
+                        { x: b.x, y: b.y, anchor: physAnchor(to, selectedConn.toAnchor) },
                         selectedConn.fromShape === selectedConn.toShape,
                         selectedConn.midOverride,
                       )
@@ -4168,15 +4359,15 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       const b = anchorPoint(to, c.toAnchor)
                       const otherShapeId = connEndDrag.which === 'from' ? c.toShape : c.fromShape
                       const fixed = connEndDrag.which === 'from'
-                        ? { x: b.x, y: b.y, anchor: c.toAnchor }
-                        : { x: a.x, y: a.y, anchor: c.fromAnchor }
+                        ? { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) }
+                        : { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) }
                       const movingAnchor = connEndDrag.hover?.anchor
                         ?? (connEndDrag.which === 'from' ? c.fromAnchor : c.toAnchor)
                       const hoverShape = connEndDrag.hover ? shapeMap.get(connEndDrag.hover.shapeId) : null
                       let previewPts: [number, number][]
                       if (hoverShape && connEndDrag.hover) {
                         const mp = anchorPoint(hoverShape, connEndDrag.hover.anchor)
-                        const moving = { x: mp.x, y: mp.y, anchor: movingAnchor }
+                        const moving = { x: mp.x, y: mp.y, anchor: physAnchor(hoverShape, movingAnchor) }
                         previewPts = connEndDrag.which === 'from'
                           ? routeConnection(moving, fixed, connEndDrag.hover.shapeId === otherShapeId)
                           : routeConnection(fixed, moving, connEndDrag.hover.shapeId === otherShapeId)
@@ -5158,6 +5349,44 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         </DialogContent>
       </Dialog>
 
+      {/* 生成主数据结果弹窗（需求 2）：新建/关联/跳过明细 */}
+      <Dialog open={genMasterOpen} onOpenChange={setGenMasterOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Database className="h-4 w-4 text-teal-700" /> 主数据生成结果
+            </DialogTitle>
+            <DialogDescription>
+              按图元位号/连线两端/挂标编码幂等生成并关联；图元、连线、挂标的绑定已自动回填并重新载入组态图
+            </DialogDescription>
+          </DialogHeader>
+          {genMasterResult && (
+            <div className="grid gap-3">
+              {([['设备', genMasterResult.equipments], ['管线', genMasterResult.pipelines], ['隔离点', genMasterResult.isoPoints]] as const).map(([label, g]) => (
+                <div key={label} className="rounded-lg border border-stone-200 p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-stone-600">
+                    <span>{label}</span>
+                    <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">新建 {g.created}</Badge>
+                    <Badge variant="outline" className="border-teal-200 bg-teal-50 text-teal-700">关联 {g.linked}</Badge>
+                    {g.skipped > 0 && <Badge variant="outline" className="border-stone-200 bg-stone-50 text-stone-500">跳过 {g.skipped}</Badge>}
+                  </div>
+                  {g.items.length > 0 && (
+                    <div className="bp-thin-scrollbar mt-2 max-h-32 overflow-y-auto">
+                      {g.items.map((it, i) => (
+                        <div key={`${it.code}-${i}`} className="flex items-center justify-between gap-2 py-0.5 text-xs">
+                          <span className="font-mono text-stone-700">{it.code}</span>
+                          <span className="truncate text-stone-400">{it.note ?? (it.created ? '新建' : '关联')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* 点位盲板作业全生命周期抽屉（盲板状态页点击挂标触发） */}
       <Sheet open={dossierOpen} onOpenChange={setDossierOpen}>
         <SheetContent className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
@@ -5202,6 +5431,50 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* 查看态隔离点悬停浮层（fixed 跟随指针，pointer-events-none 不拦截画布事件）：隐藏文字模式下编号/状态/关联单据的唯一入口 */}
+      {markHover && mode !== 'edit' && (() => {
+        const hm = content.marks.find((x) => x.id === markHover.id)
+        if (!hm) return null
+        const hst = statusMap.get(hm.id)
+        const hstate = normalizeState(hst?.state)
+        const hstyle = ISO_STATE_STYLE[hstate]
+        const FLIP_W = 264
+        const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
+        const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+        const left = Math.max(8, Math.min(markHover.x + 14, vw - FLIP_W - 10))
+        const top = Math.max(8, Math.min(markHover.y + 16, vh - 190))
+        const hasDoc = !!(hst?.requestCode || hst?.schemeCode || hst?.ticketCode)
+        return (
+          <div
+            role="tooltip"
+            className="pointer-events-none fixed z-50 w-[264px] rounded-lg border border-stone-200 bg-white/95 p-3 shadow-xl backdrop-blur"
+            style={{ left, top }}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                aria-hidden
+                className="inline-block h-3 w-3 shrink-0 rotate-45 rounded-[2px] border"
+                style={{ background: hstyle.fill, borderColor: hstyle.stroke }}
+              />
+              <span className="font-mono text-sm font-semibold text-stone-800">{hm.code}</span>
+              {hm.name && <span className="truncate text-xs text-stone-500">{hm.name}</span>}
+            </div>
+            <div className="mt-2 flex items-center gap-1.5 text-xs">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: hstyle.stroke }} />
+              <span className="font-medium" style={{ color: hstyle.line }}>{hst?.stateLabel || hstyle.legend}</span>
+            </div>
+            <div className="mt-1.5 grid gap-0.5 text-[11px] leading-relaxed text-stone-500">
+              {hst?.requestCode && <div>作业需求：{hst.requestCode}</div>}
+              {hst?.schemeCode && <div>处置方案：{hst.schemeCode}</div>}
+              {hst?.ticketCode && <div>作业票：{hst.ticketCode}</div>}
+              {hst?.blindCode && <div>盲板编号：{hst.blindCode}</div>}
+              {!hasDoc && <div>暂无进行中的盲板作业</div>}
+            </div>
+            <div className="mt-2 border-t border-stone-100 pt-1.5 text-[10px] text-stone-400">点击图标查看该点位盲板作业全生命周期档案</div>
+          </div>
+        )
+      })()}
     </Card>
     </div>
   )

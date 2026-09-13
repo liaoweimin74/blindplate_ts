@@ -177,6 +177,8 @@ export interface PidShape {
   w: number
   h: number
   label: string
+  /** 挂接旋转角（度，90° 倍数）：管线挂接自动对齐产生（Task 73），渲染/锚点随中心旋转 */
+  rotation?: number
 }
 
 /** PID 画布连线 */
