@@ -5,10 +5,13 @@ import { api, apiGet } from '@/lib/bp-api'
 import { BpUser, ModuleProps, ROLE_MAP } from '@/lib/bp-types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   LayoutDashboard, ClipboardList, FileSignature, TicketCheck, BookOpen,
   BarChart3, Database, Settings, Smartphone, Menu, X, Factory, ChevronDown, ShieldCheck,
   RefreshCw, ShieldAlert, ListChecks, FlaskConical, DraftingCompass,
+  User, KeyRound, Eye, EyeOff,
 } from 'lucide-react'
 
 import DashboardModule from '@/components/bp/dashboard'
@@ -131,16 +134,30 @@ const ROLE_TIP_MAP: Record<string, string> = {
 /** 验证码签发结果 */
 interface CaptchaPayload { captchaId: string; svg: string }
 
+/** 演示账号下拉排序（按业务层级：管理员 → 领导 → 工程师 → 审核 → 作业/监护 → 验收） */
+const ROLE_SORT: Record<string, number> = { ADMIN: 0, MANAGER: 1, ENGINEER: 2, REVIEWER: 3, OPERATOR: 4, GUARDIAN: 5, ACCEPTOR: 6 }
+
 function LoginPage({ onLogin }: { onLogin: (u: BpUser) => void }) {
   const [users, setUsers] = useState<BpUser[]>([])
-  const [selected, setSelected] = useState<BpUser | null>(null)
-  const [password, setPassword] = useState('123456')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPwd, setShowPwd] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   // 图形验证码（一次性：任意一次登录尝试后必须刷新）
   const [captcha, setCaptcha] = useState<CaptchaPayload | null>(null)
   const [captchaInput, setCaptchaInput] = useState('')
   const [captchaLoading, setCaptchaLoading] = useState(false)
+
+  const sortedUsers = useMemo(
+    () => [...users].sort((a, b) => (ROLE_SORT[a.role] ?? 99) - (ROLE_SORT[b.role] ?? 99)),
+    [users],
+  )
+  // 手动输入的用户名若命中内建账号，则下拉同步选中并显示角色提示
+  const matched = useMemo(
+    () => users.find((u) => u.username === username.trim()) ?? null,
+    [users, username],
+  )
 
   const loadCaptcha = useCallback(async () => {
     setCaptchaLoading(true)
@@ -158,11 +175,11 @@ function LoginPage({ onLogin }: { onLogin: (u: BpUser) => void }) {
       if (cancelled) return
       const active = list.filter((u) => u.active !== false)
       setUsers(active)
-      // 记住上次登录账号：自动选中
+      // 记住上次登录账号：仅预填用户名（密码不预填，保持正式登录形态）
       try {
         const lastId = localStorage.getItem('bp_last_user_id')
         const last = active.find((u) => u.id === lastId)
-        if (last) setSelected(last)
+        if (last) setUsername(last.username)
       } catch { /* ignore */ }
     }).catch(() => { if (!cancelled) setError('加载用户失败，请刷新重试') })
     return () => { cancelled = true }
@@ -170,8 +187,19 @@ function LoginPage({ onLogin }: { onLogin: (u: BpUser) => void }) {
 
   useEffect(() => { void loadCaptcha() }, [loadCaptcha])
 
+  /** 演示账号快选：自动填入账号与演示密码，聚焦验证码 */
+  const pickDemoUser = (id: string) => {
+    const u = users.find((x) => x.id === id)
+    if (!u) return
+    setUsername(u.username)
+    setPassword('123456')
+    setError('')
+    requestAnimationFrame(() => document.getElementById('login-captcha')?.focus())
+  }
+
   const submit = async () => {
-    if (!selected) return setError('请先选择登录用户')
+    if (!username.trim()) return setError('请输入用户名（或从演示账号快选中选择）')
+    if (!password) return setError('请输入密码')
     if (!captchaInput.trim()) {
       setError('请输入图形验证码')
       return
@@ -180,7 +208,7 @@ function LoginPage({ onLogin }: { onLogin: (u: BpUser) => void }) {
     try {
       const user = await api<BpUser>('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username: selected.username, password, captchaId: captcha?.captchaId ?? '', captchaCode: captchaInput }),
+        body: JSON.stringify({ username: username.trim(), password, captchaId: captcha?.captchaId ?? '', captchaCode: captchaInput }),
       })
       try { localStorage.setItem('bp_last_user_id', user.id) } catch { /* ignore */ }
       onLogin(user)
@@ -222,37 +250,77 @@ function LoginPage({ onLogin }: { onLogin: (u: BpUser) => void }) {
       <div className="w-full md:w-[460px] bg-white p-8 md:p-12 flex flex-col justify-center shadow-2xl">
         <div className="bp-fade-up">
           <h2 className="text-xl font-bold text-stone-800 mb-1">用户登录</h2>
-          <p className="text-sm text-stone-400 mb-6">请选择角色账号登录（演示密码 123456）</p>
+          <p className="text-sm text-stone-400 mb-6">请输入账号与密码登录系统</p>
         </div>
-        <div className="grid grid-cols-3 gap-2 mb-4 max-h-64 overflow-y-auto pr-1 bp-fade-up-d1">
-          {users.map((u) => (
-            <button key={u.id} onClick={() => { setSelected(u); setError('') }} title={ROLE_TIP_MAP[u.role] ?? ''}
-              className={cn('rounded-lg border p-2.5 text-left transition-all hover:border-emerald-400 hover:shadow-sm',
-                selected?.id === u.id ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400' : 'border-stone-200')}>
-              <div className="text-sm font-medium text-stone-800 truncate flex items-center gap-1">
-                {u.name}
-                {selected?.id === u.id && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />}
-              </div>
-              <div className="text-[11px] text-stone-400 truncate">{ROLE_MAP[u.role]?.label ?? u.role}</div>
+
+        {/* 演示账号快选（内建用户，选中自动填入） */}
+        <div className="mb-3 bp-fade-up-d1">
+          <Label htmlFor="login-demo" className="text-xs font-medium text-stone-500 mb-1.5 block">演示账号快选</Label>
+          <Select value={matched?.id ?? ''} onValueChange={pickDemoUser}>
+            <SelectTrigger id="login-demo" aria-label="选择内建演示账号"
+              className="w-full h-10 border-stone-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 data-[state=open]:border-emerald-500">
+              <SelectValue placeholder="选择内建演示账号（自动填入账号密码）" />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              {sortedUsers.map((u) => (
+                <SelectItem key={u.id} value={u.id} title={ROLE_TIP_MAP[u.role] ?? ''}>
+                  <span className="font-medium">{u.name}</span>
+                  <span className="ml-1.5 text-xs text-stone-400">{ROLE_MAP[u.role]?.label ?? u.role}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
+            内建演示账号密码统一为 <span className="font-mono font-semibold text-stone-600">123456</span>，选中即自动填入账号与密码
+          </p>
+        </div>
+
+        <div className="relative my-4 bp-fade-up-d1" aria-hidden="true">
+          <div className="h-px bg-stone-200" />
+          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2 text-[10px] text-stone-400">或手动输入账号</span>
+        </div>
+
+        {/* 用户名 */}
+        <div className="mb-3 bp-fade-up-d1">
+          <Label htmlFor="login-username" className="text-xs font-medium text-stone-500 mb-1.5 block">用户名</Label>
+          <div className="relative">
+            <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
+            <input id="login-username" type="text" value={username} autoComplete="username"
+              onChange={(e) => { setUsername(e.target.value); setError('') }}
+              placeholder="请输入用户名" aria-label="用户名"
+              className="w-full rounded-md border border-stone-300 pl-8 pr-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+          </div>
+        </div>
+
+        {/* 密码（支持明文切换） */}
+        <div className="mb-3 bp-fade-up-d1">
+          <Label htmlFor="login-password" className="text-xs font-medium text-stone-500 mb-1.5 block">密码</Label>
+          <div className="relative">
+            <KeyRound className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
+            <input id="login-password" type={showPwd ? 'text' : 'password'} value={password} autoComplete="current-password"
+              onChange={(e) => { setPassword(e.target.value); setError('') }}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              placeholder="请输入密码" aria-label="密码"
+              className="w-full rounded-md border border-stone-300 pl-8 pr-9 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+            <button type="button" onClick={() => setShowPwd((v) => !v)} aria-label={showPwd ? '隐藏密码' : '显示密码'}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-stone-400 transition-colors hover:text-stone-600">
+              {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
-          ))}
+          </div>
         </div>
-        {selected && (
-          <div className="mb-4 rounded-lg bg-stone-50 border border-stone-200 px-3 py-2.5 text-[11px] leading-relaxed text-stone-500 bp-fade-up">
-            <span className={cn('inline-block px-1.5 py-0.5 rounded border mr-1.5', ROLE_MAP[selected.role]?.className)}>{ROLE_MAP[selected.role]?.label}</span>
-            {ROLE_TIP_MAP[selected.role] ?? ''}
+
+        {matched && (
+          <div className="mb-3 rounded-lg bg-stone-50 border border-stone-200 px-3 py-2.5 text-[11px] leading-relaxed text-stone-500 bp-fade-up">
+            <span className={cn('inline-block px-1.5 py-0.5 rounded border mr-1.5', ROLE_MAP[matched.role]?.className)}>{ROLE_MAP[matched.role]?.label}</span>
+            {ROLE_TIP_MAP[matched.role] ?? ''}
           </div>
         )}
-        <div className="mb-3 bp-fade-up-d1">
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-            placeholder="登录密码" className="w-full rounded-md border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
-        </div>
         <div className="mb-4 bp-fade-up-d1">
+          <Label htmlFor="login-captcha" className="text-xs font-medium text-stone-500 mb-1.5 block">图形验证码</Label>
           <div className="flex items-stretch gap-2">
             <div className="relative flex-1">
               <ShieldAlert className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
-              <input type="text" value={captchaInput} maxLength={4}
+              <input id="login-captcha" type="text" value={captchaInput} maxLength={4}
                 onChange={(e) => { setCaptchaInput(e.target.value.replace(/[^a-zA-Z0-9]/g, '')); setError('') }}
                 onKeyDown={(e) => e.key === 'Enter' && submit()}
                 placeholder="验证码（不区分大小写）" aria-label="图形验证码"
