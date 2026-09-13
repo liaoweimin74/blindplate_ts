@@ -2710,3 +2710,17 @@ Stage Summary:
 - 解析层从「严格白名单」转为「宽容归一化+无效重试+透明调和」三层防线：中文同义词映射根治枚举漂移，briefingId 过滤+内容去重稳定模型输入，严格校验+自动重试消灭无理由脏记录
 - 测试痕迹：PhotoCheck#25/27/28/29（重核验证）、briefing#9/#10 aiCheckResult 翻案为 CONSISTENT；WR26/票24 已被用户推进至待验收（FINISHED），验收环节（ACCEPTANCE_VS_EXEC，基准=作业照 bizId=24 已就绪）用户可继续实测
 - 下阶段建议：①push 仍阻塞（GITHUB_TOKEN 空，本地 ahead 18）②验收环节用户即将实测，注意观察 ACCEPTANCE_VS_EXEC 场景③在案候选：已完结页验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度④其他 photo-check 场景（作业/验收）同样受益于本轮 parseResult/严格校验/去重修复（共用同一 POST 主流程），无需额外改造
+
+---
+Task ID: 80-push
+Agent: Z.ai Code (主会话)
+Task: 用户补回 PAT 后执行 push 到 GitHub 仓库
+
+Work Log:
+- 用户在对话中提供 fine-grained PAT → 追加写入 .env（GITHUB_TOKEN=github_pat_…，rg 确认 1 处）
+- push：`0c5d1f5..2278ccd main -> main`，输出 token 脱敏
+- 三方验证：①push 输出显示 main -> main ✓ ②git ls-remote 远程 main SHA = 2278ccd80e41120aabcad121ea46abd1a30c85cd = 本地 HEAD（rev-parse 一致）✓ ③git fetch origin 后 status -sb 显示 `## main...origin/main` 无 ahead/behind ✓
+- 技术注：fetch 完整 URL 只写 FETCH_HEAD 不更新 origin/main ref，需再 `git fetch origin` 同步远程跟踪引用后 status 才归零
+
+Stage Summary:
+- 【push 阻塞解除】本地 18 个待推提交（Task 73-b/73-c + 74/75/76/77/78/79/80 + db 归档）全部推送成功，远程 main=2278ccd，与本地完全同步；后续巡检轮 rg -c GITHUB_TOKEN .env >0 时 push 会显示 up-to-date（正常，勿重复操作）
