@@ -31,8 +31,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files —— 全部忽略（敏感信息不入库），仅放行模板
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -54,3 +55,11 @@ server.log
 # Skills directory
 /skills/tool-results/
 tool-results/
+
+
+# 运行时文件（pid/日志备份）
+*.pid
+dev.log.bak-*
+
+# 字体目录（纯系统字体方案：仓库不捆绑字体；如需手工放置字体文件放这里，不入库）
+assets/fonts/
