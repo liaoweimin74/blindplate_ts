@@ -2930,3 +2930,21 @@ Stage Summary:
 - 沙箱重置已完全恢复：远程代码 100% 回归 + Task 89 交互重做完成（E2E 全链通过）+ PPT 重建完成（/home/z/my-project/ppt/blind-plate-system-ppt.html，10 页含全部精修布局）
 - 经验沉淀：①平台重置会置换 git 历史+清对象库，push 前务必 git fetch 核对 ahead/behind 与 merge-base ②prisma generate 需在重置后重跑（client 过期致全站 tsc 报 Prisma 模型缺失）③SVG 画布合成事件 E2E：clickShape 需每次重查 DOM（重渲染换节点）；设备位号(E101/P101A/B)是图元、AUTO-P* 是管线号徽章 ④ppt-expert 子代理两次 context 中断后，主会话三段直写更可控
 - 未竟：T101/T-101 双编码决策、私有化 Qwen 网关参数仍待用户提供
+
+---
+Task ID: 91
+Agent: 主会话(Z.ai Code)
+Task: 用户要求把 HTML 版 PPT 转成真正的 .pptx 文件格式（可在 PowerPoint/WPS 打开编辑）
+
+Work Log:
+- 【转换管线搭建】ppt/blind-plate-system-ppt.html(10页单文件) → scripts/split_ppt_html.js 拆分为 download/slides/slide_01~10.html + global.css（去导航/缩放 JS，注入静态导出覆盖：.a/.stag 入场动画强制终态 opacity:1、.dr 描边 dashoffset:0、.fjoin 光点隐藏、.pid-canvas 去点阵背景、.ai-hub 半径 88px）→ skills/pptx/batch_html2pptx.js 导出
+- 【首轮转换 4 类缺陷】①全部 <use> 图标空白（sharp 独立栅格化无法解析跨节点 symbol 引用）②P7 两个装饰圆环变实心黑盘（转换器 computed fill='none' 时不写 fill 属性 → librsvg 默认黑填充）③P6 PID 图纸 SVG 成灰色糊团 ④P1 法兰盘丢失
+- 【预处理脚本 scripts/prep_slides_for_pptx.js（playwright）】①<use> 解析为内联 <g> ②按真实 computed style 给每个 SVG 节点写显式 fill/stroke/线宽/线帽/dasharray/opacity 属性（含 fill="none"）③全部可见 SVG 用浏览器 canvas 栅格化为 PNG <img>（小图标 3×、大图 2×，data URL 内联）④.ai-hub 用 canvas 画正圆渐变 PNG 作背景（绕过转换器大圆角截断）
+- 【z-order 陷阱（第二轮发现）】转换器把"图标 img + 直接文本节点混排且无实底背景"的 flex 行（.ri/.f-item/.s10-chip）扁平化为纯文本帧 → img 静默丢弃（XML 实证 slide9 仅 4/20 图）；而 [img,span] 纯元素子节点（.vr）或有实底的（.mchip）走逐子元素发射幸存 → 修复：预处理时把图标父容器的直接文本节点包进 <span>（视觉零变化）→ slide1 6→10、slide9 4→20、slide10 3→6 pics 全部入档
+- 【验收闭环】LibreOffice 转 PDF + pdftoppm 渲染 10 页逐页目检：P1 法兰盘/芯片图标✓ P2 痛点图标✓ P3 九环节圆内图标✓ P4 五层瓷贴图标+层间箭头✓ P5 宫格/芯片/AI 条图标✓ P6 PID 图纸完整✓ P7 正圆中枢+虚线环+连线✓ P8 特色瓷贴图标✓ P9 三色勾选✓ P10 芯片图标✓；python-pptx 校验 10 页 16:9；🚨 CRITICAL 0（仅 .bg-glow 超画布顶部的良性 ⚠，PPT 放映自动裁剪）
+
+Stage Summary:
+- 交付物：/home/z/my-project/download/石化厂盲板管理系统-产品介绍.pptx（8.9M，10 页，文本为可编辑文本框、图形为高清位图，PowerPoint/WPS 可开）；附带 qa/ 同名 PDF 预览版 + 逐页 PNG；源 HTML 与 ppt/ 单文件版保持同步
+- 复现管线：node scripts/split_ppt_html.js && NODE_PATH=/usr/local/lib/node_modules node scripts/prep_slides_for_pptx.js && NODE_PATH=/usr/local/lib/node_modules node skills/pptx/batch_html2pptx.js download/slides download/<名称>.pptx
+- 经验：改 PPT 内容只改 ppt/blind-plate-system-ppt.html 后重跑三步管线；转换器三大坑=SVG 独立栅格化丢 CSS/<use>/fill:none、图标预通道 z-order 低于父形状、大圆角截断——预处理脚本已全部规避
+- 未竟：pptx 为静态页（HTML 版动画不随转换携带，如需页面切换动画可在 PowerPoint 内补）；T101/T-101 双编码、私有化 Qwen 网关参数仍待用户定夺

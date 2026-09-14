@@ -65,3 +65,6 @@ dev.log.bak-*
 assets/fonts/
 /uploads/
 /.zscripts/
+
+# pptx conversion artifacts
+/download/qa/
