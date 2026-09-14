@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { apiGet } from '@/lib/bp-api'
 import {
-  anchorPoint, routeConnection, shapeLabelY, ShapeBody, MarkGlyph, normalizeState,
+  anchorPointT, routeConnection, shapeLabelY, ShapeBody, MarkGlyph, normalizeState,
   CANVAS_W, CANVAS_H, GRID_S, GRID_L, LINE, STROKE, ROSE, minimapBoundsOf,
   IsoState, ISO_STATE_KEYS, ISO_STATE_STYLE, PidContent, PidMark,
 } from './pid-config'
@@ -404,8 +404,8 @@ export function PidLocateDialog({
                   const b = activeDiagram.content.shapes.find((s) => s.id === c.toShape)
                   if (!a || !b) return null
                   const pts = routeConnection(
-                    { ...anchorPoint(a, c.fromAnchor), anchor: c.fromAnchor },
-                    { ...anchorPoint(b, c.toAnchor), anchor: c.toAnchor },
+                    { ...anchorPointT(a, c.fromAnchor, c.fromT), anchor: c.fromAnchor },
+                    { ...anchorPointT(b, c.toAnchor, c.toT), anchor: c.toAnchor },
                     false,
                     c.midOverride,
                   )
@@ -546,8 +546,8 @@ export function PidLocateDialog({
                         const f = activeDiagram.content.shapes.find((s) => s.id === c.fromShape)
                         const t = activeDiagram.content.shapes.find((s) => s.id === c.toShape)
                         if (!f || !t) return null
-                        const a = anchorPoint(f, c.fromAnchor)
-                        const b = anchorPoint(t, c.toAnchor)
+                        const a = anchorPointT(f, c.fromAnchor, c.fromT)
+                        const b = anchorPointT(t, c.toAnchor, c.toT)
                         return (
                           <line
                             key={c.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y}

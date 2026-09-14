@@ -29,6 +29,8 @@ export interface MountConn {
   fromAnchor: MountAnchor
   toShape: string
   toAnchor: MountAnchor
+  fromT?: number  // 自由锚点（Task 86-2）：端点沿边参数（缺省 0.5 中点，与旧数据兼容）
+  toT?: number
   pipelineId?: number | null
   direction?: string | null
   labelT?: number
@@ -93,14 +95,15 @@ export function oppositeAnchor(a: MountAnchor): MountAnchor {
   return a === 'top' ? 'bottom' : a === 'bottom' ? 'top' : a === 'left' ? 'right' : 'left'
 }
 
-/** 挂接图元锚点绝对坐标（已含旋转）：inset box 边界点绕图元中心旋转（90° 倍数精确） */
-export function mountAnchorPoint(s: MountShape, a: MountAnchor): { x: number; y: number } {
+/** 挂接图元锚点绝对坐标（已含旋转 + 自由锚点沿边参数，Task 86-2）：inset box 边界参数点绕图元中心旋转（90° 倍数精确；t 缺省 0.5 中点） */
+export function mountAnchorPoint(s: MountShape, a: MountAnchor, t?: number): { x: number; y: number } {
   const b = contentInsetBox(s)
+  const u = Math.min(1, Math.max(0, typeof t === 'number' && Number.isFinite(t) ? t : 0.5))
   const base =
-    a === 'top' ? { x: b.x + b.w / 2, y: b.y }
-    : a === 'bottom' ? { x: b.x + b.w / 2, y: b.y + b.h }
-    : a === 'left' ? { x: b.x, y: b.y + b.h / 2 }
-    : { x: b.x + b.w, y: b.y + b.h / 2 }
+    a === 'top' ? { x: b.x + u * b.w, y: b.y }
+    : a === 'bottom' ? { x: b.x + u * b.w, y: b.y + b.h }
+    : a === 'left' ? { x: b.x, y: b.y + u * b.h }
+    : { x: b.x + b.w, y: b.y + u * b.h }
   const rot = s.rotation ?? 0
   if (!rot) return base
   const c = centerOf(s)
@@ -197,8 +200,8 @@ export function mountShapeOnConn<S extends MountShape, C extends MountConn>(
   const me = shapes.find((x) => x.id === shapeId)
   const from = content.shapes.find((x) => x.id === conn.fromShape)
   const to = content.shapes.find((x) => x.id === conn.toShape)
-  // 「朝向 A 端」的物理方向：比较 A 端锚点与挂接点的相对方位（旋转感知锚点坐标）
-  const aPt = from ? mountAnchorPoint(from, conn.fromAnchor) : target.point
+  // 「朝向 A 端」的物理方向：比较 A 端锚点与挂接点的相对方位（旋转感知锚点坐标，含自由锚点沿边参数）
+  const aPt = from ? mountAnchorPoint(from, conn.fromAnchor, conn.fromT) : target.point
   let physTowardA: MountAnchor
   if (target.horizontal) physTowardA = aPt.x <= target.point.x ? 'left' : 'right'
   else physTowardA = aPt.y <= target.point.y ? 'top' : 'bottom'
@@ -210,6 +213,7 @@ export function mountShapeOnConn<S extends MountShape, C extends MountConn>(
   const seg1: C = { ...conn }
   seg1.toShape = shapeId
   seg1.toAnchor = anchorTowardA
+  seg1.toT = undefined // 原连线 to 端自由锚点参数不属于阀门端，清除（Task 86-2）
   seg1.midOverride = undefined
   seg1.labelT = t0 != null && t0 <= p ? t0 / p : undefined
   const seg2 = {
@@ -218,6 +222,7 @@ export function mountShapeOnConn<S extends MountShape, C extends MountConn>(
     fromAnchor: anchorTowardB,
     toShape: conn.toShape,
     toAnchor: conn.toAnchor,
+    toT: conn.toT, // B 端自由锚点参数继承（Task 86-2）
     pipelineId: conn.pipelineId,
     direction: conn.direction,
     labelT: t0 != null && t0 > p ? (t0 - p) / (1 - p) : undefined,
@@ -256,8 +261,10 @@ export function unmountShapeFromPipe<S extends MountShape, C extends MountConn>(
     id: connTo.id,
     fromShape: connTo.fromShape,
     fromAnchor: connTo.fromAnchor,
+    fromT: connTo.fromT, // A 端自由锚点参数继承（Task 86-2）
     toShape: connFrom.toShape,
     toAnchor: connFrom.toAnchor,
+    toT: connFrom.toT, // B 端自由锚点参数继承（Task 86-2）
     pipelineId: connTo.pipelineId ?? connFrom.pipelineId ?? null,
     direction: connTo.direction ?? connFrom.direction,
     labelT: t,
@@ -303,8 +310,8 @@ export function layoutPolylineOf(getShape: (id: string) => MountShape | undefine
     const f = getShape(c.fromShape)
     const t = getShape(c.toShape)
     if (!f || !t) return null
-    const a = mountAnchorPoint(f, c.fromAnchor)
-    const b = mountAnchorPoint(t, c.toAnchor)
+    const a = mountAnchorPoint(f, c.fromAnchor, c.fromT)
+    const b = mountAnchorPoint(t, c.toAnchor, c.toT)
     const aH = c.fromAnchor === 'left' || c.fromAnchor === 'right'
     const bH = c.toAnchor === 'left' || c.toAnchor === 'right'
     if (aH && bH) {

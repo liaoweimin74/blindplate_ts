@@ -128,10 +128,22 @@ export interface PidConn {
   fromAnchor: Anchor
   toShape: string
   toAnchor: Anchor
+  fromT?: number               // 自由锚点（Task 86-2）：起点沿 fromAnchor 边的参数（0=边起点 1=边终点；缺省 0.5=四向中点，与旧数据完全兼容）
+  toT?: number                 // 自由锚点：终点沿 toAnchor 边的参数（同上）
   direction?: PidConnDirection // 流向：forward 起点→终点（缺省）/ reverse 终点→起点 / none 无向
   pipelineId?: number | null   // 绑定的管线主数据（保存图后按连线起终点自动回写管线起止设备）
   labelT?: number              // 管线号标注沿折线的位置参数（0..1 归一化弧长，缺省 0.5 中点；拖动标注时写入，图元移动后按比例跟随）
   midOverride?: number         // 中段布线手动覆盖：H-H 路由的 midX / V-V 路由的 midY（拖拽中段写入；缺省自动取两端中点，改接端点后清零重排）
+}
+
+/** t 参数是否需要持久化：0.5（四向中点）即旧数据缺省行为，不写 JSON 保持干净 */
+export function freeT(t: number | undefined | null): number | undefined {
+  return typeof t === 'number' && Math.abs(t - 0.5) > 1e-6 ? t : undefined
+}
+
+/** 自由锚点 t 等值比较（去重判断用；缺省均视为 0.5） */
+export function tEq(a: number | undefined, b: number | undefined): boolean {
+  return Math.abs((a ?? 0.5) - (b ?? 0.5)) < 1e-6
 }
 
 export interface PidMark {
@@ -465,12 +477,23 @@ export const CONN_END_SNAP_DIST = 48
 
 /** 图元某锚点的绝对坐标：先内收到符号内容真实边界（消除留白悬空），再取四向中点：top=(x+w/2,y) right=(x+w,y+h/2) bottom=(x+w/2,y+h) left=(x,y+h/2) */
 export function anchorPoint(s: PidShape, a: Anchor): RoutePoint {
+  return anchorPointT(s, a)
+}
+
+/**
+ * 图元锚点绝对坐标（Task 86-2 自由锚点版）：
+ * - 先内收到符号内容真实边界（消除留白悬空），再取 named 边上参数 t 处的点（t=0.5 即四向中点，与 anchorPoint 完全一致）；
+ * - t 语义：top/bottom 沿 x 从左到右、left/right 沿 y 从上到下（0=边起点 1=边终点）；
+ * - 挂接旋转（90° 倍数）时参数点绕图元中心旋转——旋转下 t 沿边保持，与 nearestFreeAnchorAt 的换算精确互逆。
+ */
+export function anchorPointT(s: PidShape, a: Anchor, t?: number): RoutePoint {
   const b = contentInsetBox(s)
+  const u = Math.min(1, Math.max(0, typeof t === 'number' && Number.isFinite(t) ? t : 0.5))
   const base: RoutePoint =
-    a === 'top' ? { x: b.x + b.w / 2, y: b.y }
-    : a === 'bottom' ? { x: b.x + b.w / 2, y: b.y + b.h }
-    : a === 'left' ? { x: b.x, y: b.y + b.h / 2 }
-    : { x: b.x + b.w, y: b.y + b.h / 2 }
+    a === 'top' ? { x: b.x + u * b.w, y: b.y }
+    : a === 'bottom' ? { x: b.x + u * b.w, y: b.y + b.h }
+    : a === 'left' ? { x: b.x, y: b.y + u * b.h }
+    : { x: b.x + b.w, y: b.y + u * b.h }
   const rot = s.rotation ?? 0
   if (!rot) return base
   // 挂接旋转（90° 倍数，Task 73）：锚点绕图元中心旋转
@@ -510,8 +533,13 @@ function anchorZoneBox(s: PidShape): { x: number; y: number; w: number; h: numbe
   return b
 }
 
-/** 指针落在图元边框锚点区时应吸附的锚点：按物理包围盒取最近边 → 挂接旋转时换算回逻辑锚点名（存储/路由仍用四向模型） */
-function nearestAnchorAt(s: PidShape, px: number, py: number): Anchor {
+/**
+ * 自由锚点（Task 86-2）：指针落在图元边框锚点区时的吸附端点 = 最近物理边 + 沿边参数（0..1）。
+ * 点击哪里端点就在哪里（不再吸附四向中点）。
+ * 挂接旋转换算：物理边两端点逆旋转回逻辑 content 盒求逻辑参数，端点线性插值——统一覆盖 90/180/270
+ * （旋转下沿边参数可能同向也可能反向：如 90° top→right 保持、left→top 反向；180° 全反向），与 anchorPointT 精确互逆。
+ */
+function nearestFreeAnchorAt(s: PidShape, px: number, py: number): { anchor: Anchor; t: number } {
   const b = anchorZoneBox(s)
   const dl = Math.abs(px - b.x)
   const dr = Math.abs(b.x + b.w - px)
@@ -519,8 +547,38 @@ function nearestAnchorAt(s: PidShape, px: number, py: number): Anchor {
   const db = Math.abs(b.y + b.h - py)
   const dmin = Math.min(dl, dr, dt, db)
   const phys: Anchor = dmin === dl ? 'left' : dmin === dr ? 'right' : dmin === dt ? 'top' : 'bottom'
+  // 沿物理边的参数：top/bottom 以 x 从左到右，left/right 以 y 从上到下
+  const tPhys = Math.min(1, Math.max(0,
+    phys === 'left' || phys === 'right' ? (py - b.y) / b.h : (px - b.x) / b.w))
   const rot = s.rotation ?? 0
-  return rot ? (anchorNameForPhysical(phys, rot) as Anchor) : phys
+  if (!rot) return { anchor: phys, t: tPhys }
+  const logical = anchorNameForPhysical(phys, rot) as Anchor
+  // 物理边参数 0/1 端点 → 逆旋转回逻辑坐标 → 逻辑边参数，端点线性插值得逻辑 t
+  const lb = contentInsetBox(s)
+  const cx = s.x + s.w / 2
+  const cy = s.y + s.h / 2
+  const rad = (rot * Math.PI) / 180
+  const cos = Math.cos(-rad)
+  const sin = Math.sin(-rad)
+  const toLogic = (x: number, y: number) => ({
+    x: cx + (x - cx) * cos - (y - cy) * sin,
+    y: cy + (x - cx) * sin + (y - cy) * cos,
+  })
+  const p0 = phys === 'left' || phys === 'top' ? { x: b.x, y: b.y }
+    : phys === 'right' ? { x: b.x + b.w, y: b.y }
+    : { x: b.x, y: b.y + b.h }
+  const p1 = phys === 'top' || phys === 'bottom' ? { x: b.x + b.w, y: p0.y } : { x: p0.x, y: b.y + b.h }
+  const par = (q: { x: number; y: number }) =>
+    logical === 'top' || logical === 'bottom' ? (q.x - lb.x) / lb.w : (q.y - lb.y) / lb.h
+  const t0 = par(toLogic(p0.x, p0.y))
+  const t1 = par(toLogic(p1.x, p1.y))
+  const t = Math.min(1, Math.max(0, t0 * (1 - tPhys) + t1 * tPhys))
+  return { anchor: logical, t }
+}
+
+/** 兼容别名（仅取边名）：连线端点拖拽吸附等只需方向的场景 */
+function nearestAnchorAt(s: PidShape, px: number, py: number): Anchor {
+  return nearestFreeAnchorAt(s, px, py).anchor
 }
 
 /** 指针到图元边框锚点区（物理包围盒）的距离：盒内为 0（连线端点拖拽吸附用） */
@@ -532,10 +590,11 @@ function distToAnchorZone(s: PidShape, px: number, py: number): number {
 }
 
 /**
- * 连线锚点命中区路径（Task 86）：
+ * 连线锚点命中区路径（Task 86 / 86-2）：
  * - 环带模式（evenodd 打洞）：包围盒外扩 m 的边带——常态下「边框附近一圈」都可点击连线，
  *   本体区域留洞（保留点击选中/按住拖动语义）；屏幕缩放小时边带仍足够宽，不再难命中
- * - 实心模式：整个包围盒（含本体）——连线挂起态下目标图元任意位置点击即完成连线（杜绝点本体被画布当空白吞掉）
+ * - 实心模式：包围盒外扩 m 的实心矩形（含本体+周边环带全部）——连线挂起态下目标图元「本体及边框周边任意位置」
+ *   点击即完成连线（杜绝点本体或笔画缝隙被画布当空白吞掉，Task 86-2 双保险第一层）
  */
 function anchorHitBandPath(s: PidShape, m = 18): string {
   const b = anchorZoneBox(s)
@@ -546,9 +605,11 @@ function anchorHitBandPath(s: PidShape, m = 18): string {
   return `M${ox},${oy}h${ow}v${oh}h${-ow}Z M${b.x},${b.y}h${b.w}v${b.h}h${-b.w}Z`
 }
 
-function anchorHitSolidPath(s: PidShape): string {
+function anchorHitSolidPath(s: PidShape, m = 18): string {
   const b = anchorZoneBox(s)
-  return `M${b.x},${b.y}h${b.w}v${b.h}h${-b.w}Z`
+  const ox = b.x - m
+  const oy = b.y - m
+  return `M${ox},${oy}h${b.w + 2 * m}v${b.h + 2 * m}h${-(b.w + 2 * m)}Z`
 }
 
 /**
@@ -798,8 +859,8 @@ export function autoLayoutContent(ct: PidContent): PidContent {
     const ta = useNew ? (newAnchors.get(c.id)?.[1] ?? c.toAnchor) : c.toAnchor
     const fs = { ...f, x: fp.x, y: fp.y }
     const ts = { ...t, x: tp.x, y: tp.y }
-    const a = anchorPoint(fs, fa)
-    const b = anchorPoint(ts, ta)
+    const a = useNew ? anchorPoint(fs, fa) : anchorPointT(fs, c.fromAnchor, c.fromT)
+    const b = useNew ? anchorPoint(ts, ta) : anchorPointT(ts, c.toAnchor, c.toT)
     return routeConnection(
       { x: a.x, y: a.y, anchor: physAnchor(fs, fa) },
       { x: b.x, y: b.y, anchor: physAnchor(ts, ta) },
@@ -826,7 +887,8 @@ export function autoLayoutContent(ct: PidContent): PidContent {
   const newConns: PidConn[] = ct.connections.map((c) => {
     const an = newAnchors.get(c.id)
     if (!an) return c.fromShape === c.toShape ? { ...c, midOverride: undefined } : c
-    return { ...c, fromAnchor: an[0], toAnchor: an[1], midOverride: undefined }
+    // 锚点按布局后相对方位改选：原自由锚点沿边参数失效，一并清零回中点（Task 86-2）
+    return { ...c, fromAnchor: an[0], toAnchor: an[1], fromT: undefined, toT: undefined, midOverride: undefined }
   })
 
   const newMarks = ct.marks.map((m) => {
@@ -2021,7 +2083,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [selected, setSelected] = useState<Selection | null>(null)
   const [hoverShapeId, setHoverShapeId] = useState<string | null>(null)
   const [hoverAnchor, setHoverAnchor] = useState<string | null>(null)
-  const [pendingConn, setPendingConn] = useState<{ shapeId: string; anchor: Anchor } | null>(null)
+  const [pendingConn, setPendingConn] = useState<{ shapeId: string; anchor: Anchor; t?: number } | null>(null)
   const [mousePos, setMousePos] = useState<RoutePoint | null>(null)
   const [placingShape, setPlacingShape] = useState<PidShapeType | null>(null)
   const [placingStdId, setPlacingStdId] = useState<string | null>(null)
@@ -2141,7 +2203,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   // ---- 连线交互增强：中段拖拽（竖线横向/横线纵向）+ 端点拖拽改接锚点 ----
   const [draggingConnSeg, setDraggingConnSeg] = useState<string | null>(null)
   const [connEndDrag, setConnEndDrag] = useState<
-    { id: string; which: 'from' | 'to'; x: number; y: number; hover: { shapeId: string; anchor: Anchor } | null } | null
+    { id: string; which: 'from' | 'to'; x: number; y: number; hover: { shapeId: string; anchor: Anchor; t?: number } | null } | null
   >(null)
   const connDragEndAtRef = useRef(0) // 连线拖拽结束时刻：吞掉紧随 pointerup 的 click，防误清选中
 
@@ -2841,8 +2903,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const from = sm.get(c.fromShape)
       const to = sm.get(c.toShape)
       if (!from || !to) continue
-      const a = anchorPoint(from, c.fromAnchor)
-      const b = anchorPoint(to, c.toAnchor)
+      const a = anchorPointT(from, c.fromAnchor, c.fromT)
+      const b = anchorPointT(to, c.toAnchor, c.toT)
       const pts = routeConnection(
         { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
         { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
@@ -3151,7 +3213,17 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
   const handleShapeClick = (e: React.MouseEvent<SVGElement>, id: string) => {
     if (mode !== 'edit') return
-    if (placingShape || placingMark || placingSymbol || pendingConn) return // 放置/连线挂起时冒泡给画布统一处理
+    if (placingShape || placingMark || placingSymbol) return
+    if (pendingConn) {
+      // 连线挂起态：点击目标图元本体 = 连接到该图元最近边框位置（自由锚点兑底第二层：命中区缝隙穿透时由此承接）
+      const s = contentRef.current.shapes.find((x) => x.id === id)
+      const p = toSvgPoint(e)
+      if (s && p) {
+        const fa = nearestFreeAnchorAt(s, p.x, p.y)
+        onAnchorClick(e, id, fa.anchor, fa.t)
+      }
+      return
+    }
     e.stopPropagation()
     setSelected({ kind: 'shape', id })
   }
@@ -3183,40 +3255,46 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     setSelected({ kind: 'conn', id })
   }
 
-  const onAnchorClick = (e: React.MouseEvent<SVGElement>, shapeId: string, anchor: Anchor) => {
+  const onAnchorClick = (e: React.MouseEvent<SVGElement>, shapeId: string, anchor: Anchor, t?: number) => {
     e.stopPropagation()
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     // 图元拖动刚结束的 click 不算「点边框连线」（命中区常驻渲染，拖动释放必带 click，须抑制）
     if (Date.now() < suppressShapeClickAtRef.current) return
     if (!pendingConn) {
-      setPendingConn({ shapeId, anchor })
+      setPendingConn({ shapeId, anchor, t })
       setSelected({ kind: 'shape', id: shapeId }) // 首击同时选中源图元，属性面板立即可用
       return
     }
-    const { shapeId: fromShape, anchor: fromAnchor } = pendingConn
+    const { shapeId: fromShape, anchor: fromAnchor, t: fromT } = pendingConn
     setPendingConn(null)
-    if (fromShape === shapeId && fromAnchor === anchor) return // 同锚点再点视为取消
+    if (fromShape === shapeId && fromAnchor === anchor) return // 同图元同边再点视为取消（同边不同位置也取消，避免误建零长连线）
     const dup = content.connections.some(
-      (c) => c.fromShape === fromShape && c.fromAnchor === fromAnchor && c.toShape === shapeId && c.toAnchor === anchor,
+      (c) => c.fromShape === fromShape && c.fromAnchor === fromAnchor && tEq(c.fromT, fromT) && c.toShape === shapeId && c.toAnchor === anchor && tEq(c.toT, t),
     )
     if (dup) {
       toast({ title: '连线已存在', description: '相同方向的连线已存在，已跳过创建' })
       return
     }
+    const ft = freeT(fromT)
+    const tt = freeT(t)
     mutate((prev) => ({
       ...prev,
-      connections: [...prev.connections, { id: uid('c'), fromShape, fromAnchor, toShape: shapeId, toAnchor: anchor }],
+      connections: [...prev.connections, {
+        id: uid('c'), fromShape, fromAnchor, toShape: shapeId, toAnchor: anchor,
+        ...(ft !== undefined ? { fromT: ft } : {}),
+        ...(tt !== undefined ? { toT: tt } : {}),
+      }],
     }))
   }
 
-  /** 连线折线提供器（挂接几何用，Task 73）：与渲染同源（anchorPoint 旋转感知 + physAnchor + routeConnection） */
+  /** 连线折线提供器（挂接几何用，Task 73）：与渲染同源（anchorPointT 旋转感知 + physAnchor + routeConnection） */
   const polylineOf: PolylineOf = useCallback((c) => {
     const ct = contentRef.current
     const f = ct.shapes.find((x) => x.id === c.fromShape)
     const t = ct.shapes.find((x) => x.id === c.toShape)
     if (!f || !t) return null
-    const a = anchorPoint(f, c.fromAnchor)
-    const b = anchorPoint(t, c.toAnchor)
+    const a = anchorPointT(f, c.fromAnchor, c.fromT)
+    const b = anchorPointT(t, c.toAnchor, c.toT)
     return routeConnection(
       { x: a.x, y: a.y, anchor: physAnchor(f, c.fromAnchor) },
       { x: b.x, y: b.y, anchor: physAnchor(t, c.toAnchor) },
@@ -3283,7 +3361,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
   // ---- 拖拽移动（图元 / 标注） ----
   const startDragShape = (e: React.PointerEvent<SVGElement>, s: PidShape) => {
-    if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
+    if (mode !== 'edit' || placingShape || placingMark || placingSymbol || pendingConn) return // 连线挂起时让位：点目标图元本体 = 连线（Task 86-2）
     e.stopPropagation()
     const start = toSvgPoint(e)
     if (!start) return
@@ -3369,9 +3447,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const from = ct.shapes.find((s) => s.id === c.fromShape)
     const to = ct.shapes.find((s) => s.id === c.toShape)
     if (!from || !to) return
-    // 拖拽期间图元不动，折线在闭包内预先算好（与渲染同源：anchorPoint + routeConnection）
-    const a = anchorPoint(from, c.fromAnchor)
-    const b = anchorPoint(to, c.toAnchor)
+    // 拖拽期间图元不动，折线在闭包内预先算好（与渲染同源：anchorPointT + routeConnection）
+    const a = anchorPointT(from, c.fromAnchor, c.fromT)
+    const b = anchorPointT(to, c.toAnchor, c.toT)
     const pts = routeConnection(
       { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
       { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
@@ -3430,25 +3508,25 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     window.addEventListener('pointerup', onUp)
   }
 
-  // ---- 连线端点拖拽改接：拖起起点/终点 → 移动中吸附最近图元边框锚点并实时预览折线 → 松手改接（无目标回退，改接后清 midOverride 重新自动布线） ----
+  // ---- 连线端点拖拽改接：拖起起点/终点 → 移动中吸附最近图元边框（自由位置，Task 86-2）并实时预览折线 → 松手改接（无目标回退，改接后清 midOverride 重新自动布线） ----
   const startDragConnEnd = (e: React.PointerEvent<SVGElement>, c: PidConn, which: 'from' | 'to') => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     e.stopPropagation()
     const start = toSvgPoint(e)
     if (!start) return
     setConnEndDrag({ id: c.id, which, x: start.x, y: start.y, hover: null })
-    let hover: { shapeId: string; anchor: Anchor } | null = null
+    let hover: { shapeId: string; anchor: Anchor; t?: number } | null = null
     const onMove = (ev: PointerEvent) => {
       const p = toSvgPoint(ev)
       if (!p) return
       hover = null
       let bestD = CONN_END_SNAP_DIST
       for (const s of contentRef.current.shapes) {
-        // 边框吸附：指针在边框锚点区内视为 0 距，周边 ≤ 阈值按最近边吸附（不再仅限四向中点）
+        // 边框吸附：指针在边框锚点区内视为 0 距，周边 ≤ 阈值按最近边吸附（自由位置：落在哪就连哪）
         const d = distToAnchorZone(s, p.x, p.y)
         if (d < bestD) {
           bestD = d
-          hover = { shapeId: s.id, anchor: nearestAnchorAt(s, p.x, p.y) }
+          hover = { shapeId: s.id, ...nearestFreeAnchorAt(s, p.x, p.y) }
         }
       }
       setConnEndDrag({ id: c.id, which, x: p.x, y: p.y, hover })
@@ -3464,26 +3542,31 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       if (!cc) return
       const otherShape = which === 'from' ? cc.toShape : cc.fromShape
       const otherAnchor = which === 'from' ? cc.toAnchor : cc.fromAnchor
+      const otherT = which === 'from' ? cc.toT : cc.fromT
       const changed = which === 'from'
-        ? cc.fromShape !== target.shapeId || cc.fromAnchor !== target.anchor
-        : cc.toShape !== target.shapeId || cc.toAnchor !== target.anchor
+        ? cc.fromShape !== target.shapeId || cc.fromAnchor !== target.anchor || !tEq(cc.fromT, target.t)
+        : cc.toShape !== target.shapeId || cc.toAnchor !== target.anchor || !tEq(cc.toT, target.t)
       if (!changed) return
-      if (target.shapeId === otherShape && target.anchor === otherAnchor) {
+      if (target.shapeId === otherShape && target.anchor === otherAnchor && tEq(target.t, otherT)) {
         toast({ title: '无法改接', description: '起点与终点不能落在同一锚点' })
         return
       }
       const dup = contentRef.current.connections.some((x) =>
         x.id !== cc.id && (
           which === 'from'
-            ? x.fromShape === target.shapeId && x.fromAnchor === target.anchor && x.toShape === cc.toShape && x.toAnchor === cc.toAnchor
-            : x.fromShape === cc.fromShape && x.fromAnchor === cc.fromAnchor && x.toShape === target.shapeId && x.toAnchor === target.anchor
+            ? x.fromShape === target.shapeId && x.fromAnchor === target.anchor && tEq(x.fromT, target.t) && x.toShape === cc.toShape && x.toAnchor === cc.toAnchor && tEq(x.toT, cc.toT)
+            : x.fromShape === cc.fromShape && x.fromAnchor === cc.fromAnchor && tEq(x.fromT, cc.fromT) && x.toShape === target.shapeId && x.toAnchor === target.anchor && tEq(x.toT, target.t)
         ),
       )
       if (dup) {
         toast({ title: '连线已存在', description: '相同方向的连线已存在，已保留原接线' })
         return
       }
-      const patch = which === 'from' ? { fromShape: target.shapeId, fromAnchor: target.anchor } : { toShape: target.shapeId, toAnchor: target.anchor }
+      const ft = freeT(which === 'from' ? target.t : cc.fromT)
+      const tt = freeT(which === 'to' ? target.t : cc.toT)
+      const patch: Partial<PidConn> = which === 'from'
+        ? { fromShape: target.shapeId, fromAnchor: target.anchor, fromT: ft }
+        : { toShape: target.shapeId, toAnchor: target.anchor, toT: tt }
       mutate((prev) => ({
         ...prev,
         connections: prev.connections.map((x) => (x.id === c.id ? { ...x, ...patch, midOverride: undefined } : x)),
@@ -3709,8 +3792,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const from = shapeMap.get(c.fromShape)
       const to = shapeMap.get(c.toShape)
       if (!from || !to) return null
-      const a = anchorPoint(from, c.fromAnchor)
-      const b = anchorPoint(to, c.toAnchor)
+      const a = anchorPointT(from, c.fromAnchor, c.fromT)
+      const b = anchorPointT(to, c.toAnchor, c.toT)
       const pts = routeConnection(
         { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
         { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
@@ -3782,8 +3865,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const from = shapeMap.get(c.fromShape)
       const to = shapeMap.get(c.toShape)
       if (!from || !to) return null
-      const a = anchorPoint(from, c.fromAnchor)
-      const b = anchorPoint(to, c.toAnchor)
+      const a = anchorPointT(from, c.fromAnchor, c.fromT)
+      const b = anchorPointT(to, c.toAnchor, c.toT)
       const pts = routeConnection(
         { x: a.x, y: a.y, anchor: physAnchor(from, c.fromAnchor) },
         { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
@@ -3904,7 +3987,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     const p = toSvgPoint(e)
                     if (!p) return
                     setHoverShapeId((prev) => (prev === s.id ? prev : s.id)) // 外围边带进入即点亮视觉边框
-                    const key = `${s.id}:${nearestAnchorAt(s, p.x, p.y)}`
+                    const fa = nearestFreeAnchorAt(s, p.x, p.y)
+                    const key = `${s.id}:${fa.anchor}:${fa.t.toFixed(3)}`
                     setHoverAnchor((prev) => (prev === key ? prev : key))
                   }}
                   onPointerLeave={() => {
@@ -3913,18 +3997,23 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                   }}
                   onClick={(e) => {
                     const p = toSvgPoint(e)
-                    onAnchorClick(e, s.id, p ? nearestAnchorAt(s, p.x, p.y) : 'top')
+                    const fa = p ? nearestFreeAnchorAt(s, p.x, p.y) : null
+                    onAnchorClick(e, s.id, fa?.anchor ?? 'top', fa?.t)
                   }}
                 />
                 {(() => {
-                  // 悬停吸附反馈：在即将连接的边中点显示 teal 圆点；挂起连线时源图元选中锚点常显
-                  const pendingAn = pendingConn?.shapeId === s.id ? pendingConn.anchor : null
+                  // 悬停吸附反馈（Task 86-2 自由锚点）：teal 圆点跟随指针沿边位置（点哪连哪，不再固定四中点）；
+                  // 挂起连线时源图元选中锚点常显
+                  const pendingAn = pendingConn?.shapeId === s.id ? pendingConn : null
                   const hoverAn = hoverAnchor && hoverAnchor.startsWith(`${s.id}:`)
-                    ? (hoverAnchor.slice(s.id.length + 1) as Anchor)
+                    ? (() => {
+                      const rest = hoverAnchor.slice(s.id.length + 1).split(':')
+                      return { anchor: rest[0] as Anchor, t: rest[1] !== undefined ? Number(rest[1]) : undefined }
+                    })()
                     : null
                   const an = pendingAn ?? hoverAn
                   if (!an) return null
-                  const ap = anchorPoint(s, an)
+                  const ap = anchorPointT(s, an.anchor, an.t)
                   return <circle cx={ap.x} cy={ap.y} r={6} fill={TEAL} stroke="#fff" strokeWidth={1.5} pointerEvents="none" />
                 })()}
               </>
@@ -4585,8 +4674,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       const from = shapeMap.get(selectedConn.fromShape)
                       const to = shapeMap.get(selectedConn.toShape)
                       if (!from || !to) return null
-                      const a = anchorPoint(from, selectedConn.fromAnchor)
-                      const b = anchorPoint(to, selectedConn.toAnchor)
+                      const a = anchorPointT(from, selectedConn.fromAnchor, selectedConn.fromT)
+                      const b = anchorPointT(to, selectedConn.toAnchor, selectedConn.toT)
                       const pts = routeConnection(
                         { x: a.x, y: a.y, anchor: physAnchor(from, selectedConn.fromAnchor) },
                         { x: b.x, y: b.y, anchor: physAnchor(to, selectedConn.toAnchor) },
@@ -4634,8 +4723,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       const from = shapeMap.get(c.fromShape)
                       const to = shapeMap.get(c.toShape)
                       if (!from || !to) return null
-                      const a = anchorPoint(from, c.fromAnchor)
-                      const b = anchorPoint(to, c.toAnchor)
+                      const a = anchorPointT(from, c.fromAnchor, c.fromT)
+                      const b = anchorPointT(to, c.toAnchor, c.toT)
                       const otherShapeId = connEndDrag.which === 'from' ? c.toShape : c.fromShape
                       const fixed = connEndDrag.which === 'from'
                         ? { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) }
@@ -4645,7 +4734,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       const hoverShape = connEndDrag.hover ? shapeMap.get(connEndDrag.hover.shapeId) : null
                       let previewPts: [number, number][]
                       if (hoverShape && connEndDrag.hover) {
-                        const mp = anchorPoint(hoverShape, connEndDrag.hover.anchor)
+                        const mp = anchorPointT(hoverShape, connEndDrag.hover.anchor, connEndDrag.hover.t)
                         const moving = { x: mp.x, y: mp.y, anchor: physAnchor(hoverShape, movingAnchor) }
                         previewPts = connEndDrag.which === 'from'
                           ? routeConnection(moving, fixed, connEndDrag.hover.shapeId === otherShapeId)
@@ -4658,7 +4747,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                           {content.shapes.map((s) => {
                             const zb = anchorZoneBox(s)
                             const hot = connEndDrag.hover?.shapeId === s.id
-                            const ap = hot && connEndDrag.hover ? anchorPoint(s, connEndDrag.hover.anchor) : null
+                            const ap = hot && connEndDrag.hover ? anchorPointT(s, connEndDrag.hover.anchor, connEndDrag.hover.t) : null
                             return (
                               <g key={s.id}>
                                 <rect x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none"
@@ -4682,7 +4771,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       (() => {
                         const from = shapeMap.get(pendingConn.shapeId)
                         if (!from) return null
-                        const a = anchorPoint(from, pendingConn.anchor)
+                        const a = anchorPointT(from, pendingConn.anchor, pendingConn.t)
                         return (
                           <g pointerEvents="none">
                             <line x1={a.x} y1={a.y} x2={mousePos.x} y2={mousePos.y} stroke={TEAL} strokeWidth={2} strokeDasharray="6 4" />
@@ -4920,8 +5009,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                             const f = shapeMap.get(c.fromShape)
                             const t = shapeMap.get(c.toShape)
                             if (!f || !t) return null
-                            const a = anchorPoint(f, c.fromAnchor)
-                            const b = anchorPoint(t, c.toAnchor)
+                            const a = anchorPointT(f, c.fromAnchor, c.fromT)
+                            const b = anchorPointT(t, c.toAnchor, c.toT)
                             return (
                               <line
                                 key={c.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
@@ -5181,13 +5270,19 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         <div>
                           <span className="text-stone-400">起点</span>{' '}
                           {shapeMap.get(selectedConn.fromShape)?.label ?? '(已删除)'} · {ANCHOR_LABEL[selectedConn.fromAnchor]}
+                          {typeof selectedConn.fromT === 'number' && Math.abs(selectedConn.fromT - 0.5) > 1e-6 && (
+                            <span className="ml-0.5 font-mono text-[10px] text-teal-700">沿边{Math.round(selectedConn.fromT * 100)}%</span>
+                          )}
                         </div>
                         <div>
                           <span className="text-stone-400">终点</span>{' '}
                           {shapeMap.get(selectedConn.toShape)?.label ?? '(已删除)'} · {ANCHOR_LABEL[selectedConn.toAnchor]}
+                          {typeof selectedConn.toT === 'number' && Math.abs(selectedConn.toT - 0.5) > 1e-6 && (
+                            <span className="ml-0.5 font-mono text-[10px] text-teal-700">沿边{Math.round(selectedConn.toT * 100)}%</span>
+                          )}
                         </div>
                         <div className="border-t border-stone-200 pt-1.5 text-[11px] text-stone-400">
-                          画布上可拖拽：红色端点手柄改接锚点 · 虚线中段横/纵调整
+                          画布上可拖拽：红色端点手柄拖到目标图元边框任意位置改接（自由锚点）· 虚线中段横/纵调整
                         </div>
                       </div>
 

@@ -2893,3 +2893,23 @@ Stage Summary:
 - 连线交互终态：常态=图元边框环带（宽约旧版 10 倍）任意点点击挂起连线；挂起态=其他图元全域实心（点本体中心也能连线，死锁根除）；拖动/选中/resize 语义零损伤；存储模型四向锚点不变
 - 用户若仍见「四个点」：极大概率是浏览器未刷新（旧代码 HMR 断连）——需强制刷新（Ctrl+Shift+R）
 - 工具经验沉淀：mouse down/up 不带坐标参数；eval 返回避免逗号；window 事件监听法验证真鼠标链路
+---
+Task ID: 86-2
+Agent: 主控(Z.ai Code)
+Task: 用户第三次反馈「连线的起点和终点目前都只是图元周边的四个点」——根因升级为锚点数据模型本身（四向 named anchor 吸附），实施自由位置锚点（点哪连哪）改造
+
+Work Log:
+- 【根因实锤（证据链）】第一轮修复只扩大了「点击区域」（环带命中区），但连线端点仍经 nearestAnchorAt 吸附到 top/bottom/left/right 四边中点——hover 吸附反馈点也只在四个中点出现。用户视角「能连线的位置」=四个中点，与需求「图元周边的矩形都可以是锚点」不符。锚点体系全链调查：Anchor 四向联合类型（pid-config L121）、PidConn.fromAnchor/toAnchor 持久化、anchorPoint 仅算四中点、routeConnection/pid-locate/mount/layout 全部依赖
+- 【数据模型扩展（向后兼容）】PidConn 新增可选 fromT/toT（沿边参数 0..1：top/bottom 沿 x 左→右，left/right 沿 y 上→下；缺省 0.5=四中点=旧行为）；MountConn 同步；freeT()（t≈0.5 不写 JSON 保持旧数据零差异）+ tEq()（去重比较）导出
+- 【几何核心】①anchorPointT(s,anchor,t?)：contentInsetBox 边上参数点+挂接旋转绕中心旋转，t 缺省 0.5 时与 anchorPoint 完全一致；②nearestFreeAnchorAt(s,px,py)：物理盒最近边+沿边参数→挂接旋转下用「物理边两端点逆旋转回逻辑盒求参数」端点线性插值（数学验证：90° top→right 参数保持但 left→top 反向、180° 全反向，端点插值法统一覆盖）与 anchorPointT 精确互逆；③anchorPoint 保留为 anchorPointT 别名
+- 【交互改造】onAnchorClick(e,shapeId,anchor,t?) 四参；pendingConn 带 t；hoverAnchor key 带 t（shape:anchor:t.xxx）→teal 吸附点跟随指针沿边位置（不再固定四中点）；connEndDrag hover 带 t+落位 patch 写 fromT/toT；去重判断 tEq；创建连线仅 t≠0.5 时写 JSON
+- 【双态命中区升级（第二重保险）】anchorHitSolidPath 改为外扩 18 实心矩形（含本体+周边环带全部，旧版仅 content 盒，实测点击符号笔画缝隙 0.4px 外会穿透）；handleShapeClick 挂起态点击本体=nearestFreeAnchorAt 转连线（兜底层：命中区缝隙穿透时承接）；startDragShape 挂起态让位（点目标本体不再误启拖动）
+- 【全链渲染改造】renderConnections/renderConnBadges/polylineOf/nearestPipeAt/startDragConnLabel/selectedConn overlay/connEndDrag 预览/挂起引导线/编辑器 minimap 全部换 anchorPointT；autoLayout 锚点改选时清 fromT/toT（新方位下原参数失效回中点）；mount 分段 seg1 清 toT、seg2 继承 toT、合并段双向继承；mountAnchorPoint 加 t 感知（挂接方向判定+导入端折线）；pid-locate 两处换 anchorPointT；属性面板锚点显示增强（自由位置显示「沿边xx%」teal mono 小字+文案更新）
+- 【E2E 全链回归（agent-browser 实测，测试图 id=29 已删）】①点换热器 top 边 25% 处→teal 吸附点 (701.8,709)=top 25.75% 精确跟随✅；②点储罐 left 边 30%→连线创建，折线 701.8,709→…→1101,712.8 端点=点击位置✅；③属性面板「顶部沿边26%/左侧沿边28%」✅；④拖 rose 起点手柄→改接「底部沿边71%」折线起点 (737.6,750)✅；⑤挂起态点储罐本体内部→实心命中区接住（M1083,677h80v100h-80Z 实测）→第二条连线终点=储罐 top 边 62%✅；⑥拖换热器 (+88,-61)→两条折线端点同步平移 t 保持✅；⑦保存 DB：CONN1 {bottom,0.708→left,0.279} CONN2 {top,0.26→top,0.624}（bun+Prisma 直查，数据事实）✅；⑧查看模式渲染一致✅；⑨用户旧图「乙烯精馏塔控制流程图」6 条无 t 旧连线渲染不变✅；⑩常态点本体=选中语义保留（留洞）✅
+- 【工具坑补充】mouse down/up 用上次 move 坐标——挂起态点击目标前必须先 mouse move 到目标位置（曾因漏 move 连点源锚点触发「同边取消」）；tmp 下 bun 解析不到 @prisma/client（脚本放项目目录内跑）；元素堆栈取证用 elementsFromPoint
+- 验证：bun run lint 通过；tsc --noEmit src/ 0 错（两轮修改后各跑一次）
+
+Stage Summary:
+- 连线锚点终态：「点哪连哪」——图元边框任意位置（含本体，挂起态）点击即连线端点，吸附反馈点实时跟随指针沿边投影；存储模型 = 四向 named anchor + 可选沿边参数 t，旧图/自动布局/挂接分段合并/AI 导入/俯瞰定位全兼容零迁移
+- 数学要点：挂接旋转下沿边参数可能同向或反向（端点线性插值法统一处理），anchorPointT 与 nearestFreeAnchorAt 精确互逆
+- 未竟事项：用户浏览器若仍显示四点行为需强刷（Ctrl+Shift+R）确认 HMR 生效；管线挂接阀门在自由锚点管线上的分段继承已代码级处理但未 E2E（现有图无此类场景）
