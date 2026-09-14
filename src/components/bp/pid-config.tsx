@@ -247,6 +247,11 @@ interface GenMasterItem { code: string; id: number | null; created: boolean; not
 interface GenMasterGroup { created: number; linked: number; skipped: number; items: GenMasterItem[] }
 interface GenMasterResp { equipments: GenMasterGroup; pipelines: GenMasterGroup; isoPoints: GenMasterGroup }
 
+/** 自动标注隔离点响应（Task 81）：拓扑推导候选经 AI 语义分析后生成挂标 */
+interface DeriveAdded { code: string; name: string; x: number; y: number; bound: boolean; masterCode?: string | null; risk?: string | null }
+interface DeriveSkipped { reason: string; equipLabel: string; pathDesc: string; x: number; y: number }
+interface DeriveResp { total: number; analyzed: number; added: DeriveAdded[]; skipped: DeriveSkipped[]; llmDegraded: boolean; applied: boolean; note?: string }
+
 /** 点位作业全生命周期档案链（GET /api/point-dossier 返回） */
 interface DossierChain {
   requestId: number
@@ -970,15 +975,29 @@ function shapeBodyInner(s: PidShape) {
 
 /** 隔离点标注：编辑态 rose 菱形 + code；查看态按实时状态着色 + stateLabel chip（svg text + 双层 rect 底色） */
 /** hideText：查看态「隐藏隔离点文字」开关生效时仅绘状态色菱形（图标颜色即状态），文字信息改由悬停浮层展示；编辑态不受影响 */
+/** 主数据绑定徽章（Task 81）：右上角小圆徽——teal ✓ = 已关联隔离点主数据；violet ? = 候选/自由挂标（未入主数据），悬停有 title 说明 */
 export function MarkGlyph({ m, edit, state, stateLabel, hideText }: { m: PidMark; edit: boolean; state: IsoState; stateLabel: string; hideText?: boolean }) {
   const d = 7
   const diamond = `${m.x},${m.y - d} ${m.x + d},${m.y} ${m.x},${m.y + d} ${m.x - d},${m.y}`
+  const bound = m.masterPointId != null
+  const badge = (
+    <g>
+      <title>{bound ? '已入隔离点主数据' : '候选/自由挂标（未入主数据——保存后点「生成主数据」按编码建档/关联）'}</title>
+      <circle cx={m.x + 7.5} cy={m.y - 7.5} r={5.6} fill={bound ? '#0d9488' : '#7c3aed'} stroke="#fff" strokeWidth={1.3} />
+      {bound ? (
+        <path d={`M${m.x + 5.1},${m.y - 7.5} l1.7,1.8 l3.1,-3.4`} stroke="#fff" strokeWidth={1.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <text x={m.x + 7.5} y={m.y - 4.5} textAnchor="middle" fontSize={8.5} fontWeight={700} fill="#fff">?</text>
+      )}
+    </g>
+  )
   if (edit) {
     return (
       <g>
         {/* 透明命中垫片：菱形过小难以点中，用大号透明圆捕获指针便于拖拽/选中 */}
         <circle cx={m.x} cy={m.y} r={14} fill="transparent" />
         <polygon points={diamond} fill="#f43f5e" stroke="#fff" strokeWidth={1.4} />
+        {badge}
         <text x={m.x} y={m.y + 20} textAnchor="middle" fontSize={11} fill="#44403c" stroke="#fff" strokeWidth={3} paintOrder="stroke">
           {m.code}
         </text>
@@ -991,6 +1010,7 @@ export function MarkGlyph({ m, edit, state, stateLabel, hideText }: { m: PidMark
   return (
     <g>
       <polygon points={diamond} fill={style.fill} stroke={style.stroke} strokeWidth={1.6} />
+      {badge}
       {!hideText && (
         <>
           <rect x={m.x - chipW / 2} y={m.y + 11} width={chipW} height={16} rx={3} fill={style.fill} stroke={style.stroke} strokeWidth={0.8} />
@@ -2526,6 +2546,35 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }
 
+  // ---- 自动标注隔离点（Task 81）：整图设备按隔离包络边界拓扑推导，AI 语义分析后生成挂标 ----
+  const [deriveBusy, setDeriveBusy] = useState(false)
+  const [deriveOpen, setDeriveOpen] = useState(false)
+  const [deriveResult, setDeriveResult] = useState<DeriveResp | null>(null)
+
+  /** 自动标注隔离点：基于已保存的图内容推导，写入挂标后重新载入（不改主数据；未入主数据候选可经「生成主数据」按编码建档） */
+  const runDeriveIsolation = async () => {
+    if (!activeId || deriveBusy) return
+    if (dirtyRef.current) {
+      toast({ title: '请先保存图', description: '自动标注基于已保存的图内容，请先点击右上角保存', variant: 'destructive' })
+      return
+    }
+    setDeriveBusy(true)
+    try {
+      const r = await apiPost<DeriveResp>(`/api/pid-diagrams/${activeId}/derive-isolation`, { apply: true })
+      setDeriveResult(r)
+      setDeriveOpen(true)
+      if (r.applied) await selectDiagram(activeId) // 重新载入新挂标
+      toast({
+        title: r.applied ? '自动标注完成' : '推导完成（未新增标注）',
+        description: r.note || `推导候选 ${r.total} 个，分析 ${r.analyzed} 个，生成挂标 ${r.added.length} 个${r.skipped.length ? `，跳过 ${r.skipped.length} 个` : ''}${r.llmDegraded ? '（AI 分析异常已降级为规则命名）' : ''}`,
+      })
+    } catch (err) {
+      toast({ title: '自动标注隔离点失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setDeriveBusy(false)
+    }
+  }
+
   const switchMode = async (m: 'edit' | 'view') => {
     if (m === mode) return
     if (dirtyRef.current && activeIdRef.current) {
@@ -3915,6 +3964,15 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 onClick={() => void runGenerateMaster()}
               >
                 {genMasterBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 w-10 border-violet-300 bg-violet-50/60 p-0 text-violet-700 hover:bg-violet-100"
+                title="自动标注隔离点：整图主要设备按「隔离包络边界」拓扑推导对外连接隔离点位，AI 语义分析命名/匹配/风险提示（已入主数据 teal ✓ / 候选 violet ? 图标区分；需先保存图）"
+                disabled={!activeId || deriveBusy}
+                onClick={() => void runDeriveIsolation()}
+              >
+                {deriveBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Workflow className="h-4 w-4" />}
               </Button>
               <Button
                 variant="outline"
@@ -5527,6 +5585,76 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                   )}
                 </div>
               ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 自动标注隔离点结果弹窗（Task 81）：推导/分析/新增/跳过明细 */}
+      <Dialog open={deriveOpen} onOpenChange={setDeriveOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Workflow className="h-4 w-4 text-violet-700" /> 自动标注隔离点结果
+            </DialogTitle>
+            <DialogDescription>
+              整图设备按「隔离包络边界」拓扑推导：截断阀包络侧法兰 → 设备接口法兰 → 管线盲端三级回退；AI 语义分析完成命名/主数据匹配/风险提示（未改主数据）
+            </DialogDescription>
+          </DialogHeader>
+          {deriveResult && (
+            <div className="grid gap-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600">
+                <Badge variant="outline" className="border-stone-200 bg-stone-50 text-stone-600">推导候选 {deriveResult.total}</Badge>
+                <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-700">分析 {deriveResult.analyzed}</Badge>
+                <Badge variant="outline" className="border-teal-200 bg-teal-50 text-teal-700">生成挂标 {deriveResult.added.length}</Badge>
+                {deriveResult.skipped.length > 0 && <Badge variant="outline" className="border-stone-200 bg-stone-50 text-stone-500">跳过 {deriveResult.skipped.length}</Badge>}
+                {deriveResult.llmDegraded && (
+                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">AI 分析异常，已降级规则命名</Badge>
+                )}
+              </div>
+              {deriveResult.note && <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-500">{deriveResult.note}</div>}
+              {deriveResult.added.length > 0 && (
+                <div className="rounded-lg border border-stone-200 p-3">
+                  <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-stone-600">
+                    <span>新增挂标</span>
+                    <span className="inline-flex items-center gap-1 text-teal-700"><span className="inline-block h-2.5 w-2.5 rounded-full bg-teal-600" />✓ 已入主数据</span>
+                    <span className="inline-flex items-center gap-1 text-violet-700"><span className="inline-block h-2.5 w-2.5 rounded-full bg-violet-600" />? 候选（未入主数据）</span>
+                  </div>
+                  <div className="bp-thin-scrollbar max-h-56 overflow-y-auto">
+                    {deriveResult.added.map((it, i) => (
+                      <div key={`${it.code}-${i}`} className="border-b border-stone-100 py-1.5 last:border-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className={cn('inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white', it.bound ? 'bg-teal-600' : 'bg-violet-600')}>{it.bound ? '✓' : '?'}</span>
+                            <span className="truncate font-mono text-xs text-stone-700">{it.code}</span>
+                            <span className="truncate text-xs text-stone-500">{it.name}</span>
+                          </span>
+                          <span className="shrink-0 font-mono text-[10px] text-stone-400">({it.x},{it.y})</span>
+                        </div>
+                        {it.risk && <div className="mt-0.5 pl-5.5 text-[11px] leading-relaxed text-amber-700">⚠ {it.risk}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {deriveResult.skipped.length > 0 && (
+                <div className="rounded-lg border border-stone-200 p-3">
+                  <div className="mb-1.5 text-xs font-medium text-stone-600">跳过明细</div>
+                  <div className="bp-thin-scrollbar max-h-32 overflow-y-auto">
+                    {deriveResult.skipped.map((s, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 py-0.5 text-xs">
+                        <span className="truncate text-stone-500">{s.equipLabel}：{s.pathDesc}</span>
+                        <span className="shrink-0 text-stone-400">{s.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {deriveResult.added.some((a) => !a.bound) && (
+                <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-[11px] leading-relaxed text-violet-700">
+                  候选挂标尚未入主数据：确认无误后点击工具栏「生成主数据」即可按编码建档/关联（幂等）；不需要的候选可直接在画布删除
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

@@ -2739,3 +2739,23 @@ Work Log:
 
 Stage Summary:
 - Task 81 可行性调研完成：数据基础具备（28 阀门图元带分类、拓扑可表达、几何定位可复用），缺口=穿内联符号遍历+LLM 语义候选生成+确认 UI；推导质量前提=图上需画阀门（#20 主图无阀门会退化为设备法兰模式）
+
+---
+Task ID: 81
+Agent: Z.ai Code (主会话)
+Task: 用户批准并实施「PID 拓扑自动标注隔离点」——整图设备按隔离包络边界推导 + AI 语义分析 + 双态图标区分 + 图27 补画阀门演示舞台
+
+Work Log:
+- 【方案批准】用户批准三条：①PID 图加「自动标注隔离点」按钮，整图主要设备作包络边界生成挂标，已入主数据/未入主数据图标明显区分 ②规则按「隔离包络边界」执行 ③图27 补画阀门做演示舞台
+- 【bp-pid-derive.ts 新建】拓扑推导纯函数库：邻接表+DFS 穿透内联符号（阀门/仪表/管件），visited 防环，连线方向与行走方向解耦（E 可能是 conn.toShape）；三级回退定位：靠包络侧最近截断阀包络侧法兰（阀侧管线段中点）→ 设备接口法兰（首段中点）→ 管线盲端（末端外延 20）；阀门筛选：仅 vl-shutoff 7 种+基础阀门图形可作边界，止回/调节/泄放/执行机构/仪表穿透不设点
+- 【derive-isolation API 新建】POST /api/pid-diagrams/[id]/derive-isolation，body {apply}（false=预览不写库）：图遍历→去重（已有挂标 30 单位内跳过；候选同位同管线跳过/异管线 dx=18 偏移保留）→ LLM 语义分析（bpComplete 单次调用+无效重试一次+仍失败降级确定性命名并透明标注 llmDegraded；产出建议编码/位置名称/主数据匹配/风险提示，匹配「宁可漏配不可错配」且 id 必须在候选集内防幻觉）→ apply 写挂标（命中主数据绑定 masterPointId 用主数据 code/name；未命中候选挂标可后续「生成主数据」按编码建档）→ 返回 added/skipped/llmDegraded 明细；LLM 编码查重冲突自动加序号
+- 【pid-config.tsx 五处】①DeriveResp 类型 ②runDeriveIsolation（脏检查→POST→结果弹窗→重载）③工具栏 violet Workflow 按钮（生成主数据旁，title 说明三级回退与双态图标）④MarkGlyph 主数据绑定徽章：masterPointId!=null → teal 圆徽白✓，null → violet 圆徽白?（编辑/查看态都有，SVG title 悬停说明）⑤结果弹窗：统计徽章+新增明细（双态图例+risk amber 提示+坐标）+跳过明细+候选转正引导
+- 【图27 演示舞台】快照存 /tmp/pid27-before.json；插入 CV-201 旋启止回阀（泵出口，演示穿透）+V-202 截止阀（罐入口，演示罐侧截断），重接 5 段连线全 pipelineId=40：泵→止回→闸阀→仪表→截止→罐
+- 【环境坑】tsc 突报 31 错（PrismaClient 缺 Briefing/Attachment/PhotoCheck）——平台快照恢复致 node_modules/.prisma 生成产物过期，bunx prisma generate 重新生成后归零；下轮若见同类错误先 generate
+- 【验证（API+UI 双层）】①#27 预览：2 候选——P201 侧穿过止回阀选中 FV-101 闸阀、LLM 匹配既有主数据 IP-T73-77 正确跳过（本图已有标注）；V301 侧产出 IP-V301-01「V301入口法兰」✓ ②#27 apply：挂标写入 DB 验证（无 masterPointId）✓ ③#20 预览（apply=false 不污染舞台）：28 候选→17 保留（平行线 c-p28/29 异管线 dx 偏移保留、同位重复 11 跳过），E105 候选 LLM 匹配主数据 IP-E105-01 bound=true，全无阀门回退设备法兰路径验证 ✓ ④UI：双态徽章 DOM 断言 teal=1/violet=1；幂等重跑跳过原因精确（V301 附近已有标注/P201 主数据已有标注）；删挂标后 UI 按钮全链路重生成 IP-V301-01→画布 violet 徽章+结果弹窗（图例/明细/转正引导）✓ ⑤lint 0/tsc 0/dev.log 无错
+
+Stage Summary:
+- Task 81 交付闭环：PID 组态工具栏新增「自动标注隔离点」（violet Workflow）——整图设备按隔离包络边界拓扑推导，止回阀穿透/截断阀选边界/无阀回退设备法兰三级规则经图27+图20 双舞台验证；AI 语义分析负责命名/编码/主数据匹配/风险提示（带重试+降级防线，Task 80 教训落地）
+- 双态图标落地：挂标右上角圆徽 teal✓=已入主数据（含既有 m-p33 自动获得）/violet?=候选未入主数据，用户要求「明显区分」达成；候选经「生成主数据」按钮按编码幂等建档转正
+- 舞台变化：图27 新增 CV-201/V-202 两阀门（5 段连线 pipelineId=40）+候选挂标 IP-V301-01；图20/24 未写入任何挂标（预览模式验证）
+- 下阶段建议：①用户实测 PID 组态按钮（图27/图20 均可点，图20 会写入 17 个候选挂标可删除）②在案候选：已完结页验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度 ③prisma generate 环境坑已记录（快照恢复后 tsc 报 PrismaClient 缺模型先重新生成）
