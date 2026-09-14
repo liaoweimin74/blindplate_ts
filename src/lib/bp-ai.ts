@@ -27,38 +27,64 @@ export function getZai(): Promise<ZaiClient> {
   return zaiPromise
 }
 
-// ============ LLM Provider：DeepSeek / 内置网关（双通道，.env 随时切换） ============
+// ============ LLM Provider：私有化 OpenAI 兼容网关 / 内置 SDK（双通道，.env 随时切换） ============
 /**
  * 通道选择（每次调用实时读 .env，改配置无需改代码；dev 下改 .env 会自动重载）：
- * - LLM_PROVIDER=deepseek → 强制 DeepSeek（未配 key 直接报错，不静默回退，避免误判在用哪一方）
+ * - LLM_PROVIDER=private  → 强制私有化网关（未配 key 直接报错，不静默回退，避免误判在用哪一方）
+ * - LLM_PROVIDER=deepseek → 同 private（历史别名，向后兼容旧配置）
  * - LLM_PROVIDER=builtin  → 强制内置 z-ai-web-dev-sdk（.z-ai-config）
- * - LLM_PROVIDER=auto/未设 → 有 DEEPSEEK_API_KEY 用 DeepSeek，否则内置
- * 模型：文本 DEEPSEEK_MODEL（默认 deepseek-chat）；图像 DEEPSEEK_VISION_MODEL（默认 deepseek-flash，
- * 官方文档 https://api-docs.deepseek.com/zh-cn/guides/vision：image_url 块仅允许出现在 user 消息）
+ * - LLM_PROVIDER=auto/未设 → 有 LLM_API_KEY（旧名 DEEPSEEK_API_KEY 亦认）走私有网关，否则内置
+ *
+ * 私有化网关 = 任意 OpenAI 兼容 /chat/completions 服务（公司自建 vLLM / SGLang / Ollama / DashScope 兼容模式均可）：
+ * - LLM_BASE_URL        网关根地址（填到 /v1 这一级，如 http://10.0.0.5:8000/v1）
+ * - LLM_API_KEY         鉴权 key（网关无鉴权时填任意非空占位串）
+ * - LLM_MODEL           文本模型名（如 qwen3.8-27b）
+ * - VLM_MODEL           视觉模型名（未配默认复用 LLM_MODEL；若该模型不支持图像输入需另配 VL 模型）
+ * - LLM_ENABLE_THINKING 显式 =false/0/off 时注入 chat_template_kwargs.enable_thinking=false
+ *                       （vLLM/SGLang 部署 Qwen3 建议关闭思考链：输出更稳更快、不占 token 预算；
+ *                        不设置则不传该字段，保持部署端默认行为；若网关对未知字段报 4xx 请去掉）
+ * - LLM_MAX_TOKENS      可选：私有通道 max_tokens 硬上限（部署端上下文较小时防 4xx）
+ * 历史兼容：未配新变量时回读 DEEPSEEK_BASE_URL/DEEPSEEK_API_KEY/DEEPSEEK_MODEL/DEEPSEEK_VISION_MODEL。
+ * Qwen3 思考链说明：开思考时 vLLM/SGLang 把思考内容放 message.reasoning_content（不占 content），
+ * 本层只取 content 天然兼容；若思考耗尽 max_tokens 会得到空 content——下方空响应报错已覆盖该场景。
  */
-function deepseekConfig() {
-  const apiKey = (process.env.DEEPSEEK_API_KEY || '').trim()
-  const baseUrl = (process.env.DEEPSEEK_BASE_URL || '').trim() || 'https://api.deepseek.com'
-  const model = (process.env.DEEPSEEK_MODEL || '').trim() || 'deepseek-chat'
-  const visionModel = (process.env.DEEPSEEK_VISION_MODEL || '').trim() || 'deepseek-flash'
+function privateConfig() {
+  const apiKey = (process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim()
+  const baseUrl = (process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || '').trim() || 'https://api.deepseek.com'
+  const model = (process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || '').trim() || 'deepseek-chat'
+  // 视觉模型未单独配置时默认复用文本模型（公司常见「一个多模态模型全包」部署）；不支持图像时另配 VLM_MODEL
+  const visionModel = (process.env.VLM_MODEL || process.env.DEEPSEEK_VISION_MODEL || '').trim() || model
   return { apiKey, baseUrl, model, visionModel }
 }
 
-function resolveProvider(): 'deepseek' | 'builtin' {
-  const cfg = deepseekConfig()
+function resolveProvider(): 'private' | 'builtin' {
+  const cfg = privateConfig()
   const p = (process.env.LLM_PROVIDER || 'auto').trim().toLowerCase()
   if (p === 'builtin') return 'builtin'
-  if (p === 'deepseek') {
+  if (p === 'private' || p === 'deepseek') {
     if (!cfg.apiKey) {
-      throw new Error('LLM_PROVIDER=deepseek 但未配置 DEEPSEEK_API_KEY——请在 .env 填写后保存（dev 会自动重载）或改为 LLM_PROVIDER=builtin/auto')
+      throw new Error('LLM_PROVIDER=private 但未配置 LLM_API_KEY——请在 .env 填写公司网关地址与 key 后保存（dev 会自动重载）或改为 LLM_PROVIDER=builtin/auto')
     }
-    return 'deepseek'
+    return 'private'
   }
-  return cfg.apiKey ? 'deepseek' : 'builtin'
+  return cfg.apiKey ? 'private' : 'builtin'
 }
 
-/** DeepSeek OpenAI 兼容 /chat/completions 共用请求（返回文本） */
-async function deepseekFetch(
+/** Qwen3 等思考链开关：LLM_ENABLE_THINKING 显式 false 时注入 chat_template_kwargs（vLLM/SGLang 识别） */
+function thinkingOffPatch(): Record<string, unknown> {
+  const v = (process.env.LLM_ENABLE_THINKING || '').trim().toLowerCase()
+  if (v === 'false' || v === '0' || v === 'off') return { chat_template_kwargs: { enable_thinking: false } }
+  return {}
+}
+
+/** 私有通道 max_tokens 上限（LLM_MAX_TOKENS 可选覆盖，防部署端上下文不足报 4xx） */
+function tokenCap(fallback: number): number {
+  const n = Number(process.env.LLM_MAX_TOKENS)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+/** OpenAI 兼容 /chat/completions 共用请求（返回文本；私有化网关与 DeepSeek 均走此格式） */
+async function openaiCompatFetch(
   baseUrl: string,
   apiKey: string,
   body: Record<string, unknown>,
@@ -78,20 +104,20 @@ async function deepseekFetch(
     })
     if (!res.ok) {
       const errText = (await res.text()).slice(0, 300)
-      throw new Error(`DeepSeek API ${res.status}: ${errText}`)
+      throw new Error(`私有化网关 ${res.status}: ${errText}`)
     }
     const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>
       usage?: { completion_tokens_details?: { reasoning_tokens?: number } }
     }
     const choice = data.choices?.[0]
     const content = choice?.message?.content ?? ''
     if (!content) {
-      // HTTP 200 但正文为空：deepseek-flash 等推理模型的 max_tokens 是「思维链+答案」总预算，
+      // HTTP 200 但正文为空：思考链模型（DeepSeek-R1 / Qwen3 开思考）的 max_tokens 是「思维链+答案」总预算，
       // 思维链未写完预算即耗尽 → finish_reason=length + content=""（实测）。必须报错而非静默返回空串。
-      const reasoning = data.usage?.completion_tokens_details?.reasoning_tokens
+      const reasoning = data.usage?.completion_tokens_details?.reasoning_tokens ?? choice?.message?.reasoning_content?.length
       throw new Error(
-        `DeepSeek 模型 ${body.model} 返回空响应（finish_reason=${choice?.finish_reason ?? '未知'}，思维链 tokens=${reasoning ?? '未知'}）——多为推理预算被思维链耗尽，请重试`,
+        `模型 ${body.model} 返回空响应（finish_reason=${choice?.finish_reason ?? '未知'}，思考 tokens=${reasoning ?? '未知'}）——多为思考链耗尽 token 预算，建议 .env 设 LLM_ENABLE_THINKING=false 或调大 LLM_MAX_TOKENS 后重试`,
       )
     }
     return content
@@ -103,21 +129,20 @@ async function deepseekFetch(
 // ============ 消息清洗 ============
 export interface AiChatMessage { role: 'user' | 'assistant'; content: string }
 
-/** 文本补全（DeepSeek 通道）：system 置顶，OpenAI 兼容 */
-async function deepseekComplete(
+/** 文本补全（私有网关通道）：system 置顶，OpenAI 兼容 */
+async function privateComplete(
   systemPrompt: string,
   messages: AiChatMessage[],
   opts?: { maxTokens?: number; temperature?: number },
 ): Promise<string> {
-  const { apiKey, baseUrl, model } = deepseekConfig()
-  // 推理模型预算适配：deepseek-flash 的 max_tokens 是「思维链+答案」总预算（实测思维链可达数千 tokens），
-  // 直接透传业务值（如体检 8000）会被思维链耗尽致 content 空——放大 4 倍封顶 32000（实测 API 接受 ≥60000）
-  const maxTokens = opts?.maxTokens ? Math.min(opts.maxTokens * 4, 32000) : 8192
-  return deepseekFetch(baseUrl, apiKey, {
+  const { apiKey, baseUrl, model } = privateConfig()
+  // max_tokens 透传业务值（默认 8192），受 LLM_MAX_TOKENS 硬上限约束；思考链预算不足时由空响应报错兜底提示
+  return openaiCompatFetch(baseUrl, apiKey, {
     model,
     stream: false,
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
-    max_tokens: maxTokens,
+    max_tokens: Math.min(opts?.maxTokens ?? 8192, tokenCap(32768)),
+    ...thinkingOffPatch(),
     ...(opts?.temperature !== undefined ? { temperature: opts.temperature } : {}),
   }, 120_000)
 }
@@ -129,13 +154,12 @@ async function deepseekComplete(
  * imageDataUrl 必须是 data:image/...;base64,... 形式
  */
 export async function bpVisionComplete(systemPrompt: string, imageDataUrl: string): Promise<string> {
-  const cfg = deepseekConfig()
-  if (resolveProvider() === 'deepseek') {
-    return deepseekFetch(cfg.baseUrl, cfg.apiKey, {
+  const cfg = privateConfig()
+  if (resolveProvider() === 'private') {
+    return openaiCompatFetch(cfg.baseUrl, cfg.apiKey, {
       model: cfg.visionModel,
       stream: false,
-      // 视觉模型同为推理模型（思维链+识别 JSON 输出），默认 4K 会被思维链耗尽致空响应——给足预算
-      max_tokens: 32000,
+      max_tokens: tokenCap(16384),
       messages: [
         { role: 'system', content: systemPrompt },
         {
@@ -146,6 +170,7 @@ export async function bpVisionComplete(systemPrompt: string, imageDataUrl: strin
           ],
         },
       ],
+      ...thinkingOffPatch(),
     }, 180_000)
   }
   const zai = await getZai()
@@ -174,12 +199,12 @@ export async function bpVisionComplete(systemPrompt: string, imageDataUrl: strin
 export async function bpVisionCompleteMulti(systemPrompt: string, imageDataUrls: string[]): Promise<string> {
   if (!imageDataUrls.length) throw new Error('未提供任何图片')
   const imageBlocks = imageDataUrls.map((url) => ({ type: 'image_url' as const, image_url: { url } }))
-  const cfg = deepseekConfig()
-  if (resolveProvider() === 'deepseek') {
-    return deepseekFetch(cfg.baseUrl, cfg.apiKey, {
+  const cfg = privateConfig()
+  if (resolveProvider() === 'private') {
+    return openaiCompatFetch(cfg.baseUrl, cfg.apiKey, {
       model: cfg.visionModel,
       stream: false,
-      max_tokens: 32000,
+      max_tokens: tokenCap(16384),
       messages: [
         { role: 'system', content: systemPrompt },
         {
@@ -190,6 +215,7 @@ export async function bpVisionCompleteMulti(systemPrompt: string, imageDataUrls:
           ],
         },
       ],
+      ...thinkingOffPatch(),
     }, 180_000)
   }
   const zai = await getZai()
@@ -277,7 +303,7 @@ export async function bpComplete(
   messages: AiChatMessage[],
   opts?: { maxTokens?: number; temperature?: number },
 ): Promise<string> {
-  if (resolveProvider() === 'deepseek') return deepseekComplete(systemPrompt, messages, opts)
+  if (resolveProvider() === 'private') return privateComplete(systemPrompt, messages, opts)
   const zai = await getZai()
   const completion = await zai.chat.completions.create({
     messages: [{ role: 'assistant', content: systemPrompt }, ...messages],

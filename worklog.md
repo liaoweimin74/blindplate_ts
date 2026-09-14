@@ -2796,3 +2796,21 @@ Stage Summary:
 - 「生成主数据」从单击直写升级为「预览确认两步流」：apply=false 预览计划（负数临时 id 标记将新建、零写库实证）→ 用户确认 → apply=true 幂等执行；预览后图变更自动检测要求重新预览，杜绝计划过期误执行
 - 图 22 的历史悬空引用借 E2E 顺带自愈（2 设备+6 管线落库）；图 20/23 悬空引用仍待用户下次点生成时自动修复
 - 下阶段建议：①用户实测预览确认流（任意图点生成主数据即可体验）②在案候选不变：验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入、T101/T-101 双编码合并决策
+
+---
+Task ID: 83
+Agent: 主会话
+Task: 接入公司私有化部署 Qwen 大模型作为 LLM/VLM 的通道改造（用户咨询「需要怎么修改？代码需要改吗？」）
+
+Work Log:
+- 全库调查：12 个 AI 调用点（chat/draft×4/survey×2/pid-extract/photo-check/derive-isolation/master-validate-ai/briefing/retrieval）全部收敛于 src/lib/bp-ai.ts 三个统一出口，无直接 SDK 依赖
+- 确认 bp-ai.ts 已有「内置 SDK + DeepSeek OpenAI 兼容」双通道架构（LLM_PROVIDER 实时切换）
+- 泛化重构 bp-ai.ts（单文件 6 处）：deepseekConfig→privateConfig（新变量 LLM_BASE_URL/LLM_API_KEY/LLM_MODEL/VLM_MODEL，兼容回读 DEEPSEEK_*）；resolveProvider 值域 deepseek→private（deepseek 保留为别名）；deepseekFetch→openaiCompatFetch（错误消息去品牌化，空响应报错增强识别 reasoning_content）；新增 thinkingOffPatch（LLM_ENABLE_THINKING=false 注入 chat_template_kwargs.enable_thinking=false，vLLM/SGLang 关 Qwen3 思考链）；新增 tokenCap（LLM_MAX_TOKENS 硬上限）；deepseekComplete→privateComplete（max_tokens 改透传+默认 8192）；bpVisionComplete/bpVisionCompleteMulti/bpComplete 三出口同步切换
+- VLM 策略：VLM_MODEL 未配时默认复用 LLM_MODEL（适配「一个多模态模型全包」部署）
+- 验证：rg 旧引用残留 0；bun run lint 通过；tsc --noEmit src/ 0 错；回归 /api/ai/chat（builtin 默认通道）正确返回「一票一板」+入口标记，零行为变化
+
+Stage Summary:
+- 代码已就绪支持任意 OpenAI 兼容私有化网关（vLLM/SGLang/Ollama/DashScope 兼容模式），用户只需在 .env 填 LLM_BASE_URL/LLM_API_KEY/LLM_MODEL（可选 VLM_MODEL/LLM_ENABLE_THINKING=false/LLM_MAX_TOKENS）即可切换，dev 改 .env 自动重载
+- 未配置新变量时行为与改前完全一致（当前实测仍走内置通道）
+- 待用户提供：公司网关地址/鉴权 key/模型名；若文本模型不支持图像需另配 VL 模型名
+- 风险提示：网关若对 chat_template_kwargs 未知字段报 4xx，去掉 LLM_ENABLE_THINKING 即可
