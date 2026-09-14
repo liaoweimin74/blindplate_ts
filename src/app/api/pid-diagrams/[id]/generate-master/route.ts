@@ -19,6 +19,10 @@ export const dynamic = 'force-dynamic'
  *    并回填 mark.masterPointId；已绑定 / 编码为空的挂标跳过；已绑定但主数据缺管线归属的补归属；
  *    设备引用同理悬空自愈（重置后按 label 位号重新生成/关联，图 20/22/23/24 实证）。
  * 全程事务；回填后的 content 写回组态图，前端刷新后图元/连线/挂标与主数据一一对应。
+ *
+ * body: { apply?: boolean } —— 预览确认模式（用户要求：先预览、确认后再生成）：
+ * - apply=false（默认）预览：完整推导变更计划但不写库，将新建项用负数临时 id 标记；
+ * - apply=true 才真正生成入库、回填绑定并保存组态图。
  */
 
 interface GenShape {
@@ -85,11 +89,14 @@ function equipTypeOf(s: GenShape): string {
   return 'OTHER'
 }
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const did = parseId(id)
     if (!did) return jsonError('无效的 PID 图 ID')
+    let body: { apply?: boolean } = {}
+    try { body = await req.json() } catch { /* 缺省预览模式 */ }
+    const apply = body.apply === true
     const diagram = await db.pidDiagram.findUnique({ where: { id: did } })
     if (!diagram) return jsonError('PID 图不存在', 404)
 
@@ -114,6 +121,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       // 悬空设备引用自愈：图元绑定的设备 id 若已不存在（历史删除/跨图复制），重置为未绑定，
       // 再按 label 位号重新生成/关联；否则设备阶段误计 skipped，管线端点校验静默失败
       const existingEquipIds = new Set((await tx.equipment.findMany({ select: { id: true } })).map((e) => e.id))
+      // 预览模式虚拟设备：负数临时 id → 位号（供管线阶段解析端点编码，不落库）
+      const virtualEquipCode = new Map<number, string>()
+      let fakeEquipSeq = 0
       for (const s of shapes) {
         if (s.equipmentId != null && !existingEquipIds.has(s.equipmentId)) s.equipmentId = null
         if (s.equipmentId != null) { equipments.skipped++; continue }
@@ -128,27 +138,43 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         if (exists) {
           s.equipmentId = exists.id
           equipments.linked++
-          equipments.items.push({ code: tag, id: exists.id, created: false, note: '已存在，已关联到图元' })
+          equipments.items.push({ code: tag, id: exists.id, created: false, note: apply ? '已存在，已关联到图元' : '编码已存在，将关联到图元' })
           continue
         }
         const name = (s.label ?? '').trim().slice(0, 60)
-        const created = await tx.equipment.create({
-          data: {
-            code: tag,
-            name: name || tag,
-            type: equipTypeOf(s),
-            unitId: diagram.unitId,
-            remark: 'PID 图生成主数据自动创建',
-          },
-        })
-        s.equipmentId = created.id
-        equipments.created++
-        equipments.items.push({ code: tag, id: created.id, created: true })
+        if (apply) {
+          const created = await tx.equipment.create({
+            data: {
+              code: tag,
+              name: name || tag,
+              type: equipTypeOf(s),
+              unitId: diagram.unitId,
+              remark: 'PID 图生成主数据自动创建',
+            },
+          })
+          s.equipmentId = created.id
+          equipments.created++
+          equipments.items.push({ code: tag, id: created.id, created: true })
+        } else {
+          fakeEquipSeq -= 1
+          s.equipmentId = fakeEquipSeq
+          virtualEquipCode.set(fakeEquipSeq, tag)
+          equipments.created++
+          equipments.items.push({ code: tag, id: fakeEquipSeq, created: true, note: '将新建' })
+        }
       }
 
       // ---- 2. 管线 ----
       const pipelines: GenGroup = { created: 0, linked: 0, skipped: 0, items: [] }
       const pipeCodeCount = new Map<string, number>()
+      const plannedPipes: Array<[number, string]> = [] // 预览模式计划新建的管线（临时 id → 编码）
+      let fakePipeSeq = 0
+      // 端点设备编码解析：预览模式优先取虚拟设备位号，实存设备查库
+      const equipCodeOf = async (eqId: number): Promise<string> => {
+        const v = virtualEquipCode.get(eqId)
+        if (v != null) return v
+        return (await tx.equipment.findUnique({ where: { id: eqId } }))?.code ?? ''
+      }
       // DB 实存管线 id 集合：图 JSON 里指向已删除管线的悬空 id 先自愈重置为未绑定（静默），
       // 使这些连线重新走正常生成流程；后续隔离点归属也以此 + 新建 id 为准，杜绝外键崩溃
       const existingPipeIds = new Set((await tx.pipeline.findMany({ select: { id: true } })).map((p) => p.id))
@@ -162,8 +188,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
           pipelines.items.push({ code: '(端点未绑定设备)', id: null, created: false, note: '两端图元需先生成/绑定设备' })
           continue
         }
-        const fromCode = (await tx.equipment.findUnique({ where: { id: fromEq } }))?.code ?? ''
-        const toCode = (await tx.equipment.findUnique({ where: { id: toEq } }))?.code ?? ''
+        const fromCode = await equipCodeOf(fromEq)
+        const toCode = await equipCodeOf(toEq)
         if (!fromCode || !toCode) { pipelines.skipped++; continue }
         // 管线号 = 起点位号-终点位号；重复时自动加序号（同一对设备多条连线）
         const base = `${fromCode}-${toCode}`
@@ -174,29 +200,41 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         if (exists) {
           c.pipelineId = exists.id
           pipelines.linked++
-          pipelines.items.push({ code, id: exists.id, created: false, note: '已存在，已关联到连线' })
+          pipelines.items.push({ code, id: exists.id, created: false, note: apply ? '已存在，已关联到连线' : '编码已存在，将关联到连线' })
           continue
         }
-        const created = await tx.pipeline.create({
-          data: {
-            code,
-            name: code,
-            unitId: diagram.unitId,
-            startEquipmentId: fromEq,
-            endEquipmentId: toEq,
-            remark: 'PID 图生成主数据自动创建',
-          },
-        })
-        c.pipelineId = created.id
-        existingPipeIds.add(created.id)
-        pipelines.created++
-        pipelines.items.push({ code, id: created.id, created: true })
+        if (apply) {
+          const created = await tx.pipeline.create({
+            data: {
+              code,
+              name: code,
+              unitId: diagram.unitId,
+              startEquipmentId: fromEq,
+              endEquipmentId: toEq,
+              remark: 'PID 图生成主数据自动创建',
+            },
+          })
+          c.pipelineId = created.id
+          existingPipeIds.add(created.id)
+          pipelines.created++
+          pipelines.items.push({ code, id: created.id, created: true })
+        } else {
+          fakePipeSeq -= 1
+          c.pipelineId = fakePipeSeq
+          existingPipeIds.add(fakePipeSeq) // 让后续折线过滤/归属按计划口径工作
+          plannedPipes.push([fakePipeSeq, code])
+          pipelines.created++
+          pipelines.items.push({ code, id: fakePipeSeq, created: true, note: '将新建' })
+        }
       }
 
       // ---- 3. 隔离点（所属管线按挂标到各管线折线最近距离推导） ----
       const isoPoints: GenGroup = { created: 0, linked: 0, skipped: 0, items: [] }
       if (marks.length > 0) {
         const pipeCodeById = new Map((await tx.pipeline.findMany({ select: { id: true, code: true } })).map((p) => [p.id, p.code]))
+        // 预览模式：本轮计划新建的管线（负数临时 id）并入编码表，供折线过滤与归属备注使用
+        for (const [fakeId, code] of plannedPipes) pipeCodeById.set(fakeId, code)
+        let fakeMarkSeq = 0
         // 各连线折线（mount 几何库的简化正交路由，与导入端同源）
         const polyOf = layoutPolylineOf((sid) => shapeById.get(sid) as MountShape | undefined)
         const connPolys = connections
@@ -223,9 +261,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
             const bound = await tx.isoPointMaster.findUnique({ where: { id: m.masterPointId } })
             if (bound) {
               if (bound.pipelineId == null && nearestPipeId) {
-                await tx.isoPointMaster.update({ where: { id: bound.id }, data: { pipelineId: nearestPipeId } })
+                if (apply) await tx.isoPointMaster.update({ where: { id: bound.id }, data: { pipelineId: nearestPipeId } })
                 isoPoints.linked++
-                isoPoints.items.push({ code: m.code, id: bound.id, created: false, note: `补归属管线 ${pipeCodeById.get(nearestPipeId) ?? ''}` })
+                isoPoints.items.push({ code: m.code, id: bound.id, created: false, note: `${apply ? '补归属管线' : '将补归属管线'} ${pipeCodeById.get(nearestPipeId) ?? ''}` })
               } else {
                 isoPoints.skipped++
               }
@@ -238,32 +276,42 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
             m.masterPointId = exists.id
             isoPoints.linked++
             if (exists.pipelineId == null && nearestPipeId) {
-              await tx.isoPointMaster.update({ where: { id: exists.id }, data: { pipelineId: nearestPipeId } })
-              isoPoints.items.push({ code: m.code, id: exists.id, created: false, note: `已关联，并补归属管线 ${pipeCodeById.get(nearestPipeId) ?? ''}` })
+              if (apply) await tx.isoPointMaster.update({ where: { id: exists.id }, data: { pipelineId: nearestPipeId } })
+              isoPoints.items.push({ code: m.code, id: exists.id, created: false, note: `${apply ? '已关联，并补归属管线' : '编码已存在，将关联并补归属管线'} ${pipeCodeById.get(nearestPipeId) ?? ''}` })
             } else {
-              isoPoints.items.push({ code: m.code, id: exists.id, created: false, note: '已存在，已关联到挂标' })
+              isoPoints.items.push({ code: m.code, id: exists.id, created: false, note: apply ? '已存在，已关联到挂标' : '编码已存在，将关联到挂标' })
             }
             continue
           }
-          const created = await tx.isoPointMaster.create({
-            data: {
-              code: m.code,
-              name: (m.name ?? '').trim() || m.code,
-              pipelineId: nearestPipeId,
-              remark: 'PID 图生成主数据自动创建',
-            },
-          })
-          m.masterPointId = created.id
-          isoPoints.created++
-          isoPoints.items.push({ code: m.code, id: created.id, created: true, note: nearestPipeId ? `所属管线 ${pipeCodeById.get(nearestPipeId) ?? ''}` : '未识别到所属管线（位置距管线较远）' })
+          const note = nearestPipeId ? `所属管线 ${pipeCodeById.get(nearestPipeId) ?? ''}` : '未识别到所属管线（位置距管线较远）'
+          if (apply) {
+            const created = await tx.isoPointMaster.create({
+              data: {
+                code: m.code,
+                name: (m.name ?? '').trim() || m.code,
+                pipelineId: nearestPipeId,
+                remark: 'PID 图生成主数据自动创建',
+              },
+            })
+            m.masterPointId = created.id
+            isoPoints.created++
+            isoPoints.items.push({ code: m.code, id: created.id, created: true, note })
+          } else {
+            fakeMarkSeq -= 1
+            m.masterPointId = fakeMarkSeq
+            isoPoints.created++
+            isoPoints.items.push({ code: m.code, id: fakeMarkSeq, created: true, note: `将建档，${note}` })
+          }
         }
       }
 
-      // ---- 4. 回填 content 并保存（管线起止设备已在创建时写入） ----
-      const normalized = JSON.stringify({ shapes, connections, marks })
-      await tx.pidDiagram.update({ where: { id: did }, data: { content: normalized } })
+      // ---- 4. 回填 content 并保存（仅 apply；预览模式不写库） ----
+      if (apply) {
+        const normalized = JSON.stringify({ shapes, connections, marks })
+        await tx.pidDiagram.update({ where: { id: did }, data: { content: normalized } })
+      }
 
-      return { equipments, pipelines, isoPoints }
+      return { applied: apply, equipments, pipelines, isoPoints }
     })
 
     return NextResponse.json(result)

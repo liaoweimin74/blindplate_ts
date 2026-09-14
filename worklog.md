@@ -2779,3 +2779,20 @@ Work Log:
 Stage Summary:
 - generate-master 现在对三类脏数据免疫：悬空 pipelineId / 悬空 equipmentId / 悬空 masterPointId 全部自愈，且幂等收敛（重复运行只链不建）；图 24 从崩溃态恢复为全绑定态，用户并发编辑期间系统行为始终正确
 - 遗留观察项：①图 24/20 存在无横线位号（T101）与种子横线位号（T-101）并存——同物理设备双编码，是否合并属主数据决策待用户定夺 ②用户仍在并发编辑图 24，勿对其做写操作 ③图 20/22/23 的悬空引用会在用户下次点「生成主数据」时自动同款修复
+
+---
+Task ID: 82
+Agent: Z.ai Code (主会话)
+Task: 用户需求「PID组态编辑器中生成主数据时需要在对话框中先预览一下，确认以后再生成」——generate-master 预览确认两步流
+
+Work Log:
+- 【API·apply 开关】generate-master 增加 body {apply?: boolean}：apply=false（默认，更安全口径）完整推导变更计划但零写库；apply=true 才生成入库/回填绑定/保存 content；响应新增 applied 字段
+- 【API·预览虚拟 id 体系】预览模式下将新建项用负数临时 id 标记：virtualEquipCode（虚拟设备 id→位号）+ equipCodeOf 解析器（管线端点编码优先取虚拟设备）+ plannedPipes（临时 id→编码并入 pipeCodeById 供折线过滤/归属备注）——保证悬空自愈→虚拟编码→管线号推导→隔离点归属的完整链路在预览态与执行态口径一致；所有 tx 写操作（create/update/content 回写）均 if (apply) 守卫；预览复用 $transaction（纯读，开销可忽略）
+- 【UI·两步流】runGenerateMaster 改为第一步预览（apply:false→genMasterPreview→预览弹窗）；新增 confirmGenerateMaster 第二步（dirtyRef 复查防计划过期→apply:true→关闭预览→展示既有结果弹窗+toast+重载）；工具栏按钮 title 更新「先预览变更计划，确认后…」
+- 【UI·预览弹窗】teal Database 标题「生成主数据 · 预览确认」；三组卡片（设备/管线/隔离点）徽章改为「将新建(emerald)/将关联(teal)/跳过(stone)」+ 明细列表（note 带将前缀：将新建/将关联/将补归属管线/将建档）；genTotalChanges=0 时显示「均已就绪无需变更」且确认按钮禁用；确认按钮 teal 主操作色；预览后图被编辑过则 toast 要求重新预览
+- 【验证】①图24 预览：applied=False 全 skipped，前后 DB 快照（28/30/40/20）零变化——只读性实证 ②图22 预览（仍有 2 悬空 eq+6 悬空 pipe）：计划=设备将新建 P-101/V-101+管线将新建 6 条（V-101-P-101 同时用到两个虚拟设备编码，虚拟链路全通）③浏览器 E2E 图22：点生成主数据→预览弹窗明细正确→点确认生成→结果弹窗出现，DB 复核 equipment 28→30/pipeline 30→36/图22 悬空 eq 清零/6 条管线起止设备绑定正确 ④控制台 0 错误、lint 0、tsc 0
+
+Stage Summary:
+- 「生成主数据」从单击直写升级为「预览确认两步流」：apply=false 预览计划（负数临时 id 标记将新建、零写库实证）→ 用户确认 → apply=true 幂等执行；预览后图变更自动检测要求重新预览，杜绝计划过期误执行
+- 图 22 的历史悬空引用借 E2E 顺带自愈（2 设备+6 管线落库）；图 20/23 悬空引用仍待用户下次点生成时自动修复
+- 下阶段建议：①用户实测预览确认流（任意图点生成主数据即可体验）②在案候选不变：验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入、T101/T-101 双编码合并决策

@@ -242,10 +242,14 @@ interface StatusResp {
   generatedAt?: string
 }
 
-/** 生成主数据响应（需求 2）：按图元/连线/挂标标识幂等生成设备/管线/隔离点并回填绑定 */
+/** 生成主数据响应（需求 2）：按图元/连线/挂标标识幂等生成设备/管线/隔离点并回填绑定；applied=false 为预览计划（负数临时 id 标记将新建项） */
 interface GenMasterItem { code: string; id: number | null; created: boolean; note?: string }
 interface GenMasterGroup { created: number; linked: number; skipped: number; items: GenMasterItem[] }
-interface GenMasterResp { equipments: GenMasterGroup; pipelines: GenMasterGroup; isoPoints: GenMasterGroup }
+interface GenMasterResp { applied?: boolean; equipments: GenMasterGroup; pipelines: GenMasterGroup; isoPoints: GenMasterGroup }
+
+/** 预览计划中的实际变更数（将新建+将关联，不含跳过） */
+const genTotalChanges = (g: GenMasterResp) =>
+  g.equipments.created + g.equipments.linked + g.pipelines.created + g.pipelines.linked + g.isoPoints.created + g.isoPoints.linked
 
 /** 自动标注隔离点响应（Task 81）：拓扑推导候选经 AI 语义分析后生成挂标 */
 interface DeriveAdded { code: string; name: string; x: number; y: number; bound: boolean; masterCode?: string | null; risk?: string | null }
@@ -2079,6 +2083,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [genMasterBusy, setGenMasterBusy] = useState(false)
   const [genMasterOpen, setGenMasterOpen] = useState(false)
   const [genMasterResult, setGenMasterResult] = useState<GenMasterResp | null>(null)
+  const [genPreviewOpen, setGenPreviewOpen] = useState(false)
+  const [genPreviewBusy, setGenPreviewBusy] = useState(false)
+  const [genMasterPreview, setGenMasterPreview] = useState<GenMasterResp | null>(null)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameVal, setRenameVal] = useState('')
   const [renaming, setRenaming] = useState(false)
@@ -2521,7 +2528,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }
 
-  /** 生成主数据（需求 2）：基于已保存的图内容，按标识幂等生成/关联设备、管线、隔离点，回填绑定后重新载入 */
+  /** 生成主数据·第一步预览（用户要求：先预览、确认后再生成）：apply=false 只算变更计划不写库，弹窗确认后才真正生成 */
   const runGenerateMaster = async () => {
     if (!activeId || genMasterBusy) return
     if (dirtyRef.current) {
@@ -2530,7 +2537,29 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
     setGenMasterBusy(true)
     try {
-      const r = await apiPost<GenMasterResp>(`/api/pid-diagrams/${activeId}/generate-master`, {})
+      const r = await apiPost<GenMasterResp>(`/api/pid-diagrams/${activeId}/generate-master`, { apply: false })
+      setGenMasterPreview(r)
+      setGenPreviewOpen(true)
+    } catch (err) {
+      toast({ title: '生成主数据预览失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setGenMasterBusy(false)
+    }
+  }
+
+  /** 生成主数据·第二步确认执行：apply=true 真正生成入库并回填绑定，展示结果弹窗 */
+  const confirmGenerateMaster = async () => {
+    if (!activeId || genPreviewBusy) return
+    if (dirtyRef.current) {
+      // 预览后图又改过：计划已过期，要求重新预览
+      setGenPreviewOpen(false)
+      toast({ title: '图内容已变化，请重新预览', description: '预览后图又被编辑过，变更计划已过期；请重新点击生成主数据预览', variant: 'destructive' })
+      return
+    }
+    setGenPreviewBusy(true)
+    try {
+      const r = await apiPost<GenMasterResp>(`/api/pid-diagrams/${activeId}/generate-master`, { apply: true })
+      setGenPreviewOpen(false)
       setGenMasterResult(r)
       setGenMasterOpen(true)
       await loadBindOptions()
@@ -2542,7 +2571,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     } catch (err) {
       toast({ title: '生成主数据失败', description: (err as Error).message, variant: 'destructive' })
     } finally {
-      setGenMasterBusy(false)
+      setGenPreviewBusy(false)
     }
   }
 
@@ -3959,7 +3988,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               <Button
                 variant="outline"
                 className="h-10 w-10 p-0"
-                title="生成主数据：按图元位号/连线两端/挂标编码，自动生成并关联设备、管线、隔离点主数据（幂等：已存在的直接复用；需先保存图）"
+                title="生成主数据：先预览变更计划，确认后按图元位号/连线两端/挂标编码自动生成并关联设备、管线、隔离点主数据（幂等：已存在的直接复用；需先保存图）"
                 disabled={!activeId || genMasterBusy}
                 onClick={() => void runGenerateMaster()}
               >
@@ -5552,7 +5581,63 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         </DialogContent>
       </Dialog>
 
-      {/* 生成主数据结果弹窗（需求 2）：新建/关联/跳过明细 */}
+      {/* 生成主数据预览弹窗：先预览变更计划，确认后才写库 */}
+      <Dialog open={genPreviewOpen} onOpenChange={(o) => !genPreviewBusy && setGenPreviewOpen(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Database className="h-4 w-4 text-teal-700" /> 生成主数据 · 预览确认
+            </DialogTitle>
+            <DialogDescription>
+              以下为基于已保存图内容推导的变更计划，确认前不会写入任何数据；跳过项保持不变（已绑定/编码已存在/位号缺失等）
+            </DialogDescription>
+          </DialogHeader>
+          {genMasterPreview && (
+            <div className="grid gap-3">
+              {([['设备', genMasterPreview.equipments], ['管线', genMasterPreview.pipelines], ['隔离点', genMasterPreview.isoPoints]] as const).map(([label, g]) => (
+                <div key={label} className="rounded-lg border border-stone-200 p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-stone-600">
+                    <span>{label}</span>
+                    <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">将新建 {g.created}</Badge>
+                    <Badge variant="outline" className="border-teal-200 bg-teal-50 text-teal-700">将关联 {g.linked}</Badge>
+                    {g.skipped > 0 && <Badge variant="outline" className="border-stone-200 bg-stone-50 text-stone-500">跳过 {g.skipped}</Badge>}
+                  </div>
+                  {g.items.length > 0 && (
+                    <div className="bp-thin-scrollbar mt-2 max-h-32 overflow-y-auto">
+                      {g.items.map((it, i) => (
+                        <div key={`${it.code}-${i}`} className="flex items-center justify-between gap-2 py-0.5 text-xs">
+                          <span className="font-mono text-stone-700">{it.code}</span>
+                          <span className="truncate text-stone-400">{it.note ?? (it.created ? '将新建' : '将关联')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {genTotalChanges(genMasterPreview) === 0 && (
+                <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-500">
+                  图上主数据均已就绪，本次无需变更（如需重新生成请先调整图内容）
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" disabled={genPreviewBusy} onClick={() => setGenPreviewOpen(false)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              className="bg-teal-600 text-white hover:bg-teal-700"
+              disabled={genPreviewBusy || !genMasterPreview || genTotalChanges(genMasterPreview) === 0}
+              onClick={() => void confirmGenerateMaster()}
+            >
+              {genPreviewBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+              确认生成
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={genMasterOpen} onOpenChange={setGenMasterOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
