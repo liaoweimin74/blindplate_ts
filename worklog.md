@@ -2724,3 +2724,18 @@ Work Log:
 
 Stage Summary:
 - 【push 阻塞解除】本地 18 个待推提交（Task 73-b/73-c + 74/75/76/77/78/79/80 + db 归档）全部推送成功，远程 main=2278ccd，与本地完全同步；后续巡检轮 rg -c GITHUB_TOKEN .env >0 时 push 会显示 up-to-date（正常，勿重复操作）
+
+---
+Task ID: 81-调研
+Agent: Z.ai Code (主会话)
+Task: 用户讨论「PID 拓扑推导隔离点位」粒度规则——所有阀门 vs 设备接口到相邻阀门
+
+Work Log:
+- 【DB 取证】PidDiagram content 三键 {shapes, connections, marks}；图 20（15 设备图元全带 equipmentId+14 连线全带 pipelineId，无阀门）；图 27 实证阀门拓扑：泵→vl-gate 闸阀→in-field 仪表→罐三边串联同 pipelineId=40
+- 【图元库】std/valves.tsx 28 种阀门带 sub 分类：vl-shutoff 截断阀×7（闸/截止/球/蝶/旋塞/针/隔膜）、vl-check 止回阀×3、vl-control 调节阀×3、vl-relief 泄放阀×4、vl-special 特殊阀×5、vl-actuator 执行机构×6
+- 【IsoPointMaster 17 条】命名全为边界模式：E101入口法兰/P102出口阀后/待生滑阀后——无一条是「管线中间任意阀门」
+- 【generate-master 规则核实】管线生成要求两端图元绑定设备（阀门/仪表端点的边被跳过不穿越）→ 拓扑推导需新增「穿内联符号的边链合并」逻辑；挂标→管线归属已有最近折线推导（distToSegment≤120）
+- 【结论】隔离点位正确粒度=隔离包络边界，非全量阀门也非设备接口段本身；方案已报用户（目标选择→包络计算→截断阀筛选→LLM 语义把关→候选确认→批量入库），待批准后实施
+
+Stage Summary:
+- Task 81 可行性调研完成：数据基础具备（28 阀门图元带分类、拓扑可表达、几何定位可复用），缺口=穿内联符号遍历+LLM 语义候选生成+确认 UI；推导质量前提=图上需画阀门（#20 主图无阀门会退化为设备法兰模式）
