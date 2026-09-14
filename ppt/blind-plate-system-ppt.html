@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>石化厂盲板管理系统 · 产品介绍 V1.0</title>
+<style>
+:root{
+  --teal:#0d9488;--teal-d:#0f766e;--teal-dd:#134e4a;--teal-l:#5eead4;--teal-t:#99f6e4;--teal-tt:#ccfbf1;
+  --em:#10b981;--em-l:#6ee7b7;--vio:#8b5cf6;--vio-d:#6d28d9;--vio-dd:#5b21b6;
+  --amb:#f59e0b;--rose:#f43f5e;
+  --ink:#1c1917;--ink2:#44403c;--mut:#78716c;--faint:#a8a29e;--line:#e7e5e4;--bg:#fafaf9;
+  --r:18px;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Courier New",monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0b2926;font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+#viewport{position:fixed;left:0;right:0;top:0;bottom:56px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#stage{width:1280px;height:720px;position:relative;flex:none;transform-origin:center center}
+.slide{position:absolute;inset:0;overflow:hidden;border-radius:10px;background:var(--bg);box-shadow:0 30px 90px rgba(0,0,0,.5);opacity:0;visibility:hidden;transition:opacity .5s ease,visibility .5s ease}
+.slide.active{opacity:1;visibility:visible;z-index:2}
+.slide.dark{background:linear-gradient(135deg,#134e4a 0%,#0f766e 62%,#115e59 100%);color:#fff}
+.pad{position:relative;height:100%;padding:44px 56px 40px;display:flex;flex-direction:column}
+.bg-glow{position:absolute;width:560px;height:560px;right:-150px;top:-180px;border-radius:50%;background:radial-gradient(closest-side,rgba(13,148,136,.10),transparent 72%);pointer-events:none}
+/* ---- 动画 ---- */
+@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+.a{opacity:0}
+.slide.active .a{animation:fadeUp .7s cubic-bezier(.16,.68,.3,1) both;animation-delay:var(--d,.12s)}
+.stag>*{opacity:0}
+.slide.active .stag>*{animation:fadeUp .7s cubic-bezier(.16,.68,.3,1) both}
+.slide.active .stag>*:nth-child(1){animation-delay:.08s}.slide.active .stag>*:nth-child(2){animation-delay:.16s}
+.slide.active .stag>*:nth-child(3){animation-delay:.24s}.slide.active .stag>*:nth-child(4){animation-delay:.32s}
+.slide.active .stag>*:nth-child(5){animation-delay:.40s}.slide.active .stag>*:nth-child(6){animation-delay:.48s}
+.slide.active .stag>*:nth-child(7){animation-delay:.56s}.slide.active .stag>*:nth-child(8){animation-delay:.64s}
+.slide.active .stag>*:nth-child(9){animation-delay:.72s}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spinRev{to{transform:rotate(-360deg)}}
+@keyframes floaty{0%{transform:translateY(0);opacity:0}18%{opacity:var(--o,.55)}82%{opacity:var(--o,.55)}100%{transform:translateY(-54px);opacity:0}}
+@keyframes flowx{0%{left:-26px;opacity:0}12%{opacity:1}86%{opacity:1}100%{left:100%;opacity:0}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes dashflow{to{stroke-dashoffset:-48}}
+@keyframes nodePulse{0%,100%{box-shadow:0 6px 18px rgba(139,92,246,.12);transform:translateY(0)}50%{box-shadow:0 12px 30px rgba(139,92,246,.30);transform:translateY(-4px)}}
+@keyframes ripple{0%{transform:scale(.55);opacity:.9}80%{transform:scale(2.1);opacity:0}100%{transform:scale(2.1);opacity:0}}
+@media (prefers-reduced-motion:reduce){.slide.active .a,.slide.active .stag>*,.fl-rot,.ringA,.ringB,.s7-svg line,.fjoin i,.tl-dot.d1::after,.ai-node{animation:none!important;opacity:1}}
+/* ---- 图标 ---- */
+.ic{width:22px;height:22px;display:block;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* ---- 页头 ---- */
+.shead{display:flex;align-items:center;gap:16px;margin-bottom:22px;flex:none}
+.sno{font-size:36px;font-weight:900;color:#0d9488;opacity:.26;line-height:1}
+.sht{flex:none}
+.skick{font-size:11.5px;font-weight:800;letter-spacing:.2em;color:#0d9488;margin-bottom:5px}
+.stitle{font-size:29px;font-weight:900;color:var(--ink);letter-spacing:.02em;line-height:1.2}
+.stitle em{font-style:normal;color:#0d9488}
+.sline{flex:1;height:2px;border-radius:2px;background:linear-gradient(90deg,rgba(13,148,136,.45),rgba(231,229,228,.95));margin:0 4px}
+.sbrand{font-size:12px;color:var(--faint);letter-spacing:.08em;white-space:nowrap}
+.tile{border-radius:12px;display:grid;place-items:center;flex:none}
+/* ---- S1 封面 ---- */
+.s1-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(153,246,228,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(153,246,228,.055) 1px,transparent 1px);background-size:64px 64px;pointer-events:none}
+.s1-parts i{position:absolute;width:var(--s);height:var(--s);border-radius:50%;left:var(--x);top:var(--y);background:var(--c);opacity:0;animation:floaty var(--t) ease-in-out var(--dl) infinite}
+.s1-body{position:absolute;left:76px;top:50%;transform:translateY(-52%);max-width:700px;z-index:2}
+.k-row{display:flex;gap:12px;margin-bottom:30px}
+.k-chip{border:1px solid rgba(153,246,228,.42);color:var(--teal-t);padding:7px 16px;border-radius:999px;font-size:12.5px;letter-spacing:.16em;font-weight:600}
+.k-chip.solid{background:rgba(94,234,212,.14)}
+.t-sm{font-size:30px;color:var(--teal-t);letter-spacing:.5em;font-weight:600;margin-bottom:6px}
+.t-lg{font-size:92px;font-weight:900;line-height:1.06;color:#fff;letter-spacing:.04em;text-shadow:0 10px 44px rgba(0,0,0,.28)}
+.t-bar{width:132px;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--teal-l),var(--em-l));margin:22px 0 18px}
+.s1-sub{font-size:20px;color:#ccfbf1;font-weight:500;letter-spacing:.06em}
+.s1-feats{display:flex;gap:14px;margin-top:36px}
+.f-item{display:flex;align-items:center;gap:9px;padding:10px 18px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(153,246,228,.28);color:#ccfbf1;font-size:14.5px;font-weight:600}
+.f-item .ic{width:18px;height:18px;color:var(--teal-l)}
+.f-item.vio{border-color:rgba(196,181,253,.5);color:#ddd6fe}
+.f-item.vio .ic{color:#c4b5fd}
+.s1-foot{position:absolute;left:76px;right:76px;bottom:32px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(153,246,228,.25);padding-top:16px;font-size:13px;color:rgba(204,251,241,.78);letter-spacing:.06em;z-index:2}
+.vd{display:inline-block;width:4px;height:4px;border-radius:50%;background:rgba(153,246,228,.7);margin:0 12px;vertical-align:middle}
+.flange-wrap{position:absolute;right:14px;top:50%;transform:translateY(-50%);width:478px;height:478px;z-index:1}
+.flange-glow{position:absolute;inset:6%;border-radius:50%;background:radial-gradient(closest-side,rgba(20,184,166,.38),rgba(20,184,166,.08) 56%,transparent 72%);filter:blur(6px)}
+.flange-wrap svg{position:absolute;inset:0;width:100%;height:100%}
+.fl-rot{animation:spin 60s linear infinite}
+/* ---- S2 痛点 ---- */
+.s2-wrap{display:flex;gap:22px;flex:1;min-height:0}
+.s2-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:20px;flex:1}
+.pcard{position:relative;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:22px 22px 20px 26px;display:flex;gap:16px;align-items:center;overflow:hidden;box-shadow:0 6px 20px rgba(28,25,23,.05)}
+.pcard::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--pc,#f43f5e);border-radius:4px 0 0 4px;opacity:.85}
+.pcard .tile{width:52px;height:52px}
+.tile.rose{background:#fff1f2;color:#f43f5e}
+.tile.amber{background:#fffbeb;color:#f59e0b}
+.pcard h3{font-size:17.5px;font-weight:800;color:var(--ink);line-height:1.35;margin-bottom:8px;padding-right:78px}
+.pcard p{font-size:13.8px;color:var(--mut);line-height:1.68}
+.ptag{position:absolute;top:16px;right:16px;font-size:11.5px;font-weight:700;padding:3px 11px;border-radius:999px}
+.ptag.rose{background:#fff1f2;color:#be123c;border:1px solid #fecdd3}
+.ptag.amber{background:#fffbeb;color:#b45309;border:1px solid #fde68a}
+.s2-side{width:336px;flex:none;display:flex;flex-direction:column}
+.vs-card{border-radius:16px;padding:16px 18px;flex:1;display:flex;flex-direction:column;justify-content:center}
+.vs-card.old{background:#fff1f2;border:1px solid #fecdd3}
+.vs-card.new{background:#f0fdfa;border:1px solid var(--teal-t)}
+.vs-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:800;letter-spacing:.05em;margin-bottom:9px}
+.vs-h i{width:9px;height:9px;border-radius:50%;flex:none}
+.vs-card.old .vs-h{color:#be123c}.vs-card.old .vs-h i{background:#f43f5e}
+.vs-card.new .vs-h{color:#0f766e}.vs-card.new .vs-h i{background:#10b981}
+.vr{display:flex;align-items:center;font-size:13px;color:var(--ink2);padding:5.5px 0;font-weight:500}
+.vr .ic{width:15px;height:15px;flex:none;margin-right:9px}
+.vs-card.old .vr .ic{color:#f43f5e}
+.vs-card.new .vr .ic{color:#10b981}
+.vr span::before{content:'·';margin:0 7px;color:#d6d3d1}
+.vs-arrow{display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 0}
+.vs-line{width:2px;height:16px;background:linear-gradient(180deg,#fda4af,var(--teal-l))}
+.vs-pill{display:flex;align-items:center;gap:8px;background:linear-gradient(92deg,var(--teal),var(--em));color:#fff;font-size:13.5px;font-weight:800;padding:9px 22px;border-radius:999px;box-shadow:0 8px 22px rgba(13,148,136,.32);letter-spacing:.1em}
+.vs-pill .ic{width:16px;height:16px}
+/* ---- S3 九环节 ---- */
+.s3-flow{display:flex;align-items:flex-start;margin-top:auto}
+.fnode{width:96px;flex:none;text-align:center}
+.fstep{width:84px;height:84px;border-radius:50%;background:#fff;border:2.5px solid var(--teal-l);margin:0 auto;position:relative;display:grid;place-items:center;box-shadow:0 8px 20px rgba(13,148,136,.16)}
+.fstep .ic{width:34px;height:34px;color:var(--teal)}
+.fno{position:absolute;top:-8px;right:-8px;width:25px;height:25px;border-radius:50%;background:var(--teal);color:#fff;font-size:12px;font-weight:800;display:grid;place-items:center;box-shadow:0 3px 8px rgba(13,148,136,.4)}
+.fname{margin-top:13px;font-size:17px;font-weight:800;color:var(--ink)}
+.fsub{margin-top:4px;font-size:12px;color:var(--faint)}
+.fjoin{flex:1;position:relative;height:84px}
+.fjoin::before{content:'';position:absolute;top:41px;left:8px;right:8px;height:2px;background:linear-gradient(90deg,#ccfbf1,var(--teal))}
+.fjoin::after{content:'';position:absolute;right:4px;top:36px;border:6px solid transparent;border-left:7px solid var(--teal)}
+.fjoin i{position:absolute;top:38px;left:0;width:24px;height:7px;margin-top:-2.5px;border-radius:4px;background:radial-gradient(closest-side,rgba(255,255,255,.95),rgba(94,234,212,.9),transparent);opacity:0}
+.slide.active .fjoin i{animation:flowx 2.4s linear infinite;animation-delay:var(--fd,0s)}
+.loop-arc{position:relative;width:66%;height:46px;margin:16px auto 0;border:2px dashed var(--teal-t);border-top:none;border-radius:0 0 28px 28px;opacity:.85}
+.loop-arc::before{content:'';position:absolute;left:-8px;top:-10px;border:6px solid transparent;border-bottom:10px solid var(--teal-l)}
+.arc-label{position:absolute;left:50%;bottom:-15px;transform:translateX(-50%);background:#fff;border:1px solid var(--teal-t);color:var(--teal-d);font-size:12.5px;font-weight:700;padding:5px 18px;border-radius:999px;white-space:nowrap;box-shadow:0 4px 12px rgba(13,148,136,.12)}
+.s3-badges{display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:20px;margin-top:auto}
+.badge{display:flex;align-items:center;gap:15px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 20px;box-shadow:0 6px 18px rgba(28,25,23,.05)}
+.b-ic{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#f0fdfa,#ccfbf1);color:var(--teal);display:grid;place-items:center;flex:none}
+.b-ic .ic{width:24px;height:24px}
+.b-num{font-size:36px;font-weight:900;color:var(--teal-d);line-height:1;font-variant-numeric:tabular-nums}
+.b-num small{font-size:14px;font-weight:700;color:var(--faint);margin-left:3px}
+.b-tx b{display:block;font-size:14.5px;color:var(--ink);font-weight:800}
+.b-tx span{display:block;font-size:12px;color:var(--mut);margin-top:3px}
+.b-codes{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+.code-chip{font-size:12px;font-weight:700;color:var(--teal-d);background:#f0fdfa;border:1px solid var(--teal-t);border-radius:8px;padding:3px 9px;line-height:1.3}
+.code-chip b{font-family:var(--mono);margin-right:5px;color:var(--teal)}
+/* ---- S4 五层架构 ---- */
+.layers{display:flex;flex-direction:column;flex:1;margin-top:2px}
+.layers>*{min-height:0}
+.layer{position:relative;flex:1;display:flex;align-items:center;gap:18px;border:1px solid var(--line);border-radius:16px;padding:13px 64px 13px 20px;background:linear-gradient(90deg,var(--tint),#fff 62%)}
+.ltag{width:138px;flex:none;display:flex;align-items:center;gap:11px}
+.ltag .tile{width:40px;height:40px;color:#fff}
+.ltag-t b{display:block;font-size:15.5px;font-weight:800;color:var(--ink);line-height:1.25}
+.ltag-t span{display:block;font-size:10px;color:var(--faint);letter-spacing:.14em;margin-top:2px}
+.litems{flex:1;display:flex;flex-wrap:wrap;gap:8px 10px;align-content:center}
+.lchip{font-size:13px;color:var(--ink2);background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 13px;line-height:1.35;font-weight:500}
+.lchip b{color:var(--teal-d);margin-right:7px;font-weight:800}
+.lchip.vio{background:#f5f3ff;border-color:#ddd6fe}
+.lchip.vio b{color:var(--vio-d)}
+.lchip.grow{flex:1}
+.lno{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:30px;font-weight:900;color:rgba(13,148,136,.14)}
+.larr{height:18px;display:flex;align-items:center;justify-content:center;color:var(--teal-l);opacity:.75}
+.larr .ic{width:16px;height:16px}
+/* ---- S5 功能架构 ---- */
+.s5-grid{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:1fr 1fr;gap:16px;flex:1;min-height:0}
+.mod{position:relative;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:16px 17px;display:flex;flex-direction:column;justify-content:center;gap:9px;box-shadow:0 5px 16px rgba(28,25,23,.04)}
+.mod-top{display:flex;align-items:center;justify-content:space-between}
+.mod .tile{width:42px;height:42px;background:linear-gradient(135deg,#f0fdfa,#ccfbf1);color:var(--teal)}
+.mod .tile .ic{width:23px;height:23px}
+.mod-no{font-size:24px;font-weight:900;color:#e7e5e4}
+.mod h3{font-size:16.5px;font-weight:800;color:var(--ink)}
+.mod p{font-size:12.5px;color:var(--mut);line-height:1.75}
+.mbar,.abar{display:flex;align-items:center;gap:16px;border-radius:16px;padding:12px 18px}
+.mbar{background:#fff;border:1px solid var(--line);margin-top:14px}
+.mlabel{display:flex;align-items:center;gap:10px;flex:none;padding-right:14px;border-right:1px dashed var(--line)}
+.mlabel .tile{width:38px;height:38px;color:#fff}
+.mlabel-t b{display:block;font-size:14.5px;font-weight:800;color:var(--ink)}
+.mlabel-t span{display:block;font-size:10.5px;color:var(--faint);letter-spacing:.1em;margin-top:1px}
+.mchips{flex:1;display:flex;justify-content:space-between;gap:8px}
+.mchip{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:var(--ink2);background:#f5f5f4;border:1px solid var(--line);border-radius:999px;padding:8px 15px;white-space:nowrap}
+.mchip .ic{width:16px;height:16px;color:var(--em)}
+.abar{background:linear-gradient(90deg,#f5f3ff,#ede9fe);border:1px dashed #c4b5fd;margin-top:12px}
+.mlabel.vio .tile{background:linear-gradient(135deg,#8b5cf6,#6d28d9)}
+.mlabel.vio b{color:var(--vio-dd)}
+.abar .mchip{background:rgba(139,92,246,.08);border-color:#ddd6fe;color:var(--vio-dd)}
+.abar .mchip .ic{color:var(--vio)}
+/* ---- S6 PID ---- */
+.s6-wrap{display:flex;gap:24px;flex:1;min-height:0}
+.pid-card{width:640px;flex:none;background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:0 8px 24px rgba(28,25,23,.06);display:flex;flex-direction:column;overflow:hidden}
+.pid-toolbar{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--line);background:#fcfcfb}
+.pid-title{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:800;color:var(--ink2)}
+.pid-title i{width:9px;height:9px;border-radius:3px;background:var(--teal);flex:none}
+.pid-tools{display:flex;align-items:center;gap:7px;color:var(--faint);font-size:12px}
+.pt-btn{width:24px;height:24px;border:1px solid var(--line);border-radius:7px;display:grid;place-items:center;background:#fff;color:var(--mut);font-weight:700}
+.pid-canvas{flex:1;margin:12px;border:1px solid #f0efee;border-radius:12px;background-color:#fcfcfa;background-image:radial-gradient(#e3e1de 1.1px,transparent 1.1px);background-size:24px 24px;position:relative;overflow:hidden}
+.pid-canvas svg{width:100%;height:100%;display:block}
+.pid-cap{padding:0 16px 12px;font-size:11.5px;color:var(--faint);display:flex;gap:16px;align-items:center}
+.pid-cap i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.dr{stroke-dasharray:1;stroke-dashoffset:1}
+.slide.active .dr{animation:draw 1.5s cubic-bezier(.4,0,.2,1) forwards;animation-delay:var(--dd,0s)}
+.s6-list{flex:1;display:flex;flex-direction:column;justify-content:center}
+.h-item{display:flex;gap:15px;padding:15px 2px;border-bottom:1px dashed var(--line);align-items:flex-start}
+.h-item:last-child{border-bottom:none}
+.h-item .tile{width:44px;height:44px;background:linear-gradient(135deg,#f0fdfa,#ccfbf1);color:var(--teal)}
+.h-item .tile .ic{width:23px;height:23px}
+.h-tx b{font-size:16px;font-weight:800;color:var(--ink);display:flex;align-items:baseline;gap:8px}
+.h-tx p{font-size:13px;color:var(--mut);line-height:1.65;margin-top:5px}
+.bignum{font-size:27px;font-weight:900;color:var(--teal);font-variant-numeric:tabular-nums}
+.bignum em{font-style:normal;font-size:18px}
+.lg-chip{display:inline-block;font-size:11.5px;color:var(--ink2);background:#f5f5f4;border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-weight:600;margin:4px 5px 0 0}
+.lg-chip b{font-family:var(--mono);color:var(--teal);font-weight:800;margin-left:4px}
+/* ---- S7 AI ---- */
+.s7-stage{position:relative;flex:1;min-height:0}
+.s7-svg{position:absolute;inset:0;width:100%;height:100%}
+.s7-svg .ring{fill:none;transform-box:fill-box;transform-origin:center}
+.ringA{stroke:rgba(139,92,246,.4);stroke-width:1.6;stroke-dasharray:12 16;animation:spin 46s linear infinite}
+.ringB{stroke:rgba(139,92,246,.24);stroke-width:1.2;stroke-dasharray:3 11;animation:spinRev 58s linear infinite}
+.s7-svg line{stroke:#c4b5fd;stroke-width:1.6;stroke-dasharray:4 9;opacity:.55;animation:dashflow 3.2s linear infinite}
+.ai-hub{position:absolute;left:584px;top:224px;transform:translate(-50%,-50%);width:176px;height:176px;border-radius:50%;background:linear-gradient(140deg,#a78bfa,#8b5cf6 45%,#6d28d9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;box-shadow:0 18px 50px rgba(139,92,246,.4),inset 0 2px 8px rgba(255,255,255,.35);z-index:3}
+.ai-hub .ic{width:42px;height:42px;color:#fff;stroke-width:1.7}
+.ai-hub b{font-size:20px;font-weight:900;color:#fff;letter-spacing:.08em}
+.ai-hub span{font-size:11.5px;color:#ede9fe;letter-spacing:.22em;font-family:var(--mono)}
+.ai-w{position:absolute;width:208px;transform:translate(-50%,-50%);z-index:2}
+.ai-node{display:flex;align-items:center;gap:11px;background:#fff;border:1px solid #e9d5ff;border-radius:14px;padding:11px 13px;box-shadow:0 6px 18px rgba(139,92,246,.12)}
+.slide.active .ai-node{animation:nodePulse 4s ease-in-out infinite;animation-delay:var(--pd,0s)}
+.ai-node .tile{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#f5f3ff,#ede9fe);color:var(--vio)}
+.ai-node .tile .ic{width:20px;height:20px}
+.ai-node b{display:block;font-size:14.5px;font-weight:800;color:var(--ink);white-space:nowrap}
+.ai-node span{display:block;font-size:11.5px;color:var(--mut);margin-top:2px;white-space:nowrap}
+.s7-foot{flex:none;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:11px;background:linear-gradient(90deg,rgba(139,92,246,.10),rgba(139,92,246,.17));border:1px dashed rgba(139,92,246,.42);border-radius:12px;padding:12px 18px;font-size:13.5px;color:var(--vio-dd);font-weight:600}
+.s7-foot .ic{width:17px;height:17px;color:var(--vio)}
+/* ---- S8 特色 ---- */
+.s8-grid{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr;gap:22px;flex:1;min-height:0}
+.ft-card{position:relative;background:#fff;border:1px solid var(--line);border-radius:20px;padding:24px 26px;overflow:hidden;box-shadow:0 6px 18px rgba(28,25,23,.04);transition:transform .3s ease,box-shadow .3s ease;display:flex;flex-direction:column;justify-content:center;gap:13px}
+.ft-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--c1,#0d9488),var(--c2,#10b981));transform:scaleX(0);transform-origin:left;transition:transform .35s ease}
+.ft-card:hover{transform:translateY(-6px);box-shadow:0 20px 44px rgba(13,148,136,.18)}
+.ft-card:hover::before{transform:scaleX(1)}
+.ft-card .tile{width:52px;height:52px;color:#fff;background:linear-gradient(135deg,var(--c1,#0d9488),var(--c2,#10b981));border-radius:14px}
+.ft-card .tile .ic{width:27px;height:27px}
+.ft-card h3{font-size:19px;font-weight:900;color:var(--ink)}
+.ft-card p{font-size:13.8px;color:var(--mut);line-height:1.7}
+.s8-strip{text-align:center;font-size:13px;color:var(--mut);margin-top:16px;letter-spacing:.06em;flex:none}
+.s8-strip b{color:var(--teal-d)}
+/* ---- S9 路线图 ---- */
+.tl{position:relative;height:78px;flex:none}
+.tl-line{position:absolute;left:10px;right:10px;top:40px;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--teal),var(--teal-l) 44%,#e7e5e4 68%,#e7e5e4)}
+.tl-dot{position:absolute;top:42px;width:20px;height:20px;border-radius:50%;background:#fff;transform:translate(-50%,-50%);z-index:2}
+.tl-dot.d1{background:var(--teal);border:3px solid var(--teal)}
+.tl-dot.d1::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid rgba(13,148,136,.55);animation:ripple 2.2s ease-out infinite}
+.tl-dot.d2{border:3px solid var(--amb)}
+.tl-dot.d3{border:3px solid #d6d3d1}
+.now-flag{position:absolute;top:12px;transform:translateX(-50%);background:var(--teal);color:#fff;font-size:11.5px;font-weight:800;letter-spacing:.14em;padding:4px 14px;border-radius:999px;box-shadow:0 6px 14px rgba(13,148,136,.35)}
+.now-flag::after{content:'';position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);border:5px solid transparent;border-top:6px solid var(--teal)}
+.s9-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;flex:1;min-height:0}
+.stage-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;display:flex;flex-direction:column;box-shadow:0 6px 18px rgba(28,25,23,.05)}
+.stage-card.cur{border:1.5px solid var(--teal-t);background:linear-gradient(180deg,#f0fdfa,#fff 30%)}
+.sc-head{display:flex;align-items:center;gap:12px;padding-bottom:15px;border-bottom:1px dashed var(--line);margin-bottom:15px}
+.sc-ver{font-size:25px;font-weight:900}
+.stage-card.cur .sc-ver{color:var(--teal-d)}
+.sc-chip{font-size:11.5px;font-weight:800;padding:4px 12px;border-radius:999px;letter-spacing:.06em}
+.sc-chip.done{background:var(--em);color:#fff}
+.sc-chip.doing{background:#fffbeb;color:#b45309;border:1px solid #fde68a}
+.sc-chip.plan{background:#f5f5f4;color:var(--mut);border:1px solid var(--line)}
+.ri{display:flex;align-items:flex-start;gap:10px;font-size:14px;color:var(--ink2);padding:12px 0;line-height:1.5;font-weight:500}
+.ri .ic{width:17px;height:17px;flex:none;margin-top:2px}
+.stage-card.cur .ri .ic{color:var(--teal)}
+.stage-card.mid .ri .ic{color:var(--amb)}
+.stage-card.next .ri .ic{color:var(--faint)}
+/* ---- S10 结尾 ---- */
+.s10-body{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;z-index:2;text-align:center;padding:0 80px}
+.s10-kick{font-size:13px;letter-spacing:.42em;color:var(--teal-t);font-weight:700}
+.s10-t1{font-size:30px;color:#ccfbf1;font-weight:500;letter-spacing:.28em}
+.s10-t2{font-size:62px;font-weight:900;color:#fff;letter-spacing:.1em;text-shadow:0 10px 44px rgba(0,0,0,.3)}
+.s10-t2 em{font-style:normal;color:var(--teal-l)}
+.s10-chips{display:flex;gap:16px;margin-top:6px}
+.s10-chip{display:flex;align-items:center;gap:9px;border:1px solid rgba(153,246,228,.4);background:rgba(255,255,255,.07);border-radius:999px;padding:10px 22px;font-size:15px;font-weight:700;color:#ccfbf1}
+.s10-chip .ic{width:18px;height:18px;color:var(--teal-l)}
+.s10-div{width:56px;height:2px;background:rgba(153,246,228,.45);border-radius:2px}
+.s10-thx{font-size:22px;font-weight:800;color:#fff;letter-spacing:.2em}
+.s10-foot{font-size:12.5px;color:rgba(204,251,241,.6);letter-spacing:.06em}
+/* ---- 导航 ---- */
+#nav{position:fixed;left:0;right:0;bottom:0;height:56px;display:flex;align-items:center;justify-content:center;gap:14px;z-index:50;background:rgba(11,41,38,.6);backdrop-filter:blur(8px)}
+#nav button{cursor:pointer;border:none;background:none;color:#99f6e4;font-family:inherit}
+#nav .nbtn{width:34px;height:34px;border-radius:50%;border:1px solid rgba(153,246,228,.35);display:grid;place-items:center;transition:all .2s}
+#nav .nbtn:hover{background:rgba(153,246,228,.14)}
+#nav .dot{width:9px;height:9px;border-radius:999px;background:rgba(153,246,228,.3);transition:all .3s;padding:0}
+#nav .dot.on{width:26px;background:#2dd4bf}
+#pageno{color:#5eead4;font-size:12.5px;font-family:var(--mono);letter-spacing:.1em;min-width:64px;text-align:center}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16 15.2c2.6.3 4.6 1.9 5.3 4.3"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+<symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5M9 13h6M9 17h6"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-4.5"/></symbol>
+<symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M5 22h14M5 2h14M7 2v4l5 5 5-5V2M7 22v-4l5-5 5 5v4"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></symbol>
+<symbol id="i-fileplus" viewBox="0 0 24 24"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5M12 12v6M9 15h6"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="12" cy="19" r="2.5"/><path d="M6 7.5v3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-3M12 13.5v3"/></symbol>
+<symbol id="i-factory" viewBox="0 0 24 24"><path d="M2 20h20M4 20V8l6 4V8l6 4V4h4v16"/></symbol>
+<symbol id="i-checkcircle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></symbol>
+<symbol id="i-ticket" viewBox="0 0 24 24"><path d="M3 9V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2.5 2.5 0 0 0 0 6v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2.5 2.5 0 0 0 0-6z"/><path d="M13 5v2M13 11v2M13 17v2"/></symbol>
+<symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4.5 4.5 0 0 0 6 6L17 16l-8.5 5L5 17.5 10 9z"/></symbol>
+<symbol id="i-award" viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="M8.5 14L7 22l5-3 5 3-1.5-8"/></symbol>
+<symbol id="i-chevd" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/></symbol>
+<symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="10" y="10" width="4" height="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/></symbol>
+<symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+<symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8.5 8.5 0 0 1-8.5 8.5c-1.6 0-3.1-.4-4.4-1.2L3 21l1.7-5.1A8.5 8.5 0 1 1 21 12z"/></symbol>
+<symbol id="i-filetext" viewBox="0 0 24 24"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5M9 13h6M9 17h4"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5-9 9"/></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+<symbol id="i-bookopen" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="18" rx="2"/><path d="M9 2.5h6M9 10h6M9 14h4"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2l1.9 5.7L20 9.6l-5 3.9 1.8 6L12 16l-4.8 3.5L9 13.5 4 9.6l6.1-1.9z"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M8 16v-5M13 16V8M18 16v-8"/></symbol>
+<symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></symbol>
+<symbol id="i-shieldcheck" viewBox="0 0 24 24"><path d="M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z"/><path d="M9 11.5l2 2 4-4.5"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></symbol>
+<symbol id="i-cpu2" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+</defs></svg>
+
+<div id="viewport"><div id="stage">
+
+<!-- 第 1 页 · 封面 -->
+<section class="slide dark active" role="group" aria-label="封面">
+  <div class="s1-grid" aria-hidden="true"></div>
+  <div class="s1-parts" aria-hidden="true">
+    <i style="--s:5px;--x:12%;--y:22%;--c:#5eead4;--t:7s;--dl:.2s;--o:.5"></i>
+    <i style="--s:3px;--x:28%;--y:64%;--c:#99f6e4;--t:9s;--dl:1.4s;--o:.4"></i>
+    <i style="--s:4px;--x:46%;--y:16%;--c:#6ee7b7;--t:8s;--dl:.8s;--o:.45"></i>
+    <i style="--s:3px;--x:60%;--y:74%;--c:#5eead4;--t:10s;--dl:2s;--o:.35"></i>
+    <i style="--s:6px;--x:84%;--y:30%;--c:#c4b5fd;--t:8.5s;--dl:1.1s;--o:.4"></i>
+    <i style="--s:4px;--x:70%;--y:12%;--c:#99f6e4;--t:7.5s;--dl:.5s;--o:.5"></i>
+  </div>
+  <div class="flange-wrap" aria-hidden="true">
+    <div class="flange-glow"></div>
+    <svg viewBox="0 0 478 478">
+      <g class="fl-rot" style="transform-origin:239px 239px">
+        <circle cx="239" cy="239" r="216" fill="none" stroke="rgba(94,234,212,.35)" stroke-width="1.5" stroke-dasharray="4 10"/>
+        <circle cx="239" cy="239" r="188" fill="none" stroke="rgba(94,234,212,.2)" stroke-width="1"/>
+      </g>
+      <g transform="rotate(30 239 239)">
+        <rect x="27" y="217" width="180" height="44" rx="8" fill="none" stroke="rgba(153,246,228,.55)" stroke-width="2.5"/>
+        <path d="M52 239h14M60 231v16M78 231v16" stroke="rgba(153,246,228,.7)" stroke-width="2.5" stroke-linecap="round"/>
+        <rect x="271" y="217" width="180" height="44" rx="8" fill="none" stroke="rgba(153,246,228,.55)" stroke-width="2.5"/>
+      </g>
+      <circle cx="239" cy="239" r="120" fill="rgba(13,148,136,.18)" stroke="rgba(153,246,228,.75)" stroke-width="3"/>
+      <circle cx="239" cy="239" r="86" fill="none" stroke="rgba(94,234,212,.4)" stroke-width="1.5"/>
+      <g fill="#0b2926" stroke="rgba(153,246,228,.9)" stroke-width="2.5">
+        <circle cx="239" cy="139" r="8"/><circle cx="310" cy="168" r="8"/><circle cx="339" cy="239" r="8"/>
+        <circle cx="310" cy="310" r="8"/><circle cx="239" cy="339" r="8"/><circle cx="168" cy="310" r="8"/>
+        <circle cx="139" cy="239" r="8"/><circle cx="168" cy="168" r="8"/>
+      </g>
+      <circle cx="239" cy="239" r="34" fill="#134e4a" stroke="#5eead4" stroke-width="3"/>
+      <circle cx="239" cy="239" r="10" fill="#5eead4"/>
+      <text x="239" y="392" text-anchor="middle" fill="rgba(153,246,228,.85)" font-size="13" letter-spacing="4">8 字盲板 · 法兰隔离</text>
+    </svg>
+  </div>
+  <div class="s1-body">
+    <div class="k-row a" style="--d:0s">
+      <span class="k-chip solid">BLIND PLATE MANAGEMENT</span>
+      <span class="k-chip">GB 30871 合规体系</span>
+    </div>
+    <div class="t-sm a" style="--d:.12s">石 化 厂</div>
+    <h1 class="t-lg a" style="--d:.22s">盲板管理系统</h1>
+    <div class="t-bar a" style="--d:.34s"></div>
+    <p class="s1-sub a" style="--d:.42s">盲板抽堵作业全流程数字化 · GB 30871 合规</p>
+    <div class="s1-feats a" style="--d:.55s">
+      <span class="f-item"><svg class="ic"><use href="#i-refresh"/></svg>九环节闭环</span>
+      <span class="f-item"><svg class="ic"><use href="#i-phone"/></svg>双端协同</span>
+      <span class="f-item"><svg class="ic"><use href="#i-share"/></svg>PID 数字孪生</span>
+      <span class="f-item vio"><svg class="ic"><use href="#i-spark"/></svg>AI 提效</span>
+    </div>
+  </div>
+  <div class="s1-foot a" style="--d:.7s">
+    <span>石化厂盲板抽堵作业 · 全流程数字化管理平台</span>
+    <span>版本 V1.0<span class="vd"></span>汇报日期 2026-09</span>
+  </div>
+</section>
+
+<!-- 第 2 页 · 痛点 -->
+<section class="slide s2" role="group" aria-label="为什么要做">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">01</div>
+      <div class="sht"><div class="skick">WHY · 传统管理痛点</div><h2 class="stitle">为什么要做，<em>传统模式四道坎</em></h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="s2-wrap">
+      <div class="s2-grid stag">
+        <div class="pcard" style="--pc:#f43f5e">
+          <div class="tile rose"><svg class="ic"><use href="#i-doc"/></svg></div>
+          <div><h3>纸质单据流转慢、易丢失</h3><p>票据人工传递，等待与查找耗时，丢失后补办成本更高</p></div>
+          <span class="ptag rose">效率损耗</span>
+        </div>
+        <div class="pcard" style="--pc:#f59e0b">
+          <div class="tile amber"><svg class="ic"><use href="#i-book"/></svg></div>
+          <div><h3>盲板台账不清，漏挂漏拆风险</h3><p>台账与现场脱节，装错位置、漏拆盲板后果不堪设想</p></div>
+          <span class="ptag amber">安全风险</span>
+        </div>
+        <div class="pcard" style="--pc:#f59e0b">
+          <div class="tile amber"><svg class="ic"><use href="#i-hourglass"/></svg></div>
+          <div><h3>审批链路长，进度不透明</h3><p>多级签批靠人盯，卡在哪个环节、还要等多久无从知晓</p></div>
+          <span class="ptag amber">协同低效</span>
+        </div>
+        <div class="pcard" style="--pc:#f43f5e">
+          <div class="tile rose"><svg class="ic"><use href="#i-search"/></svg></div>
+          <div><h3>追溯困难，检查取证难</h3><p>记录分散难汇总，安全检查时翻箱倒柜才能找到证据</p></div>
+          <span class="ptag rose">取证合规</span>
+        </div>
+      </div>
+      <div class="s2-side">
+        <div class="vs-card old a" style="--d:.4s">
+          <div class="vs-h"><i></i>传统方式 · 纸上流转</div>
+          <div class="vr"><svg class="ic"><use href="#i-x"/></svg><b>纸质票证</b><span>手工传递</span></div>
+          <div class="vr"><svg class="ic"><use href="#i-x"/></svg><b>Excel 台账</b><span>各自为政</span></div>
+          <div class="vr"><svg class="ic"><use href="#i-x"/></svg><b>电话催办</b><span>进度靠问</span></div>
+          <div class="vr"><svg class="ic"><use href="#i-x"/></svg><b>事后补录</b><span>取证困难</span></div>
+        </div>
+        <div class="vs-arrow a" style="--d:.55s">
+          <div class="vs-line"></div>
+          <div class="vs-pill"><svg class="ic"><use href="#i-zap"/></svg>数字化转型</div>
+          <div class="vs-line"></div>
+        </div>
+        <div class="vs-card new a" style="--d:.7s">
+          <div class="vs-h"><i></i>数字化管理 · 一屏总览</div>
+          <div class="vr"><svg class="ic"><use href="#i-check"/></svg><b>线上流转</b><span>状态实时</span></div>
+          <div class="vr"><svg class="ic"><use href="#i-check"/></svg><b>台账唯一</b><span>权责清晰</span></div>
+          <div class="vr"><svg class="ic"><use href="#i-check"/></svg><b>移动审批</b><span>进度透明</span></div>
+          <div class="vr"><svg class="ic"><use href="#i-check"/></svg><b>全程留痕</b><span>一键追溯</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 第 3 页 · 九环节闭环 -->
+<section class="slide s3" role="group" aria-label="解决方案总览">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">02</div>
+      <div class="sht"><div class="skick">SOLUTION · 方案总览</div><h2 class="stitle">九环节作业，<em>全流程数字化闭环</em></h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="s3-flow stag">
+      <div class="fnode"><div class="fstep"><span class="fno">1</span><svg class="ic"><use href="#i-fileplus"/></svg></div><div class="fname">作业需求</div><div class="fsub">需求登记</div></div>
+      <div class="fjoin"><i style="--fd:0s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">2</span><svg class="ic"><use href="#i-pin"/></svg></div><div class="fname">现场勘察</div><div class="fsub">管线核实</div></div>
+      <div class="fjoin"><i style="--fd:.28s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">3</span><svg class="ic"><use href="#i-shield"/></svg></div><div class="fname">JSA 分析</div><div class="fsub">作业危害分析</div></div>
+      <div class="fjoin"><i style="--fd:.56s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">4</span><svg class="ic"><use href="#i-branch"/></svg></div><div class="fname">隔离方案</div><div class="fsub">隔离点设计</div></div>
+      <div class="fjoin"><i style="--fd:.84s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">5</span><svg class="ic"><use href="#i-factory"/></svg></div><div class="fname">工艺处置</div><div class="fsub">吹扫置换</div></div>
+      <div class="fjoin"><i style="--fd:1.12s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">6</span><svg class="ic"><use href="#i-checkcircle"/></svg></div><div class="fname">处置确认</div><div class="fsub">能量隔离确认</div></div>
+      <div class="fjoin"><i style="--fd:1.4s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">7</span><svg class="ic"><use href="#i-ticket"/></svg></div><div class="fname">作业票</div><div class="fsub">开票审批</div></div>
+      <div class="fjoin"><i style="--fd:1.68s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">8</span><svg class="ic"><use href="#i-wrench"/></svg></div><div class="fname">作业执行</div><div class="fsub">挂板抽堵</div></div>
+      <div class="fjoin"><i style="--fd:1.96s"></i></div>
+      <div class="fnode"><div class="fstep"><span class="fno">9</span><svg class="ic"><use href="#i-award"/></svg></div><div class="fname">作业验收</div><div class="fsub">恢复确认</div></div>
+    </div>
+    <div class="loop-arc a" style="--d:.9s" aria-hidden="true">
+      <span class="arc-label">状态机驱动 · 顺序流转 · 不可跳步</span>
+    </div>
+    <div class="s3-badges stag">
+      <div class="badge">
+        <div class="b-ic"><svg class="ic"><use href="#i-refresh"/></svg></div>
+        <div class="b-num">20<small>个</small></div>
+        <div class="b-tx"><b>状态节点全流转</b><span>状态机驱动 · 不可跳步</span></div>
+      </div>
+      <div class="badge">
+        <div class="b-ic"><svg class="ic"><use href="#i-users"/></svg></div>
+        <div class="b-num">7<small>类</small></div>
+        <div class="b-tx"><b>角色在线协同</b><span>申请 · 审批 · 作业 · 验收各司其职</span></div>
+      </div>
+      <div class="badge">
+        <div class="b-ic"><svg class="ic"><use href="#i-link"/></svg></div>
+        <div class="b-tx" style="flex:1">
+          <b>编号体系全程可追溯</b>
+          <div class="b-codes">
+            <span class="code-chip"><b>WR-</b>需求</span>
+            <span class="code-chip"><b>GL-</b>隔离方案</span>
+            <span class="code-chip"><b>GY-</b>处置方案</span>
+            <span class="code-chip"><b>BP-</b>作业票</span>
+            <span class="code-chip"><b>TSK-</b>任务</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 第 4 页 · 整体架构 -->
+<section class="slide s4" role="group" aria-label="整体架构">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">03</div>
+      <div class="sht"><div class="skick">ARCHITECTURE · 整体架构</div><h2 class="stitle">五层架构，<em>端到端一体化</em></h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="layers stag">
+      <div class="layer" style="--tint:#f0fdfa">
+        <div class="ltag"><div class="tile" style="background:#0d9488"><svg class="ic"><use href="#i-users"/></svg></div><div class="ltag-t"><b>用户层</b><span>USER</span></div></div>
+        <div class="litems">
+          <div class="lchip"><b>管理端</b>PC Web</div>
+          <div class="lchip"><b>移动端</b>uniapp App</div>
+          <div class="lchip"><b>大屏看板</b></div>
+        </div>
+        <div class="lno">01</div>
+      </div>
+      <div class="larr"><svg class="ic"><use href="#i-chevd"/></svg></div>
+      <div class="layer" style="--tint:#ecfdf5">
+        <div class="ltag"><div class="tile" style="background:#059669"><svg class="ic"><use href="#i-monitor"/></svg></div><div class="ltag-t"><b>表现层</b><span>PRESENTATION</span></div></div>
+        <div class="litems">
+          <div class="lchip"><b>Next.js 16</b>SPA</div>
+          <div class="lchip"><b>8 大功能模块</b></div>
+          <div class="lchip"><b>PID 组态画布</b></div>
+          <div class="lchip"><b>Recharts</b>可视化</div>
+        </div>
+        <div class="lno">02</div>
+      </div>
+      <div class="larr"><svg class="ic"><use href="#i-chevd"/></svg></div>
+      <div class="layer" style="--tint:#f0fdfa">
+        <div class="ltag"><div class="tile" style="background:#0d9488"><svg class="ic"><use href="#i-server"/></svg></div><div class="ltag-t"><b>应用服务层</b><span>SERVICE</span></div></div>
+        <div class="litems">
+          <div class="lchip grow"><b>业务流程服务</b>需求 / 勘察 / JSA / 方案 / 作业票 / 任务 / 验收</div>
+          <div class="lchip"><b>盲板台账服务</b></div>
+          <div class="lchip"><b>统计分析服务</b></div>
+          <div class="lchip vio"><b>AI 服务</b>LLM · VLM</div>
+        </div>
+        <div class="lno">03</div>
+      </div>
+      <div class="larr"><svg class="ic"><use href="#i-chevd"/></svg></div>
+      <div class="layer" style="--tint:#f5f5f4">
+        <div class="ltag"><div class="tile" style="background:#78716c"><svg class="ic"><use href="#i-db"/></svg></div><div class="ltag-t"><b>数据层</b><span>DATA</span></div></div>
+        <div class="litems">
+          <div class="lchip"><b>MySQL / SQLite</b>Prisma ORM</div>
+          <div class="lchip"><b>19 张业务表</b></div>
+          <div class="lchip"><b>文件与图片</b>存储</div>
+        </div>
+        <div class="lno">04</div>
+      </div>
+      <div class="larr"><svg class="ic"><use href="#i-chevd"/></svg></div>
+      <div class="layer" style="--tint:#f0fdfa">
+        <div class="ltag"><div class="tile" style="background:#0f766e"><svg class="ic"><use href="#i-cpu2"/></svg></div><div class="ltag-t"><b>基础设施</b><span>INFRA</span></div></div>
+        <div class="litems">
+          <div class="lchip"><b>内网部署</b></div>
+          <div class="lchip vio"><b>私有化大模型网关</b>vLLM / SGLang · OpenAI 兼容</div>
+          <div class="lchip"><b>备份与安全</b></div>
+        </div>
+        <div class="lno">05</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 第 5 页 · 功能架构 -->
+<section class="slide s5" role="group" aria-label="功能架构">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">04</div>
+      <div class="sht"><div class="skick">MODULES · 功能架构</div><h2 class="stitle"><em>8 大模块</em> + 移动端 + AI 能力</h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="s5-grid stag">
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-dash"/></svg></div><span class="mod-no">01</span></div><h3>首页看板</h3><p>KPI 总览 · 趋势图表 · 待办提醒</p></div>
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-fileplus"/></svg></div><span class="mod-no">02</span></div><h3>作业需求</h3><p>需求登记 · 提交 · 状态流转</p></div>
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-pin"/></svg></div><span class="mod-no">03</span></div><h3>现场勘察与 JSA</h3><p>勘察记录 · JSA 步骤分析</p></div>
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-branch"/></svg></div><span class="mod-no">04</span></div><h3>方案管理</h3><p>隔离方案 · 工艺处置方案 · 两级审核</p></div>
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-ticket"/></svg></div><span class="mod-no">05</span></div><h3>作业任务</h3><p>开票 · 签发审批 · 执行跟踪 · 验收</p></div>
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-db"/></svg></div><span class="mod-no">06</span></div><h3>盲板台账</h3><p>盲板档案 · 变动记录 · 库存预警</p></div>
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-share"/></svg></div><span class="mod-no">07</span></div><h3>PID 组态</h3><p>图元库 · 画布编辑 · 主数据生成</p></div>
+      <div class="mod"><div class="mod-top"><div class="tile"><svg class="ic"><use href="#i-chart"/></svg></div><span class="mod-no">08</span></div><h3>统计分析</h3><p>状态分布 · 月度趋势 · 装置排名</p></div>
+    </div>
+    <div class="mbar a" style="--d:.7s">
+      <div class="mlabel">
+        <div class="tile" style="background:linear-gradient(135deg,#10b981,#059669)"><svg class="ic"><use href="#i-phone"/></svg></div>
+        <div class="mlabel-t"><b>移动端</b><span>UNIAPP APP</span></div>
+      </div>
+      <div class="mchips">
+        <span class="mchip"><svg class="ic"><use href="#i-clip"/></svg>我的任务</span>
+        <span class="mchip"><svg class="ic"><use href="#i-scan"/></svg>扫码识别</span>
+        <span class="mchip"><svg class="ic"><use href="#i-zap"/></svg>执行反馈</span>
+        <span class="mchip"><svg class="ic"><use href="#i-checkcircle"/></svg>验收申请</span>
+        <span class="mchip"><svg class="ic"><use href="#i-bell"/></svg>消息通知</span>
+      </div>
+    </div>
+    <div class="abar a" style="--d:.85s">
+      <div class="mlabel vio">
+        <div class="tile"><svg class="ic"><use href="#i-spark"/></svg></div>
+        <div class="mlabel-t"><b>AI 能力</b><span>AI POWERED</span></div>
+      </div>
+      <div class="mchips">
+        <span class="mchip"><svg class="ic"><use href="#i-chat"/></svg>AI 对话</span>
+        <span class="mchip"><svg class="ic"><use href="#i-filetext"/></svg>方案草稿</span>
+        <span class="mchip"><svg class="ic"><use href="#i-image"/></svg>图纸识别</span>
+        <span class="mchip"><svg class="ic"><use href="#i-camera"/></svg>照片检查</span>
+        <span class="mchip"><svg class="ic"><use href="#i-shield"/></svg>安全交底</span>
+        <span class="mchip"><svg class="ic"><use href="#i-bookopen"/></svg>知识检索</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 第 6 页 · PID 组态 -->
+<section class="slide s6" role="group" aria-label="核心亮点 PID 组态">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">05</div>
+      <div class="sht"><div class="skick">核心亮点 HIGHLIGHT · PID 组态</div><h2 class="stitle">PID 组态画布，<em>数字孪生车间图纸</em></h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="s6-wrap">
+      <div class="pid-card a" style="--d:.15s">
+        <div class="pid-toolbar">
+          <div class="pid-title"><i></i>PID 组态画布 · 装置单元示意</div>
+          <div class="pid-tools"><span class="pt-btn">+</span><span class="pt-btn">−</span><span>100%</span></div>
+        </div>
+        <div class="pid-canvas">
+          <svg viewBox="0 0 616 356">
+            <g fill="none" stroke="#0d9488" stroke-width="2">
+              <rect x="46" y="52" width="62" height="150" rx="31" fill="#f0fdfa"/>
+              <path d="M56 96h42" stroke-dasharray="4 3" stroke-width="1.4"/>
+              <rect x="180" y="40" width="86" height="86" rx="43" fill="#f0fdfa"/>
+              <circle cx="223" cy="83" r="34" fill="#fff"/>
+              <rect x="330" y="34" width="96" height="100" rx="8" fill="#f0fdfa"/>
+              <rect x="344" y="46" width="68" height="10" rx="3" fill="#ccfbf1" stroke="none"/>
+              <rect x="344" y="112" width="68" height="10" rx="3" fill="#ccfbf1" stroke="none"/>
+              <circle cx="150" cy="270" r="17" fill="#fff"/>
+              <path d="M136 258l28 24M164 258l-28 24" stroke-width="0"/>
+              <path d="M139 259a14 14 0 0 1 22 0M139 281a14 14 0 0 0 22 0" stroke-width="2"/>
+            </g>
+            <g class="dr" style="--dd:.4s" stroke="#0d9488" stroke-width="2" fill="none" stroke-dasharray="700" stroke-dashoffset="700">
+              <path d="M108 127H180"/>
+              <path d="M266 83H330"/>
+              <path d="M378 134V236H167"/>
+            </g>
+            <g fill="#0d9488"><path d="M300 83l-11-5v10zM240 236l11-5v-10z" opacity="0" /></g>
+            <g stroke="#0d9488" stroke-width="2" fill="#fff">
+              <path d="M198 71l14 24h-28zM216 71h14v24h-14z" fill="none"/>
+            </g>
+            <g stroke="#d97706" stroke-width="2" stroke-dasharray="3 3" fill="none">
+              <path d="M150 190v42M143 200l7-10 7 10M143 226l7 10 7-10"/>
+            </g>
+            <g font-family="ui-monospace,Consolas,monospace" font-size="12" fill="#44403c">
+              <text x="66" y="132" text-anchor="middle">T-201</text>
+              <text x="223" y="88" text-anchor="middle">E-101</text>
+              <text x="378" y="90" text-anchor="middle">V-102</text>
+              <text x="150" y="316" text-anchor="middle">P-205</text>
+            </g>
+            <g font-family="inherit" font-size="11">
+              <rect x="252" y="118" width="128" height="22" rx="6" fill="#fffbeb" stroke="#f59e0b"/>
+              <text x="316" y="133" text-anchor="middle" fill="#b45309" font-weight="700">隔离点 01 · 拆盲板</text>
+              <rect x="96" y="300" width="110" height="22" rx="6" fill="#fffbeb" stroke="#f59e0b"/>
+              <text x="151" y="315" text-anchor="middle" fill="#b45309" font-weight="700">隔离点 02 · 堵盲板</text>
+              <rect x="288" y="168" width="96" height="20" rx="6" fill="#f0fdfa" stroke="#14b8a6"/>
+              <text x="336" y="182" text-anchor="middle" fill="#0f766e" font-weight="600">自由锚点连线</text>
+              <circle cx="286" cy="178" r="4" fill="#0d9488"/><circle cx="372" cy="168" r="4" fill="#0d9488"/>
+            </g>
+          </svg>
+        </div>
+        <div class="pid-cap">
+          <span><i style="background:#0d9488"></i>设备 / 管线 / 阀门</span>
+          <span><i style="background:#f59e0b"></i>隔离点标注</span>
+          <span><i style="background:#2dd4bf"></i>自由锚点连线</span>
+          <span><i style="background:#a8a29e"></i>框选编辑</span>
+        </div>
+      </div>
+      <div class="s6-list stag">
+        <div class="h-item">
+          <div class="tile"><svg class="ic"><use href="#i-dash"/></svg></div>
+          <div class="h-tx"><b>标准图例图元库 <span class="bignum">126<em>+</em></span> 种</b>
+            <p><span class="lg-chip">设备<b>40</b></span><span class="lg-chip">管道管件<b>26</b></span><span class="lg-chip">阀门<b>28</b></span><span class="lg-chip">仪表<b>17</b></span><span class="lg-chip">电气安全<b>15</b></span></p>
+          </div>
+        </div>
+        <div class="h-item">
+          <div class="tile"><svg class="ic"><use href="#i-branch"/></svg></div>
+          <div class="h-tx"><b>自由锚点 ·「点哪连哪」智能连线</b>
+            <p>设备 / 管线边框任意点点击即连线端点，吸附反馈点实时跟随，正交走线、绘图零门槛</p>
+          </div>
+        </div>
+        <div class="h-item">
+          <div class="tile"><svg class="ic"><use href="#i-db"/></svg></div>
+          <div class="h-tx"><b>生成主数据 · 预览确认两步流</b>
+            <p>图纸一键生成设备 / 管线 / 隔离点主数据，预览确认后才落库，杜绝误录</p>
+          </div>
+        </div>
+        <div class="h-item">
+          <div class="tile"><svg class="ic"><use href="#i-refresh"/></svg></div>
+          <div class="h-tx"><b>图纸 ⇄ 台账 双向联动</b>
+            <p>PID 图纸、盲板台账、现场实物三者绑定，点击图元直达档案</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 第 7 页 · AI 赋能 -->
+<section class="slide s7" role="group" aria-label="核心亮点 AI 赋能">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">06</div>
+      <div class="sht"><div class="skick">核心亮点 HIGHLIGHT · AI 赋能</div><h2 class="stitle">AI 深度赋能，<em>私有化大模型驱动</em></h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="s7-stage">
+      <svg class="s7-svg" viewBox="0 0 1168 380" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <circle class="ring ringA" cx="584" cy="224" r="168" style="transform-origin:584px 224px"/>
+        <circle class="ring ringB" cx="584" cy="224" r="228" style="transform-origin:584px 224px"/>
+        <line x1="584" y1="224" x2="584" y2="52"/><line x1="584" y1="224" x2="920" y2="128"/>
+        <line x1="584" y1="224" x2="916" y2="332"/><line x1="584" y1="224" x2="584" y2="336"/>
+        <line x1="584" y1="224" x2="250" y2="330"/><line x1="584" y1="224" x2="248" y2="120"/>
+      </svg>
+      <div class="ai-hub a" style="--d:.2s">
+        <svg class="ic"><use href="#i-cpu"/></svg>
+        <b>AI 中枢</b><span>LLM · VLM</span>
+      </div>
+      <div class="ai-w a" style="--d:.3s;left:584px;top:56px"><div class="ai-node" style="--pd:0s"><div class="tile"><svg class="ic"><use href="#i-chat"/></svg></div><div><b>智能问答对话</b><span>业务知识即时答</span></div></div></div>
+      <div class="ai-w a" style="--d:.4s;left:920px;top:130px"><div class="ai-node" style="--pd:.6s"><div class="tile"><svg class="ic"><use href="#i-filetext"/></svg></div><div><b>隔离方案草稿生成</b><span>一键起草隔离点方案</span></div></div></div>
+      <div class="ai-w a" style="--d:.5s;left:916px;top:330px"><div class="ai-node" style="--pd:1.2s"><div class="tile"><svg class="ic"><use href="#i-image"/></svg></div><div><b>PID 图纸智能识别</b><span>图元自动提取入库</span></div></div></div>
+      <div class="ai-w a" style="--d:.6s;left:584px;top:352px"><div class="ai-node" style="--pd:1.8s"><div class="tile"><svg class="ic"><use href="#i-camera"/></svg></div><div><b>作业照片合规检查</b><span>现场拍照自动核验</span></div></div></div>
+      <div class="ai-w a" style="--d:.7s;left:250px;top:330px"><div class="ai-node" style="--pd:2.4s"><div class="tile"><svg class="ic"><use href="#i-shield"/></svg></div><div><b>安全交底书生成</b><span>规范条款自动成文</span></div></div></div>
+      <div class="ai-w a" style="--d:.8s;left:248px;top:120px"><div class="ai-node" style="--pd:3s"><div class="tile"><svg class="ic"><use href="#i-bookopen"/></svg></div><div><b>安全知识库检索</b><span>标准法规秒级定位</span></div></div></div>
+    </div>
+    <div class="s7-foot a" style="--d:.9s">
+      <svg class="ic"><use href="#i-shieldcheck"/></svg>
+      支持企业<b>私有化大模型部署</b>（Qwen 系列 · OpenAI 兼容网关），<b>数据不出厂</b>
+    </div>
+  </div>
+</section>
+
+<!-- 第 8 页 · 特色亮点 -->
+<section class="slide s8" role="group" aria-label="系统特色及亮点">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">07</div>
+      <div class="sht"><div class="skick">FEATURES · 特色亮点</div><h2 class="stitle">六大<em>系统特色与亮点</em></h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="s8-grid stag">
+      <div class="ft-card" style="--c1:#0d9488;--c2:#10b981">
+        <div class="tile"><svg class="ic"><use href="#i-refresh"/></svg></div>
+        <h3>全流程闭环</h3>
+        <p>九环节一单到底，状态机驱动不可跳步，环节零遗漏</p>
+      </div>
+      <div class="ft-card" style="--c1:#0d9488;--c2:#10b981">
+        <div class="tile"><svg class="ic"><use href="#i-phone"/></svg></div>
+        <h3>双端协同</h3>
+        <p>PC 端管理 + 移动端现场扫码执行，管理执行两不误</p>
+      </div>
+      <div class="ft-card" style="--c1:#0f766e;--c2:#0d9488">
+        <div class="tile"><svg class="ic"><use href="#i-shieldcheck"/></svg></div>
+        <h3>GB 30871 合规</h3>
+        <p>JSA 分析、双人审核、监护人到位等规范要求系统内置</p>
+      </div>
+      <div class="ft-card" style="--c1:#0d9488;--c2:#10b981">
+        <div class="tile"><svg class="ic"><use href="#i-link"/></svg></div>
+        <h3>数字孪生台账</h3>
+        <p>PID 图纸 = 台账 = 现场实物，三者绑定实时一致</p>
+      </div>
+      <div class="ft-card" style="--c1:#0f766e;--c2:#0d9488">
+        <div class="tile"><svg class="ic"><use href="#i-chart"/></svg></div>
+        <h3>数据驱动</h3>
+        <p>多维度统计看板，库存 / 作业 / 趋势一目了然</p>
+      </div>
+      <div class="ft-card" style="--c1:#8b5cf6;--c2:#6d28d9">
+        <div class="tile"><svg class="ic"><use href="#i-spark"/></svg></div>
+        <h3>AI 提效</h3>
+        <p>方案起草、图纸识别、拍照检查，重复工作量大幅下降</p>
+      </div>
+    </div>
+    <div class="s8-strip a" style="--d:.8s">六大能力相互咬合 —— 覆盖<b>『管理 · 执行 · 监督』</b>全链路</div>
+  </div>
+</section>
+
+<!-- 第 9 页 · 路线图 -->
+<section class="slide s9" role="group" aria-label="系统路线图">
+  <div class="pad">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="shead a" style="--d:0s">
+      <div class="sno">08</div>
+      <div class="sht"><div class="skick">ROADMAP · 演进路线</div><h2 class="stitle">三阶段演进，<em>从上线到集团化</em></h2></div>
+      <div class="sline" aria-hidden="true"></div>
+      <div class="sbrand">盲板抽堵作业全流程数字化</div>
+    </div>
+    <div class="tl a" style="--d:.2s">
+      <div class="tl-line"></div>
+      <span class="now-flag" style="left:16.66%">NOW · V1.0 在线运行</span>
+      <span class="tl-dot d1" style="left:16.66%"></span>
+      <span class="tl-dot d2" style="left:50%"></span>
+      <span class="tl-dot d3" style="left:83.33%"></span>
+    </div>
+    <div class="s9-grid stag">
+      <div class="stage-card cur">
+        <div class="sc-head"><span class="sc-ver">V1.0</span><span class="sc-chip done">已完成 · 当前版本</span></div>
+        <div class="ri"><svg class="ic"><use href="#i-checkcircle"/></svg>九环节全流程上线</div>
+        <div class="ri"><svg class="ic"><use href="#i-checkcircle"/></svg>盲板台账与库存管理</div>
+        <div class="ri"><svg class="ic"><use href="#i-checkcircle"/></svg>PID 组态编辑器</div>
+        <div class="ri"><svg class="ic"><use href="#i-checkcircle"/></svg>数据看板</div>
+        <div class="ri"><svg class="ic"><use href="#i-checkcircle"/></svg>移动端核心功能</div>
+        <div class="ri"><svg class="ic"><use href="#i-checkcircle"/></svg>7 类角色权限协同</div>
+      </div>
+      <div class="stage-card mid">
+        <div class="sc-head"><span class="sc-ver">V2.0</span><span class="sc-chip doing">演进中</span></div>
+        <div class="ri"><svg class="ic"><use href="#i-clock"/></svg>AI 图纸导入深化</div>
+        <div class="ri"><svg class="ic"><use href="#i-clock"/></svg>验收照片墙与影像归档</div>
+        <div class="ri"><svg class="ic"><use href="#i-clock"/></svg>移动端真机发布</div>
+        <div class="ri"><svg class="ic"><use href="#i-clock"/></svg>审批流与消息通知增强</div>
+        <div class="ri"><svg class="ic"><use href="#i-clock"/></svg>安全知识库与检索增强</div>
+      </div>
+      <div class="stage-card next">
+        <div class="sc-head"><span class="sc-ver">V3.0</span><span class="sc-chip plan">规划</span></div>
+        <div class="ri"><svg class="ic"><use href="#i-target"/></svg>多厂区集团化部署</div>
+        <div class="ri"><svg class="ic"><use href="#i-target"/></svg>IoT 智能盲板状态感知</div>
+        <div class="ri"><svg class="ic"><use href="#i-target"/></svg>数字孪生大屏</div>
+        <div class="ri"><svg class="ic"><use href="#i-target"/></svg>预测性安全分析</div>
+        <div class="ri"><svg class="ic"><use href="#i-target"/></svg>开放 API 与系统集成</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 第 10 页 · 结尾 -->
+<section class="slide dark s10" role="group" aria-label="结尾">
+  <div class="s1-grid" aria-hidden="true"></div>
+  <div class="s1-parts" aria-hidden="true">
+    <i style="--s:5px;--x:16%;--y:30%;--c:#5eead4;--t:8s;--dl:.3s;--o:.4"></i>
+    <i style="--s:4px;--x:80%;--y:24%;--c:#99f6e4;--t:9s;--dl:1s;--o:.45"></i>
+    <i style="--s:3px;--x:70%;--y:70%;--c:#6ee7b7;--t:10s;--dl:1.8s;--o:.35"></i>
+    <i style="--s:5px;--x:24%;--y:76%;--c:#5eead4;--t:8.5s;--dl:.9s;--o:.4"></i>
+  </div>
+  <div class="s10-body">
+    <div class="s10-kick a" style="--d:0s">THANK YOU · 安全管理数字化</div>
+    <div class="s10-t1 a" style="--d:.15s">让每一次抽堵盲板</div>
+    <div class="s10-t2 a" style="--d:.3s"><em>安全 · 可视 · 可溯</em></div>
+    <div class="s10-chips a" style="--d:.5s">
+      <span class="s10-chip"><svg class="ic"><use href="#i-shieldcheck"/></svg>安全合规</span>
+      <span class="s10-chip"><svg class="ic"><use href="#i-monitor"/></svg>全程可视</span>
+      <span class="s10-chip"><svg class="ic"><use href="#i-link"/></svg>数据可溯</span>
+    </div>
+    <div class="s10-div a" style="--d:.65s"></div>
+    <div class="s10-thx a" style="--d:.75s">谢谢观看 · 欢迎试用</div>
+    <div class="s10-foot a" style="--d:.85s">石化厂盲板管理系统 V1.0 · 盲板抽堵作业全流程数字化管理平台 · 2026-09</div>
+  </div>
+</section>
+</div></div>
+
+<div id="nav">
+  <button class="nbtn" id="bprev" aria-label="上一页"><svg class="ic" style="width:16px;height:16px;transform:rotate(90deg)"><use href="#i-chevd"/></svg></button>
+  <span id="dots" style="display:flex;gap:7px;align-items:center"></span>
+  <button class="nbtn" id="bnext" aria-label="下一页"><svg class="ic" style="width:16px;height:16px;transform:rotate(-90deg)"><use href="#i-chevd"/></svg></button>
+  <span id="pageno">01 / 10</span>
+</div>
+
+<script>
+(function(){
+  var slides=document.querySelectorAll('.slide'),cur=0,N=slides.length;
+  var dots=document.getElementById('dots'),pn=document.getElementById('pageno');
+  for(var i=0;i<N;i++){(function(i){
+    var d=document.createElement('button');d.className='dot';d.setAttribute('aria-label','第'+(i+1)+'页');
+    d.onclick=function(){go(i)};dots.appendChild(d);
+  })(i)}
+  function pad(n){return n<10?'0'+n:''+n}
+  function go(n){cur=Math.max(0,Math.min(N-1,n));
+    slides.forEach(function(s,i){s.classList.toggle('active',i===cur)});
+    var ds=dots.querySelectorAll('.dot');ds.forEach(function(d,i){d.classList.toggle('on',i===cur)});
+    pn.textContent=pad(cur+1)+' / '+pad(N);}
+  function next(){go(cur+1)}function prev(){go(cur-1)}
+  document.getElementById('bnext').onclick=next;document.getElementById('bprev').onclick=prev;
+  window.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault();next()}
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();prev()}
+    else if(e.key==='Home'){go(0)}else if(e.key==='End'){go(N-1)}
+  });
+  var tx=null;
+  document.addEventListener('touchstart',function(e){tx=e.touches[0].clientX},{passive:true});
+  document.addEventListener('touchend',function(e){if(tx===null)return;var dx=e.changedTouches[0].clientX-tx;if(Math.abs(dx)>60)(dx<0?next:prev)();tx=null},{passive:true});
+  function fit(){
+    var vp=document.getElementById('viewport');
+    var s=Math.min(vp.clientWidth/1280,vp.clientHeight/720);
+    document.getElementById('stage').style.transform='scale('+s+')';
+  }
+  window.addEventListener('resize',fit);fit();go(0);
+})();
+</script>
+</body>
+</html>

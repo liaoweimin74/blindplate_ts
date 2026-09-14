@@ -2913,3 +2913,20 @@ Stage Summary:
 - 连线锚点终态：「点哪连哪」——图元边框任意位置（含本体，挂起态）点击即连线端点，吸附反馈点实时跟随指针沿边投影；存储模型 = 四向 named anchor + 可选沿边参数 t，旧图/自动布局/挂接分段合并/AI 导入/俯瞰定位全兼容零迁移
 - 数学要点：挂接旋转下沿边参数可能同向或反向（端点线性插值法统一处理），anchorPointT 与 nearestFreeAnchorAt 精确互逆
 - 未竟事项：用户浏览器若仍显示四点行为需强刷（Ctrl+Shift+R）确认 HMR 生效；管线挂接阀门在自由锚点管线上的分段继承已代码级处理但未 E2E（现有图无此类场景）
+
+---
+Task ID: 89-R + 90-R
+Agent: 主会话(Z.ai Code)
+Task: push 前发现沙箱被平台重置——恢复远程代码、重做 Task 89（多选替换对话框）、主会话直写重建 PPT
+
+Work Log:
+- 【事故发现】push 前侦察：fetch 后 behind 35 / merge-base 退回 Task 73 时期；本地 HEAD 被平台置换为平行 UUID 链（655bd38），原链提交对象 47b040f(Task 89)/d3cc941(PPT)/8786d11 全部 MISSING——ppt/ 目录消失、pid-config.tsx 退回 Task 73 版（fromT/bulkIds 特征 grep=0）、db 回退旧快照 389KB
+- 【恢复】db/custom.db 备份至 /tmp 后 git reset --hard origin/main(8f6440a)——Task 74~86-2 全部代码回归（fromT:23/nearestFreeAnchorAt:7 实证）+ 平台较新 db 快照 565KB；kill 旧 dev 进程后双 fork 重启（db inode 已换防 SQLITE_READONLY_DBMOVED），首页/API 200、数据完好
+- 【Task 89 重做（MultiEdit 17 处 + 2 修复）】①lucide+Replace、ReactNode 导入 ②bulkIds/replaceDlgOpen/replaceTargetIds/dlgSearch/dlgOpenGroups 五状态 ③replaceShapesWith（保留 x/y/label/equipmentId/fill/stroke/rotation，type/stdId/parts/designW/H/flip 按目标重置，尺寸用新类型默认）+ openReplaceDialog（valid 过滤+搜索/折叠复位）+ deleteBulkShapes（挂接图元逐个 unmountShapeFromPipe 合并管线再级联连线，单次 mutate；unmount 返回缺 marks 需回填 working.marks）④handleShapeClick Shift/Ctrl/Cmd 多选追加/移除+属性面板跟随最后点选 ⑤Esc 链加 bulkIds 分支、Delete 多选态直达批量删除、keydown deps 补 bulkIds+replaceDlgOpen、对话框打开时画布快捷键 guard ⑥空白点击/切图/切模式/删除图/单删全部清 bulkIds ⑦isBulk 虚线高亮（opacity .65 区分选中）⑧单选工具条条件 bulkIds.length===0 让位+新增「替换成」4 键布局 ⑨多选悬浮工具条（已选 N 个 teal 徽章+替换成…主按钮+批量删除 rose+退出 X，悬于最后选中图元上方 left 钳制 260）⑩替换对话框：搜索框(autoFocus+清空)+7 组（设备图元 6/基础图形 4 默认展开，标准图例五大类默认收起，组头 Chevron 旋转+计数徽章）+搜索命中组自动展开空组隐藏（label/desc/id 三字段）+4 列宫格（libCell=ShapeBody 缩略 svg / stdCell=StdSymbolThumb）+底栏提示
+- 【E2E 8/8 通过（合成事件法：MouseEvent click bubbles+shiftKey，注意管线徽章 AUTO-P* 非图元勿点错）】①Shift+点 E102/E103→「已选 2 个」工具条✅ ②替换成…→对话框标题「2 个图元」✅ ③7 组开合精确✅ ④折叠设备图元→单元格 10→4✅ ⑤搜「换热器」→仅 2 命中组可见且自动展开✅ ⑥点换热器→对话框关+toast「已替换 2 个图元」+多选保持+属性面板类型=换热器✅ ⑦Esc→工具条消失✅ ⑧批量删除 E102/E103→toast「已删除图元」✅；刷新丢弃全部未保存操作零污染，console 零 error
+- 【PPT 重建（ppt-expert 两次中断后主会话直写）】三段写入法：骨架(CSS+40 symbol 图标+fit 缩放+导航 JS)→slide1-5→slide6-10；68KB/10 页/0 外链/0 禁色；布局精修参数内嵌（五层 flex:1 铺满、宫格 flex:1+内容居中、九环节 84px 节点+光点流动、徽章 padding-right:78px、路线图 6/5/5 条 ri 12px）；截图复验封面/五层架构/结尾三页与验收版一致
+
+Stage Summary:
+- 沙箱重置已完全恢复：远程代码 100% 回归 + Task 89 交互重做完成（E2E 全链通过）+ PPT 重建完成（/home/z/my-project/ppt/blind-plate-system-ppt.html，10 页含全部精修布局）
+- 经验沉淀：①平台重置会置换 git 历史+清对象库，push 前务必 git fetch 核对 ahead/behind 与 merge-base ②prisma generate 需在重置后重跑（client 过期致全站 tsc 报 Prisma 模型缺失）③SVG 画布合成事件 E2E：clickShape 需每次重查 DOM（重渲染换节点）；设备位号(E101/P101A/B)是图元、AUTO-P* 是管线号徽章 ④ppt-expert 子代理两次 context 中断后，主会话三段直写更可控
+- 未竟：T101/T-101 双编码决策、私有化 Qwen 网关参数仍待用户提供

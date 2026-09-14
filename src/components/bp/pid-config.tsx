@@ -4,13 +4,13 @@
 // + 拖拽移动/四角缩放 + 边框吸附锚点连线（正交曼哈顿自动折弯）+ 隔离点标注 + 查看模式实时状态轮询 + 全屏/窗口切换
 // 设计核心：连线只存锚点归属（fromShape/fromAnchor → toShape/toAnchor），折线路径在渲染时实时推导，拖拽/缩放后自动跟随
 //            自定义图元实例内嵌部件快照（parts + designW/H），库删除不影响已放置实例的渲染
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, Link2, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, Move, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
-  TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
+  Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
 } from 'lucide-react'
 import { ModuleProps, entryActionEventName } from '@/lib/bp-types'
 import {
@@ -2095,6 +2095,12 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ 'm-equipment': true, basic: true, custom: true })
   const toggleGroup = useCallback((key: string) => setOpenGroups((m) => ({ ...m, [key]: !m[key] })), [])
   const [libHover, setLibHover] = useState<{ title: string; lines: string[]; x: number; y: number } | null>(null)
+  // ---- 多选（Shift/Ctrl/Cmd 点击追加）与批量操作：多选悬浮工具条 +「替换成」对话框（Task 89） ----
+  const [bulkIds, setBulkIds] = useState<string[]>([])
+  const [replaceDlgOpen, setReplaceDlgOpen] = useState(false)
+  const [replaceTargetIds, setReplaceTargetIds] = useState<string[]>([]) // 进入对话框时的目标图元快照（防中途删除悬空）
+  const [dlgSearch, setDlgSearch] = useState('')
+  const [dlgOpenGroups, setDlgOpenGroups] = useState<Record<string, boolean>>({}) // 对话框分组折叠（独立于侧栏；开对话框时复位）
   const [placingMark, setPlacingMark] = useState<PlacingMark | null>(null)
   const [placingSymbol, setPlacingSymbol] = useState<SymbolRow | null>(null)
   // 直线橡皮筋绘制：按下定起点 → 拖动实时改角度/长度 → 抬起定终点（任意方向，/ 与 \ 双向支持）
@@ -2647,6 +2653,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
     setDetailLoading(true)
     setSelected(null)
+    setBulkIds([])
     setPendingConn(null)
     setPlacingShape(null)
     setPlacingMark(null)
@@ -2781,6 +2788,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
     setMode(m)
     setSelected(null)
+    setBulkIds([])
     setPendingConn(null)
     setPlacingShape(null)
     setPlacingMark(null)
@@ -3083,10 +3091,57 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       mutate((prev) => ({ ...prev, marks: prev.marks.filter((m) => m.id !== sel.id) }))
     }
     setSelected(null)
+    setBulkIds((prev) => prev.filter((x) => x !== sel.id))
   }
 
   const deleteSelectionRef = useRef(deleteSelection)
   deleteSelectionRef.current = deleteSelection
+
+  // ---- 「替换成」（Task 89）：批量更换图元图形本体——保留位置/名称/设备绑定/颜色/旋转与连线，尺寸改用新类型默认值 ----
+  const replaceShapesWith = (ids: string[], patch: Partial<PidShape>) => {
+    if (!ids.length || !activeIdRef.current) return
+    mutate((prev) => ({
+      ...prev,
+      shapes: prev.shapes.map((s) => (ids.includes(s.id) ? ({ ...s, ...patch } as PidShape) : s)),
+    }))
+    setReplaceDlgOpen(false)
+    toast({ title: '已替换图元', description: `已替换 ${ids.length} 个图元，位置/名称/连线不变（记得保存）` })
+  }
+  const replaceShapesWithRef = useRef(replaceShapesWith)
+  replaceShapesWithRef.current = replaceShapesWith
+
+  /** 统一替换入口：单选传 1 个、多选传全体；过滤已删除 id，搜索词与折叠状态复位 */
+  const openReplaceDialog = (ids: string[]) => {
+    const valid = ids.filter((id) => contentRef.current.shapes.some((s) => s.id === id))
+    if (!valid.length) return
+    setReplaceTargetIds(valid)
+    setDlgSearch('')
+    setDlgOpenGroups({})
+    setReplaceDlgOpen(true)
+  }
+
+  /** 多选批量删除：挂接图元先合并两段管线闭合，再级联删除连线，单次 mutate */
+  const deleteBulkShapes = () => {
+    if (!bulkIds.length || !activeIdRef.current) return
+    const ids = [...bulkIds]
+    mutate((prev0) => {
+      let working = prev0
+      for (const id of ids) {
+        const s = working.shapes.find((x) => x.id === id)
+        if (s && isMountableShape(s)) working = { ...unmountShapeFromPipe(working, id, polylineOfRef.current).content, marks: working.marks }
+      }
+      return {
+        shapes: working.shapes.filter((x) => !ids.includes(x.id)),
+        connections: working.connections.filter((c) => !ids.includes(c.fromShape) && !ids.includes(c.toShape)),
+        marks: working.marks,
+      }
+    })
+    setBulkIds([])
+    setSelected(null)
+    toast({ title: '已删除图元', description: `已删除 ${ids.length} 个图元及其关联连线` })
+  }
+  const deleteBulkShapesRef = useRef(deleteBulkShapes)
+  deleteBulkShapesRef.current = deleteBulkShapes
 
   // ---- 以选中图元为基础复制新建（副本偏移 24px，保持形状/尺寸/颜色/标签，便于在既有图元上改造） ----
   const duplicateShape = (s: PidShape) => {
@@ -3109,6 +3164,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (symbolEditorRef.current) return // 图元编辑器界面打开时，画布快捷键全部让位给编辑器
+      if (replaceDlgOpen) return // 替换成对话框打开时，画布快捷键全部让位（Esc/Enter 归 Radix，Delete 不误删）
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       if (e.key === 'Escape') {
@@ -3120,6 +3176,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         else if (placingShape) setPlacingShape(null)
         else if (placingSymbol) setPlacingSymbol(null)
         else if (pendingConn) setPendingConn(null)
+        else if (bulkIds.length) setBulkIds([])
         else setSelected(null)
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
         if (mode !== 'edit' || !selected || selected.kind !== 'shape') return
@@ -3128,14 +3185,16 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         e.preventDefault()
         duplicateShapeRef.current(s)
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (mode !== 'edit' || !selected) return
+        if (mode !== 'edit') return
+        if (bulkIds.length) { e.preventDefault(); deleteBulkShapesRef.current(); return } // 多选态直达批量删除
+        if (!selected) return
         e.preventDefault()
         deleteSelectionRef.current(selected)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mode, selected, placingMark, placingShape, pendingConn])
+  }, [mode, selected, placingMark, placingShape, pendingConn, bulkIds, replaceDlgOpen])
 
   // ---- 画布事件 ----
   const handleCanvasPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -3209,6 +3268,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       return
     }
     setSelected(null)
+    setBulkIds([])
   }
 
   const handleShapeClick = (e: React.MouseEvent<SVGElement>, id: string) => {
@@ -3225,6 +3285,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       return
     }
     e.stopPropagation()
+    // Shift/Ctrl/Cmd 点击：加入/移出多选（Task 89）；普通点击退出多选
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      setBulkIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+      setSelected({ kind: 'shape', id }) // 属性面板跟随最后点选的图元
+      return
+    }
+    if (bulkIds.length) setBulkIds([])
     setSelected({ kind: 'shape', id })
   }
 
@@ -3716,6 +3783,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         setContent(EMPTY_CONTENT)
         setDirty(false)
         setSelected(null)
+        setBulkIds([])
         setStatusPoints([])
         setStatusAt(null)
       }
@@ -3909,6 +3977,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const renderShapes = () =>
     content.shapes.map((s) => {
       const isSel = selected?.kind === 'shape' && selected.id === s.id
+      const isBulk = bulkIds.includes(s.id) // 多选成员高亮（Task 89）
       const showAnchors = mode === 'edit' && (hoverShapeId === s.id || isSel || pendingConn?.shapeId === s.id)
       // 手柄显示位置 clamp 进当前视口（无限画布下贴边图元的角手柄不被裁剪、始终可点）；缩放计算基于指针位置不受影响
       const clampV = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
@@ -3957,10 +4026,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               {s.label}
             </text>
           )}
-          {isSel && mode === 'edit' && (
+          {(isSel || isBulk) && mode === 'edit' && (
             <rect
               x={s.x - 6} y={s.y - 6} width={s.w + 12} height={s.h + 12} rx={4}
-              fill="none" stroke={TEAL} strokeWidth={1.2} strokeDasharray="5 3"
+              fill="none" stroke={TEAL} strokeWidth={isSel ? 1.2 : 1}
+              strokeDasharray="5 3" opacity={isSel ? 1 : 0.65}
             />
           )}
           {(() => {
@@ -5062,7 +5132,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 )}
 
                 {/* 选中图元浮动工具条：悬浮在选中图元右上角（画布内浮层；只读/查看态不渲染） */}
-                {mode === 'edit' && !detailLoading && selectedShape && canvasW > 0 && (() => {
+                {mode === 'edit' && !detailLoading && selectedShape && bulkIds.length === 0 && canvasW > 0 && (() => {
                   const s = selectedShape
                   const k = canvasW / vb.w
                   const px = (s.x + s.w - vb.x) * k
@@ -5102,6 +5172,14 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       >
                         <Shapes className="h-4 w-4" />
                       </button>
+                      <button
+                        type="button"
+                        title="替换成…（更换图形本体，位置/尺寸/名称/连线保留）"
+                        className="rounded p-1.5 text-teal-700 transition-colors hover:bg-teal-50"
+                        onClick={() => openReplaceDialog([s.id])}
+                      >
+                        <Replace className="h-4 w-4" />
+                      </button>
                       <div className="mx-0.5 h-4 w-px bg-stone-200" />
                       <button
                         type="button"
@@ -5114,6 +5192,170 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     </div>
                   )
                 })()}
+
+                {/* 多选悬浮工具条（Task 89）：悬于最后选中图元上方——已选计数 + 替换成 + 批量删除 + 退出多选 */}
+                {mode === 'edit' && !detailLoading && bulkIds.length > 0 && canvasW > 0 && (() => {
+                  const lastId = bulkIds[bulkIds.length - 1]
+                  const bs = content.shapes.find((x) => x.id === lastId)
+                  if (!bs) return null
+                  const k = canvasW / vb.w
+                  const px = (bs.x + bs.w - vb.x) * k
+                  const py = (bs.y - vb.y) * k
+                  if (px < -60 || px > canvasW + 60 || py < -60 || py > (canvasH || 9999) + 60) return null
+                  const left = Math.min(Math.max(px, 260), canvasW - 8)
+                  const top = Math.max(py, 44)
+                  return (
+                    <div
+                      className="absolute z-20 flex items-center gap-1 rounded-lg border border-teal-200 bg-white/95 p-1 shadow-md backdrop-blur"
+                      style={{ left, top, transform: 'translate(-100%, -100%) translateY(-10px)' }}
+                    >
+                      <span className="whitespace-nowrap rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700">已选 {bulkIds.length} 个</span>
+                      <button
+                        type="button"
+                        title="替换成其他图元（保留位置/尺寸/名称/连线）"
+                        className="flex items-center gap-1 whitespace-nowrap rounded-md bg-teal-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-teal-700"
+                        onClick={() => openReplaceDialog(bulkIds)}
+                      >
+                        <Replace className="h-3.5 w-3.5" /> 替换成…
+                      </button>
+                      <button
+                        type="button"
+                        title="批量删除选中图元（Delete）"
+                        className="flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-50"
+                        onClick={deleteBulkShapes}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> 批量删除
+                      </button>
+                      <button
+                        type="button"
+                        title="退出多选（Esc）"
+                        aria-label="退出多选"
+                        className="rounded p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
+                        onClick={() => setBulkIds([])}
+                      >
+                        <CloseIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )
+                })()}
+
+                {/* 替换成对话框（Task 89）：分组折叠 + 搜索；单选/多选通用——仅更换图形本体，位置/名称/绑定/连线保留 */}
+                <Dialog open={replaceDlgOpen} onOpenChange={setReplaceDlgOpen}>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2 text-teal-800">
+                        <Replace className="h-5 w-5 text-teal-600" />
+                        替换成
+                        <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{replaceTargetIds.length} 个图元</span>
+                      </DialogTitle>
+                      <DialogDescription>选择目标图元——仅更换图形，位置/尺寸/名称/设备绑定/连线全部保留；保存前不写入数据库。</DialogDescription>
+                    </DialogHeader>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                      <Input value={dlgSearch} onChange={(e) => setDlgSearch(e.target.value)} placeholder="搜索图元名称 / 编号 / 说明…" className="pl-8" autoFocus />
+                      {dlgSearch && (
+                        <button
+                          type="button"
+                          aria-label="清空搜索"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
+                          onClick={() => setDlgSearch('')}
+                        >
+                          <CloseIcon className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-[46vh] space-y-1.5 overflow-y-auto pr-1 bp-thin-scrollbar">
+                      {(() => {
+                        const q = dlgSearch.trim().toLowerCase()
+                        const cellCls = 'group/cell rounded-md border border-stone-200 p-1 transition-colors hover:border-teal-300 hover:bg-stone-50'
+                        // 通用组头：折叠箭头旋转 + 名称 + 命中/总数徽章
+                        const GroupHead = ({ label, n, open, onToggle }: { label: string; n: number; open: boolean; onToggle: () => void }) => (
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-stone-50"
+                            onClick={onToggle}
+                            aria-expanded={open}
+                          >
+                            <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform duration-200', open && 'rotate-0', !open && '-rotate-90')} />
+                            <span className="text-xs font-semibold text-stone-600">{label}</span>
+                            <span className="rounded-full bg-stone-100 px-1.5 py-px text-[10px] font-medium text-stone-500">{n}</span>
+                          </button>
+                        )
+                        // 内建图元单元格（ShapeBody 缩略 svg，与侧栏同款）
+                        const libCell = (item: (typeof SHAPE_LIBRARY)[number]) => (
+                          <button
+                            key={`lib-${item.type}`}
+                            type="button"
+                            aria-label={`替换为${item.label}`}
+                            className={cellCls}
+                            onClick={() => replaceShapesWithRef.current(replaceTargetIds, {
+                              type: item.type, w: item.w, h: item.h,
+                              stdId: undefined, parts: undefined, designW: undefined, designH: undefined, flip: undefined,
+                            })}
+                          >
+                            <span className="flex h-14 w-full items-center justify-center">
+                              <svg viewBox={`0 0 ${item.w} ${item.h}`} className="max-h-12 max-w-full" aria-hidden="true">
+                                <ShapeBody s={{ id: `rep-${item.type}`, type: item.type, x: 0, y: 0, w: item.w, h: item.h, label: '' }} />
+                              </svg>
+                            </span>
+                            <span className="block truncate px-0.5 pb-0.5 text-center text-[10px] leading-tight text-stone-500">{item.label}</span>
+                          </button>
+                        )
+                        // 标准图例单元格（StdSymbolThumb 缩略，与侧栏同款）
+                        const stdCell = (sym: StdSymbol) => (
+                          <button
+                            key={`std-${sym.id}`}
+                            type="button"
+                            aria-label={`替换为${sym.label}`}
+                            className={cellCls}
+                            onClick={() => replaceShapesWithRef.current(replaceTargetIds, {
+                              type: 'std', stdId: sym.id, w: sym.sw, h: sym.sh,
+                              parts: undefined, designW: undefined, designH: undefined, flip: undefined,
+                            })}
+                          >
+                            <span className="flex h-14 w-full items-center justify-center">
+                              <StdSymbolThumb id={sym.id} className="h-12 w-full" />
+                            </span>
+                            <span className="block truncate px-0.5 pb-0.5 text-center text-[10px] leading-tight text-stone-500">{sym.label}</span>
+                          </button>
+                        )
+                        const stdHit = (sym: StdSymbol) =>
+                          !q || sym.label.toLowerCase().includes(q) || sym.desc.toLowerCase().includes(q) || sym.id.toLowerCase().includes(q)
+                        const libHit = (label: string) => !q || label.toLowerCase().includes(q)
+                        // 七个分组：设备图元/基础图形默认展开，标准图例五大类默认收起；搜索时自动展开有命中的组并隐藏空组
+                        const defs: { key: string; label: string; defaultOpen: boolean; cells: ReactNode }[] = [
+                          { key: 'equip', label: '设备图元', defaultOpen: true, cells: SHAPE_LIBRARY.filter((d) => d.group === 'equip' && libHit(d.label)).map(libCell) },
+                          { key: 'basic', label: '基础图形', defaultOpen: true, cells: SHAPE_LIBRARY.filter((d) => d.group === 'basic' && d.type !== 'line' && libHit(d.label)).map(libCell) },
+                          ...STD_MAJOR_ORDER.map((mj) => ({
+                            key: `std-${mj}`,
+                            label: `标准图例 · ${STD_MAJOR_LABEL[mj]}`,
+                            defaultOpen: false,
+                            cells: STD_SYMBOLS.filter((sym) => sym.major === mj && stdHit(sym)).map(stdCell),
+                          })),
+                        ]
+                        const visible = defs
+                          .map((g) => ({ ...g, n: (g.cells as { key?: string }[]).length ?? 0 }))
+                          .filter((g) => (q ? g.n > 0 : true))
+                        if (!visible.length) {
+                          return <div className="py-10 text-center text-sm text-stone-400">没有匹配「{dlgSearch}」的图元</div>
+                        }
+                        return visible.map((g) => {
+                          const open = q ? true : (dlgOpenGroups[g.key] ?? g.defaultOpen)
+                          return (
+                            <div key={g.key} className="rounded-lg border border-stone-100">
+                              <GroupHead label={g.label} n={g.n} open={open} onToggle={() => setDlgOpenGroups((m) => ({ ...m, [g.key]: !(q ? true : (dlgOpenGroups[g.key] ?? g.defaultOpen)) }))} />
+                              {open && <div className="grid grid-cols-4 gap-1.5 p-1.5 pt-0.5">{g.cells}</div>}
+                            </div>
+                          )
+                        })
+                      })()}
+                    </div>
+                    <DialogFooter className="items-center gap-2 sm:justify-between">
+                      <span className="text-[11px] text-stone-400">仅更换图形本体，位置 / 尺寸 / 名称 / 连线不变</span>
+                      <Button type="button" variant="outline" onClick={() => setReplaceDlgOpen(false)}>关闭</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
 
