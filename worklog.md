@@ -2814,3 +2814,19 @@ Stage Summary:
 - 未配置新变量时行为与改前完全一致（当前实测仍走内置通道）
 - 待用户提供：公司网关地址/鉴权 key/模型名；若文本模型不支持图像需另配 VL 模型名
 - 风险提示：网关若对 chat_template_kwargs 未知字段报 4xx，去掉 LLM_ENABLE_THINKING 即可
+
+---
+Task ID: 84
+Agent: 主会话
+Task: PID 组态编辑器——图元库面板与属性面板支持折叠/展开（用户需求）
+
+Work Log:
+- 定位：src/components/bp/pid-config.tsx（5839 行）两面板均为 w-60 固定宽、mode==='edit' 渲染——左图元库（~4121）/右属性面板（~4888），外层 flex 行容器
+- 实现（6 处编辑）：①lucide 导入 PanelLeftClose/PanelLeftOpen/PanelRightClose/PanelRightOpen；②新增 libCollapsed/propsCollapsed 状态 + localStorage 持久化（bp-pid-lib-collapsed / bp-pid-props-collapsed）+ 移动端(<768px)首次默认折叠 + panelsHydratedRef 防 SSR 水合不匹配；③④左面板容器 className 动态化（展开 w-60 / 折叠 w-9 窄条 + transition-[width] duration-200 过渡动画），展开态标题行加「折叠图元库」按钮（PanelLeftClose），折叠态渲染窄条把手（PanelLeftOpen 按钮 + 竖排「图元库」writing-mode:vertical-rl 文字）；⑤⑥右侧属性面板镜像实现（PanelRight* 图标 + 竖排「属性面板」）
+- 折叠后画布自动获得约 2×192px 额外宽度；aria-expanded/aria-label/title 无障碍完备；hover 态 teal 色系（配色铁律）
+- 验证：bun run lint 通过；tsc --noEmit src/ 0 错
+- agent-browser E2E 走查全链：登录（SVG 验证码 DOM 提取法）→ PID 组态 → 左面板折叠（窄条 36px 实测 + ls='1'）→ 展开恢复（按钮/页签/搜索框全回来 + ls='0'）→ 右面板同链 → 刷新记忆闭环（双折叠态 reload 后均保持）→ 375px 移动视口清记忆后默认双折叠 ✅ → 移动端窄条点击展开可用 ✅ → 控制台零错误 → 基线还原（1440 视口 + 清 ls）
+
+Stage Summary:
+- PID 组态编辑器左右面板均可折叠成 36px 竖条把手（带图标+竖排文字），点击即展开；展开态标题行右侧有折叠按钮；状态 localStorage 记忆跨会话保持；移动端首次进入默认折叠给画布留空间
+- 无任何 API/数据层改动，纯前端 UI 状态

@@ -9,7 +9,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Eye, EyeOff, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
-  MousePointer2, Map as MapIcon, Move, MoveDiagonal, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
+  MousePointer2, Map as MapIcon, Move, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
   TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
 } from 'lucide-react'
 import { ModuleProps, entryActionEventName } from '@/lib/bp-types'
@@ -2011,6 +2011,38 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   // ---- 俯瞰图（工具栏开关，画布右下角显示：整图缩略 + 当前视口框，点击/拖拽快速定位） ----
   const [minimapOpen, setMinimapOpen] = useState(false)
   const minimapNavRef = useRef(false) // 俯瞰图按下拖拽导航中（pointer capture 保证移动/抬起事件回到缩略图）
+
+  // ---- 面板折叠（图元库/属性面板）：localStorage 记忆开关状态，移动端首次默认折叠给画布留空间 ----
+  const [libCollapsed, setLibCollapsed] = useState(false)
+  const [propsCollapsed, setPropsCollapsed] = useState(false)
+  const panelsHydratedRef = useRef(false)
+  useEffect(() => {
+    if (panelsHydratedRef.current) return
+    panelsHydratedRef.current = true
+    try {
+      const mobile = window.innerWidth < 768
+      const savedLib = localStorage.getItem('bp-pid-lib-collapsed')
+      const savedProps = localStorage.getItem('bp-pid-props-collapsed')
+      if (savedLib != null) setLibCollapsed(savedLib === '1')
+      else if (mobile) setLibCollapsed(true)
+      if (savedProps != null) setPropsCollapsed(savedProps === '1')
+      else if (mobile) setPropsCollapsed(true)
+    } catch { /* localStorage 不可用（隐私模式等）：保持默认展开 */ }
+  }, [])
+  const toggleLibPanel = useCallback((v?: boolean) => {
+    setLibCollapsed((prev) => {
+      const next = v ?? !prev
+      try { localStorage.setItem('bp-pid-lib-collapsed', next ? '1' : '0') } catch { /* 忽略 */ }
+      return next
+    })
+  }, [])
+  const togglePropsPanel = useCallback((v?: boolean) => {
+    setPropsCollapsed((prev) => {
+      const next = v ?? !prev
+      try { localStorage.setItem('bp-pid-props-collapsed', next ? '1' : '0') } catch { /* 忽略 */ }
+      return next
+    })
+  }, [])
 
   // ---- 标注隔离点 Dialog ----
   const [markDialogOpen, setMarkDialogOpen] = useState(false)
@@ -4086,8 +4118,24 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           <div ref={canvasRowRef} className="flex items-stretch gap-3" style={canvasH > 0 ? { height: canvasH } : undefined}>
             {/* 左侧图元库（编辑模式）：设备图元 + 基础图形两组 */}
             {mode === 'edit' && (
-              <div className="flex w-60 shrink-0 flex-col rounded-lg border bg-white">
-                <div className="border-b px-3 py-2 text-xs font-medium text-stone-500">图元库</div>
+              <div className={cn('flex shrink-0 flex-col overflow-hidden rounded-lg border bg-white transition-[width] duration-200', libCollapsed ? 'w-9 items-center gap-2 py-2' : 'w-60')}>
+                {libCollapsed ? (
+                  <>
+                    <button type="button" onClick={() => toggleLibPanel(false)} title="展开图元库" aria-label="展开图元库" aria-expanded={false}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-stone-500 transition-colors hover:bg-teal-50 hover:text-teal-700">
+                      <PanelLeftOpen className="h-4 w-4" />
+                    </button>
+                    <span className="select-none text-[11px] font-medium tracking-[0.2em] text-stone-400 [writing-mode:vertical-rl]">图元库</span>
+                  </>
+                ) : (
+                  <>
+                <div className="flex items-center justify-between border-b px-3 py-2 text-xs font-medium text-stone-500">
+                  <span>图元库</span>
+                  <button type="button" onClick={() => toggleLibPanel(true)} title="折叠图元库：收起左侧面板，画布获得更大空间（状态自动记忆）" aria-label="折叠图元库" aria-expanded={true}
+                    className="-mr-1 rounded p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600">
+                    <PanelLeftClose className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <div className="flex gap-1 border-b px-2 py-1.5">
                   {([['std', '内建图元'], ['basic', '基础图形'], ['custom', '自定义']] as const).map(([v, lbl]) => (
                     <button
@@ -4329,6 +4377,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         : `点击画布位置放置「${placingLabel}」，Esc 取消`
                       : '悬停查看图元信息，点击大分类/子分类标题展开折叠，点击图元进入放置模式；内建图元含设备/管道与管件/阀门/仪表与控制/电气与安全 5 大类 126 符号，支持顶部搜索'}
                 </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -4833,10 +4883,26 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               </div>
             </div>
 
-            {/* 右侧属性面板（编辑模式） */}
+            {/* 右侧属性面板（编辑模式）：可折叠成窄条把手，展开/折叠状态 localStorage 记忆，移动端默认折叠 */}
             {mode === 'edit' && (
-              <div className="flex w-60 shrink-0 flex-col rounded-lg border bg-white">
-                <div className="border-b px-3 py-2 text-xs font-medium text-stone-500">属性面板</div>
+              <div className={cn('flex shrink-0 flex-col overflow-hidden rounded-lg border bg-white transition-[width] duration-200', propsCollapsed ? 'w-9 items-center gap-2 py-2' : 'w-60')}>
+                {propsCollapsed ? (
+                  <>
+                    <button type="button" onClick={() => togglePropsPanel(false)} title="展开属性面板" aria-label="展开属性面板" aria-expanded={false}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-stone-500 transition-colors hover:bg-teal-50 hover:text-teal-700">
+                      <PanelRightOpen className="h-4 w-4" />
+                    </button>
+                    <span className="select-none text-[11px] font-medium tracking-[0.2em] text-stone-400 [writing-mode:vertical-rl]">属性面板</span>
+                  </>
+                ) : (
+                  <>
+                <div className="flex items-center justify-between border-b px-3 py-2 text-xs font-medium text-stone-500">
+                  <span>属性面板</span>
+                  <button type="button" onClick={() => togglePropsPanel(true)} title="折叠属性面板：收起右侧面板，画布获得更大空间（状态自动记忆）" aria-label="折叠属性面板" aria-expanded={true}
+                    className="-mr-1 rounded p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600">
+                    <PanelRightClose className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 bp-thin-scrollbar">
                   {selectedShape ? (
                     <div className="space-y-3">
@@ -5239,6 +5305,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     </div>
                   )}
                 </div>
+                  </>
+                )}
               </div>
             )}
           </div>
