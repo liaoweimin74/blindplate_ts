@@ -532,6 +532,26 @@ function distToAnchorZone(s: PidShape, px: number, py: number): number {
 }
 
 /**
+ * 连线锚点命中区路径（Task 86）：
+ * - 环带模式（evenodd 打洞）：包围盒外扩 m 的边带——常态下「边框附近一圈」都可点击连线，
+ *   本体区域留洞（保留点击选中/按住拖动语义）；屏幕缩放小时边带仍足够宽，不再难命中
+ * - 实心模式：整个包围盒（含本体）——连线挂起态下目标图元任意位置点击即完成连线（杜绝点本体被画布当空白吞掉）
+ */
+function anchorHitBandPath(s: PidShape, m = 18): string {
+  const b = anchorZoneBox(s)
+  const ox = b.x - m
+  const oy = b.y - m
+  const ow = b.w + 2 * m
+  const oh = b.h + 2 * m
+  return `M${ox},${oy}h${ow}v${oh}h${-ow}Z M${b.x},${b.y}h${b.w}v${b.h}h${-b.w}Z`
+}
+
+function anchorHitSolidPath(s: PidShape): string {
+  const b = anchorZoneBox(s)
+  return `M${b.x},${b.y}h${b.w}v${b.h}h${-b.w}Z`
+}
+
+/**
  * 连线正交（曼哈顿）自动折弯路由：
  * - 双水平锚点（left/right）：取 midX 拐弯（midOverride 可手动覆盖中段竖线位置）
  * - 双垂直锚点（top/bottom）：取 midY 拐弯（midOverride 可手动覆盖中段横线位置）
@@ -2037,6 +2057,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [canvasH, setCanvasH] = useState(0) // 0 = 未测量（回落到画布比例兜底）
   const [canvasW, setCanvasW] = useState(0) // 浮动工具条定位 clamp 用
   const suppressClickAtRef = useRef(0) // 平移拖拽结束时刻：吞掉紧随 pointerup 的 click，防误点挂标/误取消选中
+  const suppressShapeClickAtRef = useRef(0) // 图元拖动刚结束时刻：吞掉紧随的 click——全域锚点命中区下防止拖动图元被误判为「点击边框连线」
 
   // ---- 画布文字/角标显隐四开关（缩放悬浮栏控制，编辑/查看通用；默认全显示）：设备名 / 管线名 / 标注文字 / 绑定角标 ----
   const [showDeviceLabels, setShowDeviceLabels] = useState(true)
@@ -3165,8 +3186,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const onAnchorClick = (e: React.MouseEvent<SVGElement>, shapeId: string, anchor: Anchor) => {
     e.stopPropagation()
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
+    // 图元拖动刚结束的 click 不算「点边框连线」（命中区常驻渲染，拖动释放必带 click，须抑制）
+    if (Date.now() < suppressShapeClickAtRef.current) return
     if (!pendingConn) {
       setPendingConn({ shapeId, anchor })
+      setSelected({ kind: 'shape', id: shapeId }) // 首击同时选中源图元，属性面板立即可用
       return
     }
     const { shapeId: fromShape, anchor: fromAnchor } = pendingConn
@@ -3270,6 +3294,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const p = toSvgPoint(ev)
       if (!p) return
       moved = true
+      suppressShapeClickAtRef.current = Date.now() + 400 // 拖动过：紧随的 click 不作连线点击处理（全域锚点命中区防误触发）
       // 无限画布：拖拽不限制在 0..CANVAS_W（与放置/缩放边界策略一致）
       const nx = Math.round(p.x - offX)
       const ny = Math.round(p.y - offY)
@@ -3850,37 +3875,42 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
             </text>
           )}
           {isSel && mode === 'edit' && (
-            <>
-              <rect
-                x={s.x - 6} y={s.y - 6} width={s.w + 12} height={s.h + 12} rx={4}
-                fill="none" stroke={TEAL} strokeWidth={1.2} strokeDasharray="5 3"
-              />
-              {handles.map(([hd, hx, hy, cur]) => (
-                <rect
-                  key={hd} x={hx - 4} y={hy - 4} width={8} height={8}
-                  fill="#fff" stroke={TEAL} strokeWidth={1.3} style={{ cursor: cur }}
-                  onPointerDown={(e) => startResize(e, s, hd)}
-                />
-              ))}
-            </>
+            <rect
+              x={s.x - 6} y={s.y - 6} width={s.w + 12} height={s.h + 12} rx={4}
+              fill="none" stroke={TEAL} strokeWidth={1.2} strokeDasharray="5 3"
+            />
           )}
-          {showAnchors && (() => {
-            // 边框即锚点：整个内容盒（挂接旋转取物理包围盒）周边均可点击连线，自动吸附最近边；存储/路由仍用四向锚点模型
-            const zb = anchorZoneBox(s)
+          {(() => {
+            // 连线锚点区（Task 86）：命中区常驻渲染（编辑态、非放置中）——鼠标无需先碰本体即可从外围直接进入；
+            // 双态切换：连线挂起时目标图元（非源）为实心全域（点任意位置即完成连线），其余为边框外扩环带（本体留洞保选中/拖动）；
+            // 视觉层（teal 虚线框）仍按 showAnchors（hover/选中/挂起源）显示，吸附反馈点跟随最近边
+            const hitActive = mode === 'edit' && !placingShape && !placingMark && !placingSymbol
+            if (!hitActive) return null
+            const isPendingSrc = pendingConn?.shapeId === s.id
+            const hitPath = pendingConn && !isPendingSrc ? anchorHitSolidPath(s) : anchorHitBandPath(s)
             return (
               <>
-                <rect x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none" stroke={TEAL} strokeWidth={1.2}
-                  strokeDasharray="4 3" opacity={0.85} pointerEvents="none" />
-                <rect
-                  x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none" stroke="transparent" strokeWidth={12}
-                  pointerEvents="stroke" className="cursor-crosshair"
+                {showAnchors && (() => {
+                  const zb = anchorZoneBox(s)
+                  return (
+                    <rect x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none" stroke={TEAL} strokeWidth={1.2}
+                      strokeDasharray="4 3" opacity={0.85} pointerEvents="none" />
+                  )
+                })()}
+                <path
+                  d={hitPath} fillRule="evenodd" fill="transparent" pointerEvents="all"
+                  className="cursor-crosshair"
                   onPointerMove={(e) => {
                     const p = toSvgPoint(e)
                     if (!p) return
+                    setHoverShapeId((prev) => (prev === s.id ? prev : s.id)) // 外围边带进入即点亮视觉边框
                     const key = `${s.id}:${nearestAnchorAt(s, p.x, p.y)}`
                     setHoverAnchor((prev) => (prev === key ? prev : key))
                   }}
-                  onPointerLeave={() => setHoverAnchor((prev) => (prev && prev.startsWith(`${s.id}:`) ? null : prev))}
+                  onPointerLeave={() => {
+                    setHoverAnchor((prev) => (prev && prev.startsWith(`${s.id}:`) ? null : prev))
+                    setHoverShapeId((prev) => (prev === s.id ? null : prev))
+                  }}
                   onClick={(e) => {
                     const p = toSvgPoint(e)
                     onAnchorClick(e, s.id, p ? nearestAnchorAt(s, p.x, p.y) : 'top')
@@ -3900,6 +3930,14 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               </>
             )
           })()}
+          {isSel && mode === 'edit' && handles.map(([hd, hx, hy, cur]) => (
+            // 缩放手柄置于锚点命中区之上（渲染在最后）：选中态四角手柄不被环带拦截，改大小交互不受影响
+            <rect
+              key={hd} x={hx - 4} y={hy - 4} width={8} height={8}
+              fill="#fff" stroke={TEAL} strokeWidth={1.3} style={{ cursor: cur }}
+              onPointerDown={(e) => startResize(e, s, hd)}
+            />
+          ))}
         </g>
       )
     })
@@ -4518,7 +4556,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                           从左侧选择图元开始绘制
                         </text>
                         <text x={CANVAS_W / 2} y={CANVAS_H / 2 + 16} textAnchor="middle" fontSize={12} fill="#d6d3d1">
-                          点击图元 → 点击画布放置 · 拖拽移动 · 四角缩放 · 点边框连线
+                          点击图元 → 点击画布放置 · 拖拽移动 · 四角缩放 · 点图元边框环带连线
                         </text>
                       </g>
                     )}
@@ -5399,7 +5437,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         </li>
                         <li className="flex gap-2">
                           <Spline className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
-                          <span><b className="text-stone-700">连线</b>：依次点击两个图元的边框（自动吸附最近边），折线自动生成</span>
+                          <span><b className="text-stone-700">连线</b>：先点一个图元的边框环带，再点目标图元任意位置（自动吸附最近边），折线自动生成；点空白处取消</span>
                         </li>
                         <li className="flex gap-2">
                           <Shapes className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
