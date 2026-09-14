@@ -13,8 +13,11 @@ export const dynamic = 'force-dynamic'
  *    幂等建 Equipment 并回填 shape.equipmentId；已绑定 / 无位号 / 阀门管件仪表等内联符号跳过；
  * 2. 管线：两端图元均已绑定设备的连线 → 管线号 = 「起点位号-终点位号」（冲突自动加序号），
  *    幂等建 Pipeline（起止设备回填）并回填 connection.pipelineId；已绑定 / 端点缺设备的连线跳过；
+ *    悬空自愈：图 JSON 可能残留已删除管线的旧 id（如图从旧图复制），重置为未绑定重新生成，
+ *    否则隔离点归属阶段会拿悬空 id 建 IsoPointMaster → 外键约束崩溃（图 24 实证）；
  * 3. 隔离点：挂标 code → 幂等建 IsoPointMaster（所属管线按挂标到各管线折线的最近距离推导），
- *    并回填 mark.masterPointId；已绑定 / 编码为空的挂标跳过。
+ *    并回填 mark.masterPointId；已绑定 / 编码为空的挂标跳过；已绑定但主数据缺管线归属的补归属；
+ *    设备引用同理悬空自愈（重置后按 label 位号重新生成/关联，图 20/22/23/24 实证）。
  * 全程事务；回填后的 content 写回组态图，前端刷新后图元/连线/挂标与主数据一一对应。
  */
 
@@ -39,16 +42,23 @@ interface GenConn {
   pipelineId?: number | null
   direction?: string
 }
-interface GenMark { id: string; code: string; name?: string; x: number; y: number; masterPointId?: number }
+interface GenMark { id: string; code: string; name?: string; x: number; y: number; masterPointId?: number | null }
 
 interface GenItem { code: string; id: number | null; created: boolean; note?: string }
 interface GenGroup { created: number; linked: number; skipped: number; items: GenItem[] }
 
-/** 图元 label → 位号提取：首个空白分隔 token 匹配位号模式（T-101 / P201A / E-301 等） */
+/** 图元 label → 位号提取：首个空白分隔 token 匹配位号模式（T-101 / P201A / E-301 等）；
+ *  A/B 备用对写法（如 P101A/B 脱苯塔底泵）取斜杠前主机位号 P101A */
 function tagOf(label: string | undefined): string | null {
   if (!label) return null
   const first = label.trim().split(/\s+/)[0] ?? ''
-  return /^[A-Za-z]{1,4}-?\d{1,4}[A-Za-z]?$/.test(first) ? first.toUpperCase() : null
+  if (/^[A-Za-z]{1,4}-?\d{1,4}[A-Za-z]?$/.test(first)) return first.toUpperCase()
+  const slashIdx = first.indexOf('/')
+  if (slashIdx > 0) {
+    const head = first.slice(0, slashIdx)
+    if (/^[A-Za-z]{1,4}-?\d{1,4}[A-Za-z]?$/.test(head)) return head.toUpperCase()
+  }
+  return null
 }
 
 /** 工艺设备图元判定（阀门/管件/仪表等内联符号与基础图形不算设备） */
@@ -101,7 +111,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
       // ---- 1. 设备 ----
       const equipments: GenGroup = { created: 0, linked: 0, skipped: 0, items: [] }
+      // 悬空设备引用自愈：图元绑定的设备 id 若已不存在（历史删除/跨图复制），重置为未绑定，
+      // 再按 label 位号重新生成/关联；否则设备阶段误计 skipped，管线端点校验静默失败
+      const existingEquipIds = new Set((await tx.equipment.findMany({ select: { id: true } })).map((e) => e.id))
       for (const s of shapes) {
+        if (s.equipmentId != null && !existingEquipIds.has(s.equipmentId)) s.equipmentId = null
         if (s.equipmentId != null) { equipments.skipped++; continue }
         if (!isEquipmentLike(s)) { continue } // 内联符号/基础图形静默跳过（不计 skipped）
         const tag = tagOf(s.label)
@@ -135,7 +149,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       // ---- 2. 管线 ----
       const pipelines: GenGroup = { created: 0, linked: 0, skipped: 0, items: [] }
       const pipeCodeCount = new Map<string, number>()
+      // DB 实存管线 id 集合：图 JSON 里指向已删除管线的悬空 id 先自愈重置为未绑定（静默），
+      // 使这些连线重新走正常生成流程；后续隔离点归属也以此 + 新建 id 为准，杜绝外键崩溃
+      const existingPipeIds = new Set((await tx.pipeline.findMany({ select: { id: true } })).map((p) => p.id))
       for (const c of connections) {
+        if (c.pipelineId != null && !existingPipeIds.has(c.pipelineId)) c.pipelineId = null
         if (c.pipelineId != null) { pipelines.skipped++; continue }
         const fromEq = shapeById.get(c.fromShape)?.equipmentId ?? null
         const toEq = shapeById.get(c.toShape)?.equipmentId ?? null
@@ -170,6 +188,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
           },
         })
         c.pipelineId = created.id
+        existingPipeIds.add(created.id)
         pipelines.created++
         pipelines.items.push({ code, id: created.id, created: true })
       }
@@ -181,13 +200,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         // 各连线折线（mount 几何库的简化正交路由，与导入端同源）
         const polyOf = layoutPolylineOf((sid) => shapeById.get(sid) as MountShape | undefined)
         const connPolys = connections
-          .filter((c) => c.pipelineId != null)
+          .filter((c) => c.pipelineId != null && pipeCodeById.has(c.pipelineId))
           .map((c) => ({ pipelineId: c.pipelineId as number, pts: polyOf(c) }))
           .filter((e) => e.pts && e.pts.length >= 2)
         for (const m of marks) {
-          if (m.masterPointId != null) { isoPoints.skipped++; continue }
           if (!m.code) { isoPoints.skipped++; continue }
-          const exists = await tx.isoPointMaster.findUnique({ where: { code: m.code } })
           // 最近管线折线推导（≤120 SVG 单位内有效）
           let nearestPipeId: number | null = null
           let bestD = Infinity
@@ -200,6 +217,23 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
             if (d < bestD) { bestD = d; nearestPipeId = cp.pipelineId }
           }
           if (bestD > 120) nearestPipeId = null
+          if (m.masterPointId != null) {
+            // 已绑定挂标：主数据缺管线归属时按位置补归属（悬空自愈/管线重建后常见）；
+            // 绑定指向已删除主数据时清空，落到下方 exists/create 路径重建关联
+            const bound = await tx.isoPointMaster.findUnique({ where: { id: m.masterPointId } })
+            if (bound) {
+              if (bound.pipelineId == null && nearestPipeId) {
+                await tx.isoPointMaster.update({ where: { id: bound.id }, data: { pipelineId: nearestPipeId } })
+                isoPoints.linked++
+                isoPoints.items.push({ code: m.code, id: bound.id, created: false, note: `补归属管线 ${pipeCodeById.get(nearestPipeId) ?? ''}` })
+              } else {
+                isoPoints.skipped++
+              }
+              continue
+            }
+            m.masterPointId = null
+          }
+          const exists = await tx.isoPointMaster.findUnique({ where: { code: m.code } })
           if (exists) {
             m.masterPointId = exists.id
             isoPoints.linked++

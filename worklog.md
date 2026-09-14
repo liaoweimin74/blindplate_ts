@@ -2759,3 +2759,23 @@ Stage Summary:
 - 双态图标落地：挂标右上角圆徽 teal✓=已入主数据（含既有 m-p33 自动获得）/violet?=候选未入主数据，用户要求「明显区分」达成；候选经「生成主数据」按钮按编码幂等建档转正
 - 舞台变化：图27 新增 CV-201/V-202 两阀门（5 段连线 pipelineId=40）+候选挂标 IP-V301-01；图20/24 未写入任何挂标（预览模式验证）
 - 下阶段建议：①用户实测 PID 组态按钮（图27/图20 均可点，图20 会写入 17 个候选挂标可删除）②在案候选：已完结页验收照片墙、撤回交底级联清附件、录音真机实测、真实 PID 图纸 AI 导入验证、体检周检 cron、SSE 进度 ③prisma generate 环境坑已记录（快照恢复后 tsc 报 PrismaClient 缺模型先重新生成）
+
+---
+Task ID: 81-HOTFIX
+Agent: Z.ai Code (主会话)
+Task: 用户报障 generate-master 外键崩溃（图24：tx.isoPointMaster.create FK violated）——取证定位、悬空引用自愈修复、三轮收敛验证
+
+Work Log:
+- 【报障取证】用户实测 POST /api/pid-diagrams/24/generate-master 报 IsoPointMaster.create 外键约束崩溃；DB 取证：图 24 的 18 条连线中 17 条携带悬空 pipelineId（15-33，Pipeline 表实存仅 1-12/34/39/40），挂标 20 个其中 18 个无 masterPointId（Task 81 候选 -2 后缀特征）；generate-master 源码 connPolys 直接信任图 JSON 的 connection.pipelineId 未校验 DB 存在性 → 最近归属拿到悬空 id → create 外键炸（事务已回滚无脏数据）
+- 【根因扩展】全图扫描发现第二类悬空：图 20/22/23/24 的图元 equipmentId 全部/部分指向已删除设备行（历史删除事故波及 Equipment 16-47 与 Pipeline 15-33）；悬空 equipmentId 致管线端点校验静默失败（fromCode/toCode 为空即 skip 不推 items）
+- 【修复 1·管线悬空自愈】管线循环前取 DB 实存 id 集合，悬空 pipelineId 静默重置为未绑定重新走生成流程；新建管线 id 补入集合；connPolys 过滤加 pipeCodeById.has 兜底
+- 【修复 2·设备悬空自愈】设备循环前取实存设备 id 集合，悬空 equipmentId 重置后按 label 位号重新生成/关联
+- 【修复 3·已绑定挂标补归属】marks 循环重构：最近管线推导前置；masterPointId 有值→查绑定主数据，缺管线归属则按位置补归属（update pipelineId）；绑定指向已删主数据→清空落 exists/create 路径重建关联
+- 【修复 4·A/B 备用对位号】tagOf 增强：P101A/B 斜杠写法取斜杠前主机位号 P101A（解锁 6 个泵图元与 8 条泵管线生成）
+- 【修复 5·类型】GenMark.masterPointId 放宽为 number|null（自愈清空需赋 null，与 GenShape.equipmentId 口径一致）
+- 【验证·三轮收敛】run1：无崩溃，18 候选建档（IPM 35-52），管线悬空自愈写回；run2：设备自愈重建 9（E101-E105/T101/T102/V101/V102）+管线生成 9（T101-E101 等）+12 点补归属；期间用户并发编辑（删 13 挂标/删 IPM 50/旧画布保存覆盖回写）——run3 幂等收敛：设备 6 建 9 链（P101A-P106A）+管线 8 建 9 链（泵线全出）+新标注自动建档归属
+- 【终态核验】图 24：悬空 eq=0/悬空 pipe=0/挂标 16 全绑定/管线归属零缺失；agent-browser 只读走查：PID 组态页图元徽章「已绑定设备：E101」正常、挂标全部 teal✓「已入隔离点主数据」、控制台零错误；lint 0/tsc 0/探活 200；derive-isolation 与 status 接口审计无同类病灶（前者 get()?.code ?? null 兜底、后者按编码字符串匹配无外键写）
+
+Stage Summary:
+- generate-master 现在对三类脏数据免疫：悬空 pipelineId / 悬空 equipmentId / 悬空 masterPointId 全部自愈，且幂等收敛（重复运行只链不建）；图 24 从崩溃态恢复为全绑定态，用户并发编辑期间系统行为始终正确
+- 遗留观察项：①图 24/20 存在无横线位号（T101）与种子横线位号（T-101）并存——同物理设备双编码，是否合并属主数据决策待用户定夺 ②用户仍在并发编辑图 24，勿对其做写操作 ③图 20/22/23 的悬空引用会在用户下次点「生成主数据」时自动同款修复
