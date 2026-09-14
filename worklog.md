@@ -2830,3 +2830,19 @@ Work Log:
 Stage Summary:
 - PID 组态编辑器左右面板均可折叠成 36px 竖条把手（带图标+竖排文字），点击即展开；展开态标题行右侧有折叠按钮；状态 localStorage 记忆跨会话保持；移动端首次进入默认折叠给画布留空间
 - 无任何 API/数据层改动，纯前端 UI 状态
+
+---
+Task ID: 85
+Agent: 主会话
+Task: PID 组态编辑/查看页——画布缩放悬浮栏增加「设备名/管线名/标注文字」三个显隐开关，移除旧查看态「隐藏隔离点文字」按钮
+
+Work Log:
+- 定位：缩放悬浮栏=画布左下角 HTML 浮层（缩小/百分比/放大/重置/提示）；设备名=renderShapes 内 shape label 文字；管线名=renderConnBadges 管线号大徽章（fontSize 9）；标注文字=MarkGlyph（编辑态 code fontSize 11 / 查看态状态 chip fontSize 10 + code 10.5）；旧按钮=工具栏 markTextHidden Eye/EyeOff（仅查看态）
+- 实现（9 处编辑）：①import 移除 Eye/EyeOff；②markTextHidden 状态替换为 showDeviceLabels/showPipeLabels/showMarkText 三状态（默认全显示，编辑/查看通用）；③MarkGlyph 编辑分支 code 文字补 hideText 响应（原编辑态恒显示）；④hideText = !showMarkText（去掉 mode 限制，两模式均可隐藏）；⑤查看态 title 同步 showMarkText；⑥设备名 text 包 showDeviceLabels 条件；⑦管线号大徽章图层包 showPipeLabels 条件；⑧悬浮栏加重置后分隔线+三开关（Factory/Spline/MapPin 图标，aria-pressed，开=teal 底色/关=stone 灰，配色铁律）；⑨删除工具栏旧 Eye/EyeOff 按钮（保留状态刷新按钮）；⑩编辑态挂标所属管线小徽章（fontSize 8.5）随「标注文字」开关一并隐藏
+- 验证：残留 rg markTextHidden/EyeOff = 0；lint 通过；tsc 0 错
+- agent-browser E2E：编辑态三开关点关实测 SVG 文字统计——设备名 15→0、管线大徽章 18→0（精确区分 fontSize 9 大徽章与 8.5 小徽章）、标注 code 19→0 + 小徽章 19→0、菱形图标保留；三开恢复基线 15/19/37 ✅；查看态三开关同链验证（code 19→0、状态 chip 19→0、设备名 15→0）；旧按钮已不存在（snapshot 无「隐藏隔离点文字」）；控制台零错误
+- 走查注意：走查中途改小徽章代码触发 HMR 曾出现瞬态渲染错乱，刷新后基线完全恢复——非功能缺陷
+
+Stage Summary:
+- 编辑/查看两模式画布缩放悬浮栏均新增「设备名/管线名/标注文字」三个显隐开关（aria-pressed + teal 开态），默认全显示；旧查看态隔离点文字按钮已移除，能力由「标注文字」开关承接且扩展到编辑态
+- 纯前端渲染条件，无 API/数据层改动

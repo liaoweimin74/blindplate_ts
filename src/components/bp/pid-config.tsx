@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Eye, EyeOff, Factory, Fan, FileSignature,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, Move, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
   TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
@@ -1002,9 +1002,11 @@ export function MarkGlyph({ m, edit, state, stateLabel, hideText }: { m: PidMark
         <circle cx={m.x} cy={m.y} r={14} fill="transparent" />
         <polygon points={diamond} fill="#f43f5e" stroke="#fff" strokeWidth={1.4} />
         {badge}
-        <text x={m.x} y={m.y + 20} textAnchor="middle" fontSize={11} fill="#44403c" stroke="#fff" strokeWidth={3} paintOrder="stroke">
-          {m.code}
-        </text>
+        {!hideText && (
+          <text x={m.x} y={m.y + 20} textAnchor="middle" fontSize={11} fill="#44403c" stroke="#fff" strokeWidth={3} paintOrder="stroke">
+            {m.code}
+          </text>
+        )}
       </g>
     )
   }
@@ -2004,8 +2006,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [canvasW, setCanvasW] = useState(0) // 浮动工具条定位 clamp 用
   const suppressClickAtRef = useRef(0) // 平移拖拽结束时刻：吞掉紧随 pointerup 的 click，防误点挂标/误取消选中
 
-  // ---- 查看态隔离点：文字显示/隐藏开关（隐藏时仅显示状态色菱形，状态由图标颜色承载；悬停浮层展示编号/状态/关联单据） ----
-  const [markTextHidden, setMarkTextHidden] = useState(false)
+  // ---- 画布文字显隐三开关（缩放悬浮栏控制，编辑/查看通用；默认全显示）：设备名 / 管线名 / 标注文字 ----
+  const [showDeviceLabels, setShowDeviceLabels] = useState(true)
+  const [showPipeLabels, setShowPipeLabels] = useState(true)
+  const [showMarkText, setShowMarkText] = useState(true)
   const [markHover, setMarkHover] = useState<{ id: string; x: number; y: number } | null>(null)
 
   // ---- 俯瞰图（工具栏开关，画布右下角显示：整图缩略 + 当前视口框，点击/拖拽快速定位） ----
@@ -3784,12 +3788,14 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               </g>
             )
           })()}
-          <text
-            x={s.x + s.w / 2} y={shapeLabelY(s)} textAnchor="middle" fontSize={12} fill="#57534e"
-            stroke="#fff" strokeWidth={3} paintOrder="stroke"
-          >
-            {s.label}
-          </text>
+          {showDeviceLabels && (
+            <text
+              x={s.x + s.w / 2} y={shapeLabelY(s)} textAnchor="middle" fontSize={12} fill="#57534e"
+              stroke="#fff" strokeWidth={3} paintOrder="stroke"
+            >
+              {s.label}
+            </text>
+          )}
           {isSel && mode === 'edit' && (
             <>
               <rect
@@ -3832,7 +3838,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       const st = statusMap.get(m.id)
       const state = normalizeState(st?.state)
       const isSel = selected?.kind === 'mark' && selected.id === m.id
-      const hideText = mode !== 'edit' && markTextHidden
+      const hideText = !showMarkText
       return (
         <g
           key={m.id}
@@ -3843,13 +3849,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           onPointerLeave={mode !== 'edit' ? () => setMarkHover((prev) => (prev?.id === m.id ? null : prev)) : undefined}
           className={mode === 'edit' ? 'cursor-move' : 'cursor-pointer'}
         >
-          {mode !== 'edit' && !markTextHidden && <title>点击查看该点位盲板作业全生命周期档案</title>}
+          {mode !== 'edit' && showMarkText && <title>点击查看该点位盲板作业全生命周期档案</title>}
           {isSel && mode === 'edit' && (
             <circle cx={m.x} cy={m.y} r={11} fill="none" stroke={TEAL} strokeWidth={1.2} strokeDasharray="3 2" />
           )}
           <MarkGlyph m={m} edit={mode === 'edit'} state={state} stateLabel={st?.stateLabel ?? ''} hideText={hideText} />
-          {/* 编辑态：挂标当前所属管线号小徽章（自动计算/确认更新后实时可见） */}
-          {mode === 'edit' && m.masterPointId != null && (() => {
+          {/* 编辑态：挂标当前所属管线号小徽章（自动计算/确认更新后实时可见；随「标注文字」开关一并隐藏） */}
+          {mode === 'edit' && showMarkText && m.masterPointId != null && (() => {
             const mp = masterById.get(m.masterPointId)
             const pipeCode = mp?.pipelineName
               ?? (mp?.pipelineId != null ? pipeOptions.find((p) => p.id === mp.pipelineId)?.code ?? null : null)
@@ -4064,19 +4070,6 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 onClick={() => setStatusTick((t) => t + 1)}
               >
                 <RefreshCw className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                className={cn('h-9 w-9 p-0', markTextHidden && 'border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100')}
-                title={markTextHidden
-                  ? '显示隔离点文字：恢复显示状态标签与点位编号'
-                  : '隐藏隔离点文字：仅显示状态色图标（颜色即状态），悬停图标查看编号与状态详情'}
-                aria-pressed={markTextHidden}
-                aria-label={markTextHidden ? '显示隔离点文字' : '隐藏隔离点文字'}
-                disabled={!activeId}
-                onClick={() => setMarkTextHidden((v) => !v)}
-              >
-                {markTextHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
               </Button>
             </div>
           )}
@@ -4469,7 +4462,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     {renderConnections()}
 
                     {/* 管线号徽章图层（全部连线之上，避免重叠连线遮挡） */}
-                    {renderConnBadges()}
+                    {showPipeLabels && renderConnBadges()}
 
                     {/* 图元 */}
                     {renderShapes()}
@@ -4718,6 +4711,37 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       onClick={resetView}
                     >
                       <RotateCcw className="h-4 w-4" />
+                    </button>
+                    <div className="mx-0.5 h-4 w-px bg-stone-200" />
+                    <button
+                      type="button"
+                      title={showDeviceLabels ? '设备名：显示中，点击隐藏图元名称文字' : '设备名：已隐藏，点击显示图元名称文字'}
+                      aria-pressed={showDeviceLabels}
+                      aria-label="设备名显示开关"
+                      className={cn('rounded p-1.5 transition-colors', showDeviceLabels ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
+                      onClick={() => setShowDeviceLabels((v) => !v)}
+                    >
+                      <Factory className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      title={showPipeLabels ? '管线名：显示中，点击隐藏管线号徽章' : '管线名：已隐藏，点击显示管线号徽章'}
+                      aria-pressed={showPipeLabels}
+                      aria-label="管线名显示开关"
+                      className={cn('rounded p-1.5 transition-colors', showPipeLabels ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
+                      onClick={() => setShowPipeLabels((v) => !v)}
+                    >
+                      <Spline className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      title={showMarkText ? '标注文字：显示中，点击隐藏隔离点标注文字（仅保留状态色图标）' : '标注文字：已隐藏，点击恢复显示隔离点标注文字'}
+                      aria-pressed={showMarkText}
+                      aria-label="标注文字显示开关"
+                      className={cn('rounded p-1.5 transition-colors', showMarkText ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
+                      onClick={() => setShowMarkText((v) => !v)}
+                    >
+                      <MapPin className="h-4 w-4" />
                     </button>
                     <div className="mx-0.5 h-4 w-px bg-stone-200" />
                     <span
