@@ -2860,3 +2860,20 @@ Stage Summary:
 - 结论：绿点=已绑定设备主数据的角标（编辑/只读两模式通用），无危害
 - 【新发现潜在问题】hover 提示实际永不显示：角标组 pointerEvents=none 不参与命中 + title 在角标组内而非图元本体祖先链——设计意图「hover 显示设备位号」失效；待用户决定是否修复（title 移图元本体）或并入 Task 85 三开关（设备名/管线名/标注文字）一并处理
 - Task 85（缩放悬浮栏三开关）仍未动工
+---
+Task ID: 85-续
+Agent: 主控(Z.ai Code)
+Task: 用户两项新需求——①悬浮栏加第四个「绑定角标」开关，角标改图元中心显示且样式对齐隔离点标注；②连线锚点从四角/四边中点改为图元周边整圈边框均可
+
+Work Log:
+- 基线确认：Task 85 三开关已由前轮完成（悬浮栏 Factory/Spline/MapPin 三按钮，无持久化）；绿点角标=pid-config renderShapes 内 emerald 圆点（3781 区）
+- 【四开关+持久化】状态块升级：showDeviceLabels/showPipeLabels/showMarkText/showBindBadge 四态 + canvasFlagsHydratedRef 水合（bp-pid-show-device/pipe/mark/badge 四 key，默认全显示）+ toggleCanvasFlag 统一写 localStorage（旧三开关同步获得跨会话记忆，沿 Task 84 范式）；悬浮栏新增 Link2 图标第四开关（aria-pressed，开=teal 底/关=stone，配色铁律）
+- 【角标中心化】emerald 圆点替换为图元中央徽章：rect+text 居中于 (s.x+s.w/2, s.y+s.h/2)，样式逐属性对齐隔离点标注管线小徽章（fill #f0fdfa/stroke #5eead4/0.8 描边/rx3/高13/fontSize 8.5 mono/#0f766e），文本=设备位号（equipOptions 未命中回退 #id），title 保留；随 showBindBadge 显隐，编辑/查看通用
+- 【边框锚点】数据模型不动（存储/路由仍四向锚点，全兼容），交互层改周边矩形：①模块级三helper——anchorZoneBox（内容盒+挂接旋转90/270绕中心宽高互换的物理包围盒）/nearestAnchorAt（最近物理边→anchorNameForPhysical 逆旋回逻辑锚点）/distToAnchorZone（盒内为0距离）；②renderShapes 锚点区=teal 虚线矩形+12px 透明命中带（pointerEvents=stroke）+悬停吸附反馈 teal 点（最近边中点）+挂起时源锚点常显，点击命中带→onAnchorClick(最近边)；③connEndDrag 吸附从四中点改为边框距离（盒内 0 距/阈值 48 不变）→nearestAnchorAt；④端点拖拽高亮层改为候选图元边框高亮（hot=rose 实线+吸附点 rose 大圆/其余 stone 虚线）；⑤ANCHORS 常量删除（引用全清）；⑥空图提示/操作指引/文件头注释同步「点边框连线（自动吸附最近边）」
+- 验证：rg ANCHORS/emerald 圆点残留 0；lint 通过；tsc src 0 错
+- agent-browser E2E（admin→台账→PID组态，图24）：四开关齐全✅；绑定角标关→绑定 title 15→0（挂标小徽章 19 不受影响）→ls='0'→刷新保持（水合记忆）→恢复 15/ls='1'✅；设备名开关持久化（文字 5↔20 差值恰 15，ls 同步）✅；边框锚点全链——hover 图元出现 teal 虚线边框区（几何=内容盒 367.8,99.6,48.3×24.8）→悬停右边框出 teal 吸附点→点击挂起（常显点 1）→点击 E102 左边框→连线 18→19✅→刷新丢弃未写库✅；156% 截图确认设备中央位号徽章视觉与隔离点小徽章一致；控制台零错误；基线还原（视图重置+ls 清理+browser close）
+
+Stage Summary:
+- 悬浮栏四开关（设备名/管线名/标注文字/绑定角标）编辑/查看通用，全部 localStorage 记忆跨会话保持；绑定角标改为图元中央的隔离点标注风格位号徽章（绿点已退役）
+- 连线交互升级：图元周边整圈边框=锚点（悬停吸附反馈+最近边自动选择），端点拖拽改接同口径；存储模型四向锚点不变，旧图/自动布线/挂接/俯瞰图全兼容零迁移
+- 纯前端交互层改造，无 API/数据层改动

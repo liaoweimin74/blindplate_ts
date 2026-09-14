@@ -1,14 +1,14 @@
 'use client'
 // PID 组态编辑器：内建图元（HG/T 20519 标准符号：设备/液体传输设备/阀门/仪表/管件）+ 基础图形（矩形/圆形/直线/椭圆/三角形）+ 自定义图元
 // + 独立图元编辑器（跳转式视图：基础图形/已有图元组合构建自定义图元，保存后自动进入左侧「自定义」页签）
-// + 拖拽移动/四角缩放 + 锚点连线（正交曼哈顿自动折弯）+ 隔离点标注 + 查看模式实时状态轮询 + 全屏/窗口切换
+// + 拖拽移动/四角缩放 + 边框吸附锚点连线（正交曼哈顿自动折弯）+ 隔离点标注 + 查看模式实时状态轮询 + 全屏/窗口切换
 // 设计核心：连线只存锚点归属（fromShape/fromAnchor → toShape/toAnchor），折线路径在渲染时实时推导，拖拽/缩放后自动跟随
 //            自定义图元实例内嵌部件快照（parts + designW/H），库删除不影响已放置实例的渲染
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Factory, Fan, FileSignature,
-  FlaskConical, History, Hourglass, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
+  FlaskConical, History, Hourglass, Link2, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, Move, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
   TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
 } from 'lucide-react'
@@ -316,7 +316,6 @@ export function minimapBoundsOf(v: { x: number; y: number; w: number; h: number 
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
 }
 
-const ANCHORS: Anchor[] = ['top', 'right', 'bottom', 'left']
 const ANCHOR_LABEL: Record<Anchor, string> = { top: '顶部', right: '右侧', bottom: '底部', left: '左侧' }
 
 const DISPOSAL_METHOD_LABEL: Record<string, string> = {
@@ -497,6 +496,39 @@ function outward(a: Anchor, p: RoutePoint, d: number): RoutePoint {
     case 'left':   return { x: p.x - d, y: p.y }
     case 'right':  return { x: p.x + d, y: p.y }
   }
+}
+
+/** 图元「边框锚点区」物理包围盒：内容盒（消除符号留白）+ 挂接旋转 90°/270° 时绕中心宽高互换（与 anchorPoint 旋转后的锚点位置一致） */
+function anchorZoneBox(s: PidShape): { x: number; y: number; w: number; h: number } {
+  const b = contentInsetBox(s)
+  const rot = (((s.rotation ?? 0) % 360) + 360) % 360
+  if (rot === 90 || rot === 270) {
+    const cx = b.x + b.w / 2
+    const cy = b.y + b.h / 2
+    return { x: cx - b.h / 2, y: cy - b.w / 2, w: b.h, h: b.w }
+  }
+  return b
+}
+
+/** 指针落在图元边框锚点区时应吸附的锚点：按物理包围盒取最近边 → 挂接旋转时换算回逻辑锚点名（存储/路由仍用四向模型） */
+function nearestAnchorAt(s: PidShape, px: number, py: number): Anchor {
+  const b = anchorZoneBox(s)
+  const dl = Math.abs(px - b.x)
+  const dr = Math.abs(b.x + b.w - px)
+  const dt = Math.abs(py - b.y)
+  const db = Math.abs(b.y + b.h - py)
+  const dmin = Math.min(dl, dr, dt, db)
+  const phys: Anchor = dmin === dl ? 'left' : dmin === dr ? 'right' : dmin === dt ? 'top' : 'bottom'
+  const rot = s.rotation ?? 0
+  return rot ? (anchorNameForPhysical(phys, rot) as Anchor) : phys
+}
+
+/** 指针到图元边框锚点区（物理包围盒）的距离：盒内为 0（连线端点拖拽吸附用） */
+function distToAnchorZone(s: PidShape, px: number, py: number): number {
+  const b = anchorZoneBox(s)
+  const dx = Math.max(b.x - px, 0, px - (b.x + b.w))
+  const dy = Math.max(b.y - py, 0, py - (b.y + b.h))
+  return Math.hypot(dx, dy)
 }
 
 /**
@@ -2006,10 +2038,28 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [canvasW, setCanvasW] = useState(0) // 浮动工具条定位 clamp 用
   const suppressClickAtRef = useRef(0) // 平移拖拽结束时刻：吞掉紧随 pointerup 的 click，防误点挂标/误取消选中
 
-  // ---- 画布文字显隐三开关（缩放悬浮栏控制，编辑/查看通用；默认全显示）：设备名 / 管线名 / 标注文字 ----
+  // ---- 画布文字/角标显隐四开关（缩放悬浮栏控制，编辑/查看通用；默认全显示）：设备名 / 管线名 / 标注文字 / 绑定角标 ----
   const [showDeviceLabels, setShowDeviceLabels] = useState(true)
   const [showPipeLabels, setShowPipeLabels] = useState(true)
   const [showMarkText, setShowMarkText] = useState(true)
+  const [showBindBadge, setShowBindBadge] = useState(true)
+  const canvasFlagsHydratedRef = useRef(false)
+  useEffect(() => {
+    if (canvasFlagsHydratedRef.current) return
+    canvasFlagsHydratedRef.current = true
+    try {
+      const saved = (k: string) => localStorage.getItem(k)
+      if (saved('bp-pid-show-device') != null) setShowDeviceLabels(saved('bp-pid-show-device') === '1')
+      if (saved('bp-pid-show-pipe') != null) setShowPipeLabels(saved('bp-pid-show-pipe') === '1')
+      if (saved('bp-pid-show-mark') != null) setShowMarkText(saved('bp-pid-show-mark') === '1')
+      if (saved('bp-pid-show-badge') != null) setShowBindBadge(saved('bp-pid-show-badge') === '1')
+    } catch { /* localStorage 不可用（隐私模式等）：保持默认显示 */ }
+  }, [])
+  /** 四开关切换并记忆（localStorage 持久化，跨会话保持） */
+  const toggleCanvasFlag = (setter: (v: boolean) => void, key: string, next: boolean) => {
+    setter(next)
+    try { localStorage.setItem(key, next ? '1' : '0') } catch { /* 忽略 */ }
+  }
   const [markHover, setMarkHover] = useState<{ id: string; x: number; y: number } | null>(null)
 
   // ---- 俯瞰图（工具栏开关，画布右下角显示：整图缩略 + 当前视口框，点击/拖拽快速定位） ----
@@ -3355,7 +3405,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     window.addEventListener('pointerup', onUp)
   }
 
-  // ---- 连线端点拖拽改接：拖起起点/终点 → 移动中吸附最近图元锚点并实时预览折线 → 松手改接（无目标回退，改接后清 midOverride 重新自动布线） ----
+  // ---- 连线端点拖拽改接：拖起起点/终点 → 移动中吸附最近图元边框锚点并实时预览折线 → 松手改接（无目标回退，改接后清 midOverride 重新自动布线） ----
   const startDragConnEnd = (e: React.PointerEvent<SVGElement>, c: PidConn, which: 'from' | 'to') => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     e.stopPropagation()
@@ -3369,13 +3419,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       hover = null
       let bestD = CONN_END_SNAP_DIST
       for (const s of contentRef.current.shapes) {
-        for (const a of ANCHORS) {
-          const ap = anchorPoint(s, a)
-          const d = Math.hypot(p.x - ap.x, p.y - ap.y)
-          if (d < bestD) {
-            bestD = d
-            hover = { shapeId: s.id, anchor: a }
-          }
+        // 边框吸附：指针在边框锚点区内视为 0 距，周边 ≤ 阈值按最近边吸附（不再仅限四向中点）
+        const d = distToAnchorZone(s, p.x, p.y)
+        if (d < bestD) {
+          bestD = d
+          hover = { shapeId: s.id, anchor: nearestAnchorAt(s, p.x, p.y) }
         }
       }
       setConnEndDrag({ id: c.id, which, x: p.x, y: p.y, hover })
@@ -3778,13 +3826,18 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           className={mode === 'edit' ? 'cursor-move' : undefined}
         >
           <ShapeBody s={s} />
-          {/* 已绑定设备：左上角 emerald 圆点角标（hover 提示设备位号） */}
-          {s.equipmentId != null && (() => {
+          {/* 已绑定设备：图元中央徽章（样式对齐隔离点标注小徽章；随「绑定角标」开关显隐，编辑/查看通用） */}
+          {showBindBadge && s.equipmentId != null && (() => {
             const eq = equipOptions.find((x) => x.id === s.equipmentId)
+            const code = eq?.code ?? `#${s.equipmentId}`
+            const bw = code.length * 5.6 + 10
+            const cx = s.x + s.w / 2
+            const cy = s.y + s.h / 2
             return (
               <g pointerEvents="none">
-                <circle cx={s.x + 2} cy={s.y + 2} r={4.5} fill="#059669" stroke="#fff" strokeWidth={1.4} />
                 <title>{eq ? `已绑定设备：${eq.code} ${eq.name}` : `已绑定设备 #${s.equipmentId}`}</title>
+                <rect x={cx - bw / 2} y={cy - 6.5} width={bw} height={13} rx={3} fill="#f0fdfa" stroke="#5eead4" strokeWidth={0.8} />
+                <text x={cx} y={cy + 3} textAnchor="middle" fontSize={8.5} fontFamily="ui-monospace, monospace" fill="#0f766e">{code}</text>
               </g>
             )
           })()}
@@ -3811,23 +3864,42 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               ))}
             </>
           )}
-          {showAnchors &&
-            ANCHORS.map((a) => {
-              const p = anchorPoint(s, a)
-              const key = `${s.id}:${a}`
-              return (
-                <circle
-                  key={a} cx={p.x} cy={p.y} r={hoverAnchor === key ? 7 : 5}
-                  fill={TEAL} stroke="#fff" strokeWidth={1.5} className="cursor-crosshair"
-                  onPointerEnter={(e) => {
-                    e.stopPropagation()
-                    setHoverAnchor(key)
+          {showAnchors && (() => {
+            // 边框即锚点：整个内容盒（挂接旋转取物理包围盒）周边均可点击连线，自动吸附最近边；存储/路由仍用四向锚点模型
+            const zb = anchorZoneBox(s)
+            return (
+              <>
+                <rect x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none" stroke={TEAL} strokeWidth={1.2}
+                  strokeDasharray="4 3" opacity={0.85} pointerEvents="none" />
+                <rect
+                  x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none" stroke="transparent" strokeWidth={12}
+                  pointerEvents="stroke" className="cursor-crosshair"
+                  onPointerMove={(e) => {
+                    const p = toSvgPoint(e)
+                    if (!p) return
+                    const key = `${s.id}:${nearestAnchorAt(s, p.x, p.y)}`
+                    setHoverAnchor((prev) => (prev === key ? prev : key))
                   }}
-                  onPointerLeave={() => setHoverAnchor((prev) => (prev === key ? null : prev))}
-                  onClick={(e) => onAnchorClick(e, s.id, a)}
+                  onPointerLeave={() => setHoverAnchor((prev) => (prev && prev.startsWith(`${s.id}:`) ? null : prev))}
+                  onClick={(e) => {
+                    const p = toSvgPoint(e)
+                    onAnchorClick(e, s.id, p ? nearestAnchorAt(s, p.x, p.y) : 'top')
+                  }}
                 />
-              )
-            })}
+                {(() => {
+                  // 悬停吸附反馈：在即将连接的边中点显示 teal 圆点；挂起连线时源图元选中锚点常显
+                  const pendingAn = pendingConn?.shapeId === s.id ? pendingConn.anchor : null
+                  const hoverAn = hoverAnchor && hoverAnchor.startsWith(`${s.id}:`)
+                    ? (hoverAnchor.slice(s.id.length + 1) as Anchor)
+                    : null
+                  const an = pendingAn ?? hoverAn
+                  if (!an) return null
+                  const ap = anchorPoint(s, an)
+                  return <circle cx={ap.x} cy={ap.y} r={6} fill={TEAL} stroke="#fff" strokeWidth={1.5} pointerEvents="none" />
+                })()}
+              </>
+            )
+          })()}
         </g>
       )
     })
@@ -4446,7 +4518,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                           从左侧选择图元开始绘制
                         </text>
                         <text x={CANVAS_W / 2} y={CANVAS_H / 2 + 16} textAnchor="middle" fontSize={12} fill="#d6d3d1">
-                          点击图元 → 点击画布放置 · 拖拽移动 · 四角缩放 · 锚点连线
+                          点击图元 → 点击画布放置 · 拖拽移动 · 四角缩放 · 点边框连线
                         </text>
                       </g>
                     )}
@@ -4517,7 +4589,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       )
                     })()}
 
-                    {/* 端点拖拽中：全部候选锚点高亮 + 吸附目标 rose 放大 + 实时预览折线（移动过程自动排列） */}
+                    {/* 端点拖拽中：候选图元边框高亮 + 吸附目标 rose 锚点标记 + 实时预览折线（移动过程自动排列） */}
                     {mode === 'edit' && connEndDrag && (() => {
                       const c = content.connections.find((x) => x.id === connEndDrag.id)
                       if (!c) return null
@@ -4545,18 +4617,19 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       }
                       return (
                         <g pointerEvents="none">
-                          {content.shapes.map((s) =>
-                            ANCHORS.map((an) => {
-                              const ap = anchorPoint(s, an)
-                              const hot = connEndDrag.hover?.shapeId === s.id && connEndDrag.hover.anchor === an
-                              return (
-                                <circle
-                                  key={`${s.id}:${an}`} cx={ap.x} cy={ap.y} r={hot ? 7.5 : 4}
-                                  fill={hot ? ROSE : '#fff'} stroke={hot ? ROSE : '#a8a29e'} strokeWidth={1.4}
-                                />
-                              )
-                            }),
-                          )}
+                          {content.shapes.map((s) => {
+                            const zb = anchorZoneBox(s)
+                            const hot = connEndDrag.hover?.shapeId === s.id
+                            const ap = hot && connEndDrag.hover ? anchorPoint(s, connEndDrag.hover.anchor) : null
+                            return (
+                              <g key={s.id}>
+                                <rect x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none"
+                                  stroke={hot ? ROSE : '#d6d3d1'} strokeWidth={hot ? 1.6 : 1}
+                                  strokeDasharray={hot ? undefined : '4 3'} opacity={hot ? 1 : 0.6} />
+                                {ap && <circle cx={ap.x} cy={ap.y} r={7.5} fill={ROSE} stroke="#fff" strokeWidth={1.5} />}
+                              </g>
+                            )
+                          })}
                           <polyline
                             points={previewPts.map((p) => p.join(',')).join(' ')} fill="none"
                             stroke={ROSE} strokeWidth={2} strokeDasharray="6 4"
@@ -4719,7 +4792,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       aria-pressed={showDeviceLabels}
                       aria-label="设备名显示开关"
                       className={cn('rounded p-1.5 transition-colors', showDeviceLabels ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
-                      onClick={() => setShowDeviceLabels((v) => !v)}
+                      onClick={() => toggleCanvasFlag(setShowDeviceLabels, 'bp-pid-show-device', !showDeviceLabels)}
                     >
                       <Factory className="h-4 w-4" />
                     </button>
@@ -4729,7 +4802,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       aria-pressed={showPipeLabels}
                       aria-label="管线名显示开关"
                       className={cn('rounded p-1.5 transition-colors', showPipeLabels ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
-                      onClick={() => setShowPipeLabels((v) => !v)}
+                      onClick={() => toggleCanvasFlag(setShowPipeLabels, 'bp-pid-show-pipe', !showPipeLabels)}
                     >
                       <Spline className="h-4 w-4" />
                     </button>
@@ -4739,9 +4812,19 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       aria-pressed={showMarkText}
                       aria-label="标注文字显示开关"
                       className={cn('rounded p-1.5 transition-colors', showMarkText ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
-                      onClick={() => setShowMarkText((v) => !v)}
+                      onClick={() => toggleCanvasFlag(setShowMarkText, 'bp-pid-show-mark', !showMarkText)}
                     >
                       <MapPin className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      title={showBindBadge ? '绑定角标：显示中，点击隐藏已绑定设备的图元中央角标' : '绑定角标：已隐藏，点击显示已绑定设备的图元中央角标'}
+                      aria-pressed={showBindBadge}
+                      aria-label="绑定角标显示开关"
+                      className={cn('rounded p-1.5 transition-colors', showBindBadge ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
+                      onClick={() => toggleCanvasFlag(setShowBindBadge, 'bp-pid-show-badge', !showBindBadge)}
+                    >
+                      <Link2 className="h-4 w-4" />
                     </button>
                     <div className="mx-0.5 h-4 w-px bg-stone-200" />
                     <span
@@ -5316,7 +5399,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         </li>
                         <li className="flex gap-2">
                           <Spline className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
-                          <span><b className="text-stone-700">连线</b>：依次点击两个图元的锚点，折线自动生成</span>
+                          <span><b className="text-stone-700">连线</b>：依次点击两个图元的边框（自动吸附最近边），折线自动生成</span>
                         </li>
                         <li className="flex gap-2">
                           <Shapes className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
