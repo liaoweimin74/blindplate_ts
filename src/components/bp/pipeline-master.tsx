@@ -28,6 +28,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { GitBranch, Inbox, MapPin, Network, Pencil, Plus, RefreshCw, ScanSearch, Search, Trash2 } from 'lucide-react'
 import { MasterAuditDialog } from '@/components/bp/master-audit'
+import { DictCombobox } from '@/components/bp/dict-combobox'
 
 // ============ 类型（与 /api/pipelines、/api/iso-point-masters 契约一致） ============
 interface UnitOpt {
@@ -512,21 +513,23 @@ function PipelinesTab({ pipelines, units, loading, currentUser, reload }: {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>介质</Label>
-                <Input value={form.medium} placeholder="如 渣油 / 蒸汽" onChange={(e) => setForm({ ...form, medium: e.target.value })} />
+                {/* Task 94：字典化——选项来自数据字典 MEDIUM 分类，保留自由输入兜底 */}
+                <DictCombobox category="MEDIUM" value={form.medium} onChange={(v) => setForm({ ...form, medium: v })} placeholder="如 渣油 / 蒸汽" />
               </div>
               <div className="grid gap-1.5">
                 <Label>压力等级</Label>
-                <Input value={form.pressure} placeholder="如 PN2.5" onChange={(e) => setForm({ ...form, pressure: e.target.value })} />
+                <DictCombobox category="PRESSURE" value={form.pressure} onChange={(v) => setForm({ ...form, pressure: v })} placeholder="如 PN2.5" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>材质</Label>
-                <Input value={form.material} placeholder="如 20#/316L" onChange={(e) => setForm({ ...form, material: e.target.value })} />
+                <DictCombobox category="MATERIAL" value={form.material} onChange={(v) => setForm({ ...form, material: v })} placeholder="如 20#/316L" />
               </div>
               <div className="grid gap-1.5">
                 <Label>规格</Label>
-                <Input value={form.spec} placeholder="如 DN100×Φ108×4" onChange={(e) => setForm({ ...form, spec: e.target.value })} />
+                <DictCombobox category="BLIND_SPEC" value={form.spec} onChange={(v) => setForm({ ...form, spec: v })} placeholder="如 DN100×Φ108×4" />
+                <p className="text-[10px] leading-relaxed text-stone-400">管径可选字典 DN 系列，复合规格（含壁厚）可直接输入</p>
               </div>
             </div>
             <div className="grid gap-1.5">
