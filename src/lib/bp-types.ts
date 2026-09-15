@@ -293,17 +293,27 @@ export const PID_PLANNED_REQUEST_STATUSES: readonly string[] = [
 
 /**
  * PID 挂点六态判定（按优先级自上而下，服务端 status 接口与前端共用）：
- * 无匹配/未进入计划/已取消/回退 → idle；COMPLETED → opened；IN_PROGRESS → blinded；
+ * 无匹配/未进入计划/已取消/回退 → idle；完结态按点位动作分色：加装(COMPLETED/已执行) → blinded 盲板已装，
+ * 拆除 → opened 盲板已拆（需求8修复：原实现 COMPLETED 一律 opened，加装完作业误标「已拆」）；
+ * IN_PROGRESS：点位已执行同上分色，未执行 → working 作业执行中（未传点位信息时保持旧 blinded 行为）；
  * 隔离方案已审核 → 任务执行中 working，否则 approved；计划环节 → planned
  */
 export function resolvePidPointState(
   requestStatus: string | null | undefined,
   schemeStatus: string | null | undefined,
-  taskStatus: string | null | undefined
+  taskStatus: string | null | undefined,
+  pointAction?: string | null | undefined,
+  pointDone?: boolean | null | undefined
 ): PidPointState {
   if (!requestStatus) return 'idle'
-  if (requestStatus === 'COMPLETED') return 'opened'
-  if (requestStatus === 'IN_PROGRESS') return 'blinded'
+  // 白名单判断：仅明确 ADD → 已装；REMOVE/未传（旧调用方兼容）→ 已拆
+  const doneState: PidPointState = pointAction === 'ADD' ? 'blinded' : 'opened'
+  if (requestStatus === 'COMPLETED') return doneState
+  if (requestStatus === 'IN_PROGRESS') {
+    if (pointDone === true) return doneState
+    if (pointDone === false) return 'working'
+    return 'blinded'
+  }
   if (schemeStatus === 'APPROVED') return taskStatus === 'IN_PROGRESS' ? 'working' : 'approved'
   if (PID_PLANNED_REQUEST_STATUSES.includes(requestStatus)) return 'planned'
   return 'idle'

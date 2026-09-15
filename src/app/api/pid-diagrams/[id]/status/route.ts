@@ -97,7 +97,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       const state = resolvePidPointState(
         request?.status ?? null,
         match ? match.point.scheme.status : null,
-        task?.status ?? null
+        task?.status ?? null,
+        match?.point.action ?? null,
+        match ? match.point.done : null
       )
       return {
         markId: str(m.id) || `mark-${i + 1}`,

@@ -48,8 +48,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const byId = new Map(mastersById.map((m) => [m.id, m]))
     const byCode = new Map(mastersByCode.map((m) => [m.code, m]))
 
-    // 该需求自身的方案/任务状态决定六态（同一需求下点位状态基准一致）
-    const state = resolvePidPointState(request.status, scheme?.status ?? null, task?.status ?? null)
+    // 该需求自身的方案/任务状态 + 点位级动作/执行状态决定六态（需求8：加装完工 → 盲板已装，拆除完工 → 盲板已拆）
+    const stateOf = (p: (typeof points)[number]) =>
+      resolvePidPointState(request.status, scheme?.status ?? null, task?.status ?? null, p.action ?? null, p.done)
 
     // 关联点位编码出现在哪些 PID 图（解析每张图 marks 的 code 集合求交集）
     const codes = new Set<string>()
@@ -68,6 +69,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         (p.masterPointId != null ? (byId.get(p.masterPointId) ?? undefined) : undefined) ??
         (key ? (byCode.get(key) ?? undefined) : undefined) ??
         null
+      const st = stateOf(p)
       return {
         id: p.id,
         seq: p.seq,
@@ -75,8 +77,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         masterCode: p.masterCode ?? p.code ?? null,
         masterName: master?.name ?? p.name ?? null,
         pipelineName: master?.pipeline?.name ?? null,
-        state,
-        stateLabel: PID_POINT_STATE_MAP[state].label,
+        state: st,
+        stateLabel: PID_POINT_STATE_MAP[st].label,
       }
     })
 
