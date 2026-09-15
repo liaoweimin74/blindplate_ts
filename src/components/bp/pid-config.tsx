@@ -2196,6 +2196,14 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [freeMarkName, setFreeMarkName] = useState('')
   const [masterPoints, setMasterPoints] = useState<MasterPoint[]>([])
   const [masterLoading, setMasterLoading] = useState(false)
+  // ---- 需求7/Task93：属性面板内编辑绑定主数据（设备 / 隔离点标志） ----
+  const [eqEditOpen, setEqEditOpen] = useState(false)
+  const [eqForm, setEqForm] = useState({ code: '', name: '', type: '', unitId: '' })
+  const [eqSaving, setEqSaving] = useState(false)
+  const [mpEditOpen, setMpEditOpen] = useState(false)
+  const [mpForm, setMpForm] = useState({ code: '', name: '', pipelineId: '', location: '', remark: '' })
+  const [mpSaving, setMpSaving] = useState(false)
+  const [mastersTick, setMastersTick] = useState(0) // 保存主数据后触发重拉
 
   // ---- 隔离点所属管线自动计算（添加/移动终点位置推导，变化时确认后更新主数据归属） ----
   const [pipePrompt, setPipePrompt] = useState<PipeOwnershipPrompt | null>(null)
@@ -2639,6 +2647,104 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }, [])
 
+  // ---- 需求7：属性面板编辑设备主数据（选中变化时收起表单） ----
+  useEffect(() => {
+    setEqEditOpen(false)
+    setMpEditOpen(false)
+  }, [selected?.id, selected?.kind])
+
+  const openEqEdit = () => {
+    if (selectedShape?.equipmentId == null) return
+    const eq = equipOptions.find((x) => x.id === selectedShape.equipmentId)
+    if (!eq) {
+      toast({ title: '设备主数据加载中或不存在', variant: 'destructive' })
+      return
+    }
+    setEqForm({ code: eq.code, name: eq.name, type: eq.type, unitId: '' })
+    setEqEditOpen(true)
+    // 拉详情补全装置绑定预填（列表接口只有 unitName；预填错误会导致保存时误清装置）
+    apiGet<{ item: { id: number; code: string; name: string; type: string; unitId?: number | null } }>(`/api/equipments/${selectedShape.equipmentId}`)
+      .then((d) => {
+        if (d.item) setEqForm({ code: d.item.code, name: d.item.name, type: d.item.type, unitId: d.item.unitId != null ? String(d.item.unitId) : '' })
+      })
+      .catch(() => { /* 本地选项兜底 */ })
+  }
+
+  const saveEqMaster = async () => {
+    if (selectedShape?.equipmentId == null) return
+    const code = eqForm.code.trim()
+    const name = eqForm.name.trim()
+    if (!code || !name) {
+      toast({ title: '位号与名称不能为空', variant: 'destructive' })
+      return
+    }
+    setEqSaving(true)
+    try {
+      await apiPut(`/api/equipments/${selectedShape.equipmentId}`, {
+        code,
+        name,
+        type: eqForm.type,
+        unitId: eqForm.unitId === '' ? null : Number(eqForm.unitId),
+      })
+      toast({ title: '设备主数据已更新', description: `${code} ${name}` })
+      setEqEditOpen(false)
+      await loadBindOptions()
+    } catch (err) {
+      toast({ title: '设备主数据保存失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setEqSaving(false)
+    }
+  }
+
+  // ---- 需求7/Task93：属性面板编辑隔离点标志主数据 ----
+  const openMpEdit = () => {
+    const mp = selectedMark?.masterPointId != null ? masterById.get(selectedMark.masterPointId) : null
+    if (!mp) return
+    setMpForm({
+      code: mp.code,
+      name: mp.name,
+      pipelineId: mp.pipelineId != null ? String(mp.pipelineId) : '',
+      location: mp.location ?? '',
+      remark: mp.remark ?? '',
+    })
+    setMpEditOpen(true)
+  }
+
+  const saveMpMaster = async () => {
+    const mp = selectedMark?.masterPointId != null ? masterById.get(selectedMark.masterPointId) : null
+    if (!mp) return
+    const code = mpForm.code.trim()
+    const name = mpForm.name.trim()
+    if (!code || !name) {
+      toast({ title: '点位编码与名称不能为空', variant: 'destructive' })
+      return
+    }
+    setMpSaving(true)
+    try {
+      await apiPut(`/api/iso-point-masters/${mp.id}`, {
+        code,
+        name,
+        pipelineId: mpForm.pipelineId === '' ? null : Number(mpForm.pipelineId),
+        location: mpForm.location.trim() || null,
+        remark: mpForm.remark.trim() || null,
+      })
+      toast({ title: '隔离点主数据已更新', description: `${code} ${name}` })
+      setMpEditOpen(false)
+      setMastersTick((t) => t + 1)
+      // 编码/名称变更同步本图挂标（保持 mark.code 与主数据一致，避免匹配断链）
+      if (selectedMark && (mp.code !== code || mp.name !== name)) {
+        mutate((prev) => ({
+          ...prev,
+          marks: prev.marks.map((mk) => (mk.id === selectedMark.id ? { ...mk, code, name } : mk)),
+        }))
+      }
+    } catch (err) {
+      toast({ title: '隔离点主数据保存失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setMpSaving(false)
+    }
+  }
+
   useEffect(() => {
     void loadDiagrams()
     void loadUnits()
@@ -2838,7 +2944,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     return () => {
       alive = false
     }
-  }, [markDialogOpen, mode, toast])
+  }, [markDialogOpen, mode, toast, mastersTick])
 
   // ---- 图元增删改 ----
   const addShapeAt = (type: PidShapeType, p: RoutePoint, stdId?: string) => {
@@ -5485,10 +5591,61 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         {selectedShape.equipmentId != null && (() => {
                           const eq = equipOptions.find((x) => x.id === selectedShape.equipmentId)
                           return eq ? (
-                            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] leading-relaxed text-emerald-800">
-                              <span className="font-medium">{eq.code} · {eq.name}</span>
-                              <span className="text-emerald-600">（{EQUIP_TYPE_MAP[eq.type]?.label ?? eq.type}{eq.unitName ? ` · ${eq.unitName}` : ''}）</span>
-                              <div className="text-emerald-600">该设备的管线连接关系将在保存图时自动更新</div>
+                            <div className="space-y-1.5">
+                              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] leading-relaxed text-emerald-800">
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="min-w-0 truncate font-medium">{eq.code} · {eq.name}</span>
+                                  <button
+                                    type="button"
+                                    className="shrink-0 rounded border border-emerald-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                                    onClick={openEqEdit}
+                                    title="编辑该设备的基础数据（位号/名称/类型/装置）"
+                                  >
+                                    <Pencil className="mr-0.5 inline h-2.5 w-2.5" />编辑主数据
+                                  </button>
+                                </div>
+                                <div className="text-emerald-600">（{EQUIP_TYPE_MAP[eq.type]?.label ?? eq.type}{eq.unitName ? ` · ${eq.unitName}` : ''}）保存图时将自动更新该设备的管线连接关系</div>
+                              </div>
+                              {eqEditOpen && (
+                                <div className="space-y-1.5 rounded-md border border-emerald-200 bg-white p-2">
+                                  <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">编辑设备主数据</div>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <Input value={eqForm.code} onChange={(e) => setEqForm((f) => ({ ...f, code: e.target.value }))} className="h-7 font-mono text-xs" placeholder="位号" aria-label="设备位号" />
+                                    <Input value={eqForm.name} onChange={(e) => setEqForm((f) => ({ ...f, name: e.target.value }))} className="h-7 text-xs" placeholder="设备名称" aria-label="设备名称" />
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <select
+                                      className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
+                                      value={eqForm.type}
+                                      onChange={(e) => setEqForm((f) => ({ ...f, type: e.target.value }))}
+                                      aria-label="设备类型"
+                                    >
+                                      {Object.entries(EQUIP_TYPE_MAP).map(([k, v]) => (
+                                        <option key={k} value={k}>{v.label}</option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
+                                      value={eqForm.unitId}
+                                      onChange={(e) => setEqForm((f) => ({ ...f, unitId: e.target.value }))}
+                                      aria-label="所属装置"
+                                    >
+                                      <option value="">不关联装置</option>
+                                      {units.map((u) => (
+                                        <option key={u.id} value={String(u.id)}>{u.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="flex justify-end gap-1.5">
+                                    <Button variant="outline" className="h-7 border-stone-200 px-2 text-[11px] text-stone-500 hover:bg-stone-50" disabled={eqSaving} onClick={() => setEqEditOpen(false)}>
+                                      取消
+                                    </Button>
+                                    <Button className="h-7 bg-emerald-600 px-2.5 text-[11px] text-white hover:bg-emerald-700" disabled={eqSaving} onClick={() => { void saveEqMaster() }}>
+                                      {eqSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}保存
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ) : null
                         })()}
@@ -5733,12 +5890,64 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         const pipeCode = mp?.pipelineName
                           ?? (mp?.pipelineId != null ? pipeOptions.find((p) => p.id === mp.pipelineId)?.code ?? `#${mp.pipelineId}` : null)
                         return (
-                          <div className="flex items-center justify-between rounded-md border border-teal-100 bg-teal-50/60 px-2.5 py-1.5 text-xs">
-                            <span className="text-stone-500">所属管线</span>
-                            {pipeCode ? (
-                              <span className="font-mono font-medium text-teal-700">{pipeCode}</span>
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between rounded-md border border-teal-100 bg-teal-50/60 px-2.5 py-1.5 text-xs">
+                              <span className="text-stone-500">所属管线</span>
+                              {pipeCode ? (
+                                <span className="font-mono font-medium text-teal-700">{pipeCode}</span>
+                              ) : (
+                                <span className="text-stone-400">未关联（移到管线上可自动计算）</span>
+                              )}
+                            </div>
+                            {/* 需求7/Task93：隔离点标志主数据编辑——已入主数据的挂标可就地修改编码/名称/管线/位置/备注 */}
+                            {mp ? (
+                              <div className="space-y-1.5">
+                                {!mpEditOpen && (
+                                  <button
+                                    type="button"
+                                    className="w-full rounded-md border border-teal-200 bg-white py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-50"
+                                    onClick={openMpEdit}
+                                    title="编辑该隔离点的主数据（编码/名称/所属管线/位置/备注）"
+                                  >
+                                    <Pencil className="mr-1 inline h-3 w-3" />编辑主数据（{mp.code}）
+                                  </button>
+                                )}
+                                {mpEditOpen && (
+                                  <div className="space-y-1.5 rounded-md border border-teal-200 bg-white p-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wide text-teal-700">编辑隔离点主数据</div>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <Input value={mpForm.code} onChange={(e) => setMpForm((f) => ({ ...f, code: e.target.value }))} className="h-7 font-mono text-xs" placeholder="点位编码" aria-label="点位编码" />
+                                      <Input value={mpForm.name} onChange={(e) => setMpForm((f) => ({ ...f, name: e.target.value }))} className="h-7 text-xs" placeholder="点位名称" aria-label="点位名称" />
+                                    </div>
+                                    <select
+                                      className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-teal-500 focus:outline-none"
+                                      value={mpForm.pipelineId}
+                                      onChange={(e) => setMpForm((f) => ({ ...f, pipelineId: e.target.value }))}
+                                      aria-label="所属管线"
+                                    >
+                                      <option value="">未关联管线</option>
+                                      {pipeOptions.map((p) => (
+                                        <option key={p.id} value={String(p.id)}>{p.code} · {p.name}</option>
+                                      ))}
+                                    </select>
+                                    <Input value={mpForm.location} onChange={(e) => setMpForm((f) => ({ ...f, location: e.target.value }))} className="h-7 text-xs" placeholder="具体位置描述（如 E105 管程入口法兰）" aria-label="位置" />
+                                    <Input value={mpForm.remark} onChange={(e) => setMpForm((f) => ({ ...f, remark: e.target.value }))} className="h-7 text-xs" placeholder="备注" aria-label="备注" />
+                                    <div className="flex justify-end gap-1.5">
+                                      <Button variant="outline" className="h-7 border-stone-200 px-2 text-[11px] text-stone-500 hover:bg-stone-50" disabled={mpSaving} onClick={() => setMpEditOpen(false)}>
+                                        取消
+                                      </Button>
+                                      <Button className="h-7 bg-teal-600 px-2.5 text-[11px] text-white hover:bg-teal-700" disabled={mpSaving} onClick={() => { void saveMpMaster() }}>
+                                        {mpSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}保存
+                                      </Button>
+                                    </div>
+                                    <div className="text-[10px] leading-relaxed text-stone-400">编码修改将同步本图挂标文字；其他图中同一主数据的挂标建议按提示逐图核对（保存图后生效）。</div>
+                                  </div>
+                                )}
+                              </div>
                             ) : (
-                              <span className="text-stone-400">未关联（移到管线上可自动计算）</span>
+                              <div className="rounded-md border border-violet-100 bg-violet-50/60 px-2.5 py-1.5 text-[11px] leading-relaxed text-violet-700">
+                                自由挂标（未入主数据）：保存图后点「生成主数据」按编码自动建档/关联，建档后即可在此编辑
+                              </div>
                             )}
                           </div>
                         )
