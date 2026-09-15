@@ -3047,3 +3047,26 @@ Task: 用户回忆提供完整需求清单 1~17（Task 92 八项需求在其中�
 
 Work Log:
 - 【基线持久化】需求 1~17 全文写入本节（上），映射盘点如上；立即 git commit 防丢失；本轮逐项重建，每完成一块 commit
+
+---
+Task ID: 98-COMPLETE
+Agent: 主会话(Z.ai Code)
+Task: 需求 1~12 逐项重建完成 + push 上云 + E2E 验证收尾
+
+Work Log:
+- 【push 先行（用户指令）】清理 qa98-db.mjs 临时脚本后推送：843e8dc→da47568 共 16 提交上云（token 现取+sed 脱敏+ls-remote 三方验证），远程 main=da47568，需求基线与全部重建代码进入远程安全区
+- 需求1~4（f1c1f31）：pid-config/pid-locate 删工具栏说明文字+Move 死导入；图例右下角浮层保留；SymbolPart.stdId 修复 std 实例转自定义图元空白；更换图元对话框删 equip 分组
+- 需求8（91fe1e1）：resolvePidPointState 增点位级 pointAction/pointDone——COMPLETED 按 ADD→盲板已装/REMOVE→盲板已拆分色（修复加装完工误标已拆）；IN_PROGRESS 已执行分色、未执行→作业执行中；pid-diagrams status 与 work-requests point-status 两调用方接线
+- 需求5（85da1b7）：favicon 替换 BPMS v1.0 emerald 工厂图标（icon.svg+侧栏同款），移除智谱 Z 外链
+- 需求6（606da80）：PID 导入原图查看器（原始尺寸弹窗+放大缩小）
+- 需求7（af23cf2）：PID 组态属性面板就地编辑绑定主数据（含 Task 93 隔离点标志）
+- 需求9（f98ed95）：管线编辑字典化 DictCombobox + 字典实际值补录（Task 94/95 收口）；5a3bc98 a11y 补全
+- 需求10（6c52936）：移动端隔离点二维码标签打印 QrLabelPrint（field-ops 三处接线）；4bbc765/2c5d02a lint 修复
+- 需求11（ada32c9）：LocateCtx+PidLocateDialog——移动端各隔离点页一键查看以该点为中心的放大 PID 图
+- 需求12（d04e340）：完工确认/作业验收扫码核对 gate（交底/开工已有，四环节齐备）；da47568 hotfix 补 createContext 导入
+- 【E2E 验证】dev server 重启（孤儿化）→admin 登录→icon.svg 200+BPMS 图标内容✅；盲板状态页截图：左下工具栏无说明文字✅右下六态单行图例✅PID 渲染正常✅；需求8 代码审查✅；移动端预览任务详情/现场 Tab 交互✅；lint 通过基线（PPT 脚本 5 错误，src/ 零错误）
+
+Stage Summary:
+- 需求 1~17 全部完成并上云（13~17 于 97-R，1~12 于本 Task，远程 main=da47568）
+- 验证等级：需求1/2/5/14 浏览器截图实证；需求8 代码审查实证（用户已清数据无法复现原场景）；需求10/11/12 代码接线+页面交互抽查；需求6/7/9 专项提交+lint 通过
+- 遗留：QrSignSheet 人证核验全链路 E2E 补跑（低优先）；巡检 cron 已重建基线 da47568
