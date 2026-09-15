@@ -4,7 +4,7 @@
  * —— 字典中有该分类时选项来自 /api/dicts?category=；同时保留自由输入兜底（实际值可能不在字典）
  * 模块级缓存：同分类一次会话只拉一次（字典量小且变更低频；管理端改动后刷新页面即生效）
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ChevronsUpDown, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -52,6 +52,7 @@ export function DictCombobox({
   allowFree?: boolean
 }) {
   const [rows, setRows] = useState<DictRow[]>([])
+  const listId = useId()
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(-1) // 键盘高亮
   const boxRef = useRef<HTMLDivElement>(null)
@@ -101,6 +102,8 @@ export function DictCombobox({
         type="text"
         role="combobox"
         aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
         aria-label={placeholder}
         className={cn(
           'flex h-9 w-full rounded-md border border-stone-200 bg-white px-3 py-1 pr-8 text-sm shadow-sm transition-colors placeholder:text-stone-400 focus:border-emerald-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
@@ -140,6 +143,7 @@ export function DictCombobox({
       <ChevronsUpDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
       {open && (
         <div
+          id={listId}
           role="listbox"
           aria-label={`${placeholder}字典选项`}
           className="absolute z-30 mt-1 max-h-52 w-full overflow-y-auto rounded-md border border-stone-200 bg-white py-1 shadow-md bp-thin-scrollbar"
