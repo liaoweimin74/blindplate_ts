@@ -1885,8 +1885,11 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
     }
   }
 
-  const finish = async () => {
-    if (!photos.length) { toast({ variant: 'destructive', title: '请先拍摄作业位置照片', description: '作业照片是验收 AI 核对的基准' }); return }
+  // 需求12：完工扫码核对 gate（现场隔离点正确才允许完工）+ 无码打印兜底
+  const [finishGate, setFinishGate] = useState(false)
+  const [finishLabel, setFinishLabel] = useState<{ open: boolean; points: QrLabelPoint[] }>({ open: false, points: [] })
+
+  const finishConfirmed = async () => {
     setFinishing(true)
     try {
       await apiPost(`/api/work-tickets/${ticketId}/finish`, { __actorId: currentUser?.id, __actorName: currentUser?.name })
@@ -1897,6 +1900,12 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
     } finally {
       setFinishing(false)
     }
+  }
+
+  const finish = () => {
+    if (!photos.length) { toast({ variant: 'destructive', title: '请先拍摄作业位置照片', description: '作业照片是验收 AI 核对的基准' }); return }
+    if (ticket?.pointCode) { setFinishGate(true); return }
+    void finishConfirmed()
   }
 
   return (
@@ -1935,13 +1944,36 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
             {check?.result === 'INCONSISTENT' && <InconsistentWarning show scene="EXECUTION_VS_BRIEFING" />}
           </div>
 
-          <Button className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white text-sm" onClick={() => void finish()} disabled={finishing}>
+          <Button className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white text-sm" onClick={() => finish()} disabled={finishing} title="扫码核对隔离点位置，正确后才能完工">
             {finishing ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <FileCheck2 className="w-4 h-4 mr-1" />}
-            确认作业完工（照片 {photos.length} 张）
+            确认作业完工（扫码核对 · 照片 {photos.length} 张）
           </Button>
           {photos.length === 0 && <p className="text-[10px] text-amber-600 text-center -mt-2">完工前请拍摄作业位置照片（验收环节将以此为基准核对）</p>}
         </>
       )}
+      {/* 需求12：完工扫码核对 gate */}
+      <IsoScanSheet
+        open={finishGate}
+        onClose={() => setFinishGate(false)}
+        title="完工扫码核对隔离点"
+        points={ticket?.pointCode ? [{ code: ticket.pointCode, name: ticket.pointLocation ?? null }] : []}
+        hint={`请扫描作业票 ${ticket?.code ?? ''} 对应隔离点的现场标签二维码，确认作业位置后完工`}
+        onScan={(code) => {
+          if (code === ticket?.pointCode) {
+            setFinishGate(false)
+            void finishConfirmed()
+          } else {
+            toast({ variant: 'destructive', title: '二维码不符，不允许完工', description: `扫描到 ${code}，与本票隔离点 ${ticket?.pointCode ?? '-'} 不一致，请核对现场标签` })
+          }
+        }}
+        onPrintLabel={(p) => setFinishLabel({ open: true, points: [p] })}
+      />
+      <QrLabelPrint
+        open={finishLabel.open}
+        onClose={() => setFinishLabel({ open: false, points: [] })}
+        points={finishLabel.points}
+        title="隔离点二维码标签"
+      />
     </PageShell>
   )
 }
@@ -1962,6 +1994,9 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [warnOpen, setWarnOpen] = useState(false)
+  // 需求12：验收扫码核对 gate + 无码打印兜底
+  const [acceptGate, setAcceptGate] = useState(false)
+  const [acceptLabel, setAcceptLabel] = useState<{ open: boolean; points: QrLabelPoint[] }>({ open: false, points: [] })
 
   useEffect(() => {
     void (async () => {
@@ -2006,6 +2041,15 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
       setWarnOpen(true)
       return
     }
+    // 需求12：验收前扫码核对隔离点（扫最新作业票票面点位，现场正确才允许提交）
+    if (latestTicket?.pointCode) {
+      setAcceptGate(true)
+      return
+    }
+    await doSubmit()
+  }
+
+  const doSubmit = async () => {
     setSubmitting(true)
     try {
       const res = await apiPost<{ request?: { status: string } }>('/api/acceptances', {
@@ -2031,6 +2075,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
     } finally {
       setSubmitting(false)
       setWarnOpen(false)
+      setAcceptGate(false)
     }
   }
 
@@ -2111,6 +2156,28 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
               </div>
             </div>
           )}
+          {/* 需求12：验收扫码核对 gate */}
+          <IsoScanSheet
+            open={acceptGate}
+            onClose={() => setAcceptGate(false)}
+            title="验收扫码核对隔离点"
+            points={latestTicket?.pointCode ? [{ code: latestTicket.pointCode, name: latestTicket.pointLocation ?? null }] : []}
+            hint={`请扫描作业票 ${latestTicket?.code ?? ''} 对应隔离点的现场标签二维码，确认验收位置后提交`}
+            onScan={(code) => {
+              if (code === latestTicket?.pointCode) {
+                void doSubmit()
+              } else {
+                toast({ variant: 'destructive', title: '二维码不符，不允许验收', description: `扫描到 ${code}，与本票隔离点 ${latestTicket?.pointCode ?? '-'} 不一致，请核对现场标签` })
+              }
+            }}
+            onPrintLabel={(p) => setAcceptLabel({ open: true, points: [p] })}
+          />
+          <QrLabelPrint
+            open={acceptLabel.open}
+            onClose={() => setAcceptLabel({ open: false, points: [] })}
+            points={acceptLabel.points}
+            title="隔离点二维码标签"
+          />
         </>
       )}
     </PageShell>
