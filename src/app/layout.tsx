@@ -17,9 +17,6 @@ export const metadata: Metadata = {
   title: "石化盲板管理系统 | BPMS",
   description: "石化装置盲板抽堵作业全流程数字化管控：作业需求、现场勘察、JSA分析、隔离方案、工艺处置、作业票、作业执行与验收、盲板台账",
   keywords: ["盲板管理", "盲板抽堵", "特殊作业", "JSA分析", "作业票", "石化", "HSE"],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
 };
 
 export default function RootLayout({
