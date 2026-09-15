@@ -3085,3 +3085,21 @@ Work Log:
 Stage Summary:
 - 远程 main = 本地 main = 66cf633：需求 1~17 全量基线（worklog Task 98 节）+ Task 98-COMPLETE 交接 + 全部重建代码均已在远程安全区
 - 下轮巡检候选不变：QrSignSheet 人证核验 E2E 补跑、需求8 六态判定 E2E 实证、后端扫码强校验、库存周转图表等
+
+---
+Task ID: 99
+Agent: 主会话(Z.ai Code)
+Task: 用户新需求——移动端「开作业票」「作业票审批」也支持查看以所选隔离点为中心的放大 PID 图（需求 11 扩展到票务两页）
+
+Work Log:
+- 【接线模式】复用 field-ops 需求11 同款 LocateCtx(createContext)+Provider+PidLocateDialog 单例模式；ticket-mobile.tsx 新增模块级 LocateCtx/TicketLocateBtn（有编码才显示；嵌入 label/卡片传 stop 防外层点击）+ useTicketLocate() 共用 hook（locateState 携带 preferUnitId，本装置图优先命中）
+- 【开票页】TicketNewPage 点位选择行（label+Checkbox）尾缀 TicketLocateBtn（stop 模式防误勾选），preferUnitId=所选需求 unit.id；Provider 包裹 PageShell+弹窗
+- 【审批页】TicketReviewPage 双分支（详情/列表）各自 Provider 包裹：①列表卡由 <button> 改 div role=button+tabIndex+onKeyDown（避免按钮嵌套 button 破坏 HTML 语义），点位行嵌入 PID 按钮（stop 防触发卡片进详情）；②详情票面信息标题行 ml-auto 嵌 PID 按钮
+- 【顺手修复·真 bug】tsc 暴露 field-ops.tsx AcceptPage doSubmit 引用 `pass` 越界（需求12 拆分 submit/doSubmit 时 const pass 留在 submit 作用域）→ 验收提交必 ReferenceError 被 catch 吞成「验收提交失败」toast；修复：doSubmit 内自行计算 `const pass = leak && restore && ledger`（state 组件级可直接读）；另修 ticket-mobile 预存类型松弛（ticketed set pointId null 过滤改 flatMap）
+- 【验证】tsc src/ 零错误；ESLint 基线（PPT 脚本 5 错误，src/ 零）；E2E agent-browser 注入 WR-QA99-TEST(unit10)+方案点位 IP-PL301-01(masterPointId 29↔图23挂标)+待批票 BP-QA99-TEST：①开票页点行 PID→弹窗命中「QA催化分馏系统 PID·QA试验装置 1/1 已挂标」amber 光环定位（截图）；②审批列表卡 PID→弹窗打开且不跳详情（stopPropagation 实证）；③详情票面头部 PID→弹窗定位（截图，背景可见审核意见区）；注入数据已删还原（ticket/scheme/req 各1）、临时脚本已清、dev.log 无运行时错误
+- 【commit】da7c8f0 feat(mobile)+fix 验收 doSubmit；待用户「push」指令
+
+Stage Summary:
+- 需求 11 覆盖面扩展完成：现场端（field-ops 各页）+ 票务端（开票/审批移动双页）全部有隔离点数据的页面均可一键 PID 放大定位
+- 意外收获：修复作业验收提交必败 bug（doSubmit pass 作用域）——该路径上次 E2E 未覆盖，本轮 tsc 全量检查暴露
+- 遗留：验收页扫码 gate 全流程 E2E 仍建议下轮补跑；本地领先远程 1 提交（da7c8f0）待 push
