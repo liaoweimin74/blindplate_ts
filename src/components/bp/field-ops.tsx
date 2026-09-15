@@ -1,7 +1,7 @@
 'use client'
 // 现场作业（移动端）：勘察拍照 / 工艺处置现场确认 / 现场交底（拍照+录音+扫被交底人身份码签到+AI位置核对） / 作业拍照核对 / 验收拍照核对
 // 移动优先单列布局（真机全宽，桌面居中）；配色：AI=violet、teal 主操作、rose 不一致警告、amber 定位
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState, useRef } from 'react'
 import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPatch, apiDelete, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import type { ModuleProps } from '@/lib/bp-types'
@@ -21,12 +21,56 @@ import {
 import { parseWorkerCerts, type WorkerCert } from '@/components/bp/crew'
 import IsoScanSheet from '@/components/bp/iso-scan-sheet'
 import QrLabelPrint, { type QrLabelPoint } from '@/components/bp/qr-label-print'
+import { PidLocateDialog, type LocatePoint } from '@/components/bp/pid-locate'
 import {
   ChevronLeft, ChevronDown, MapPin, ClipboardCheck, Megaphone, HardHat, ListChecks, RefreshCw,
   Loader2, Camera, Mic, Sparkles, CircleCheck, AlertTriangle, ChevronRight,
   ClipboardList, ShieldCheck, PlayCircle, FileCheck2, Search, Settings2, Undo2, Archive,
   QrCode, UserCheck, ScanLine, X,
 } from 'lucide-react'
+
+// ============ 需求11：隔离点 → PID 放大定位（Context 免 prop 钻透，各页可一键查看） ============
+const LocateCtx = createContext<(code: string, location?: string | null) => void>(() => {})
+
+/** 隔离点信息行 + 「PID」定位按钮（有编码才可定位） */
+function PointLocateRow({ code, location }: { code?: string | null; location?: string | null }) {
+  const openLocate = useContext(LocateCtx)
+  if (!code && !location) return null
+  return (
+    <div className="flex items-center gap-2 text-[11px] leading-relaxed">
+      <span className="shrink-0 text-stone-400">隔离点</span>
+      <span className="break-all text-stone-700">{code ? `[${code}] ` : ''}{location ?? ''}</span>
+      {code && (
+        <button
+          type="button"
+          onClick={() => openLocate(code, location)}
+          title="在 PID 组态图中放大定位该隔离点"
+          aria-label={`在 PID 图中定位 ${code}`}
+          className="ml-auto inline-flex shrink-0 items-center gap-0.5 rounded border border-teal-200 px-1.5 py-0.5 text-[10px] text-teal-700 transition-colors hover:bg-teal-50"
+        >
+          <MapPin className="h-3 w-3" />PID
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** 紧凑定位按钮（嵌入标题行用，如勘察按点位拍照卡） */
+function SurveyLocateBtn({ code, location }: { code?: string | null; location?: string | null }) {
+  const openLocate = useContext(LocateCtx)
+  if (!code) return null
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); e.preventDefault(); openLocate(code, location) }}
+      title="在 PID 组态图中放大定位该隔离点"
+      aria-label={`在 PID 图中定位 ${code}`}
+      className="ml-auto inline-flex shrink-0 items-center gap-0.5 rounded border border-teal-200 bg-white px-1.5 py-0.5 text-[10px] font-normal text-teal-700 transition-colors hover:bg-teal-50"
+    >
+      <MapPin className="h-3 w-3" />PID
+    </button>
+  )
+}
 
 // ============ 类型 ============
 interface ReqLite {
@@ -164,7 +208,14 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
 
   const totalTodos = surveyTodos.length + confirmTodos.length + briefNewTodos.length + briefConfirmTodos.length + execStartTodos.length + execTodos.length + acceptTodos.length
 
+  // 需求11：各页「PID」按钮 → 以该隔离点为中心的 PID 图放大定位弹窗
+  const [locatePts, setLocatePts] = useState<LocatePoint[] | null>(null)
+  const openLocate = useCallback((code: string, location?: string | null) => {
+    setLocatePts([{ key: code, code, name: null, masterPointId: null, masterCode: null, sub: location ?? null }])
+  }, [])
+
   return (
+    <LocateCtx.Provider value={openLocate}>
     <div className={embedded ? '' : 'min-h-[60vh] bg-stone-100'}>
       <div className={embedded ? 'px-3 py-3.5 space-y-3 pb-6' : 'mx-auto max-w-md px-3 py-4 space-y-3 pb-10'}>
         {view.kind === 'todo' && (
@@ -325,8 +376,11 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
           points={startGateLabel.points}
           title="隔离点二维码标签"
         />
+        {/* 需求11：隔离点 → PID 放大定位弹窗（各页共用） */}
+        <PidLocateDialog open={!!locatePts} onClose={() => setLocatePts(null)} points={locatePts ?? []} />
       </div>
     </div>
+    </LocateCtx.Provider>
   )
 }
 
@@ -1049,6 +1103,7 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
               <Label className="text-xs font-semibold text-stone-700 flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5 text-teal-600" />{m.code} {m.name}
                 <span className="text-[10px] text-stone-400 font-normal">多角度拍照</span>
+                <SurveyLocateBtn code={m.code} location={m.location ?? null} />
               </Label>
               <PhotoPicker
                 photos={photosByPoint[m.code] ?? []}
@@ -1410,7 +1465,7 @@ function BriefNewPage(props: { ticketId: number; currentUser: ModuleProps['curre
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200">{ticket.blindSpec ?? ''} {ticket.blindType ?? ''}</span>
               <span className="text-[10px] text-stone-400">{ticket.action === 'ADD' ? '加装盲板' : ticket.action === 'REMOVE' ? '拆除盲板' : ''}</span>
             </div>
-            <InfoRow label="隔离点" value={ticket.pointLocation} />
+            <PointLocateRow code={ticket.pointCode} location={ticket.pointLocation} />
             <InfoRow label="监护人" value={ticket.guardian} />
             <InfoRow label="作业人员" value={ticket.workers} />
             <p className="text-[10px] text-stone-400 bg-stone-50 rounded p-2 leading-relaxed border border-stone-100">安全措施：{ticket.safetyMeasures}</p>
@@ -1571,7 +1626,7 @@ function BriefManagePage(props: { briefingId: number; currentUser: ModuleProps['
             : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">作业方已确认 · 只读</span>}
         </div>
         <InfoRow label="交底时间" value={fmtDateTime(briefing.createdAt)} />
-        <InfoRow label="隔离点" value={briefing.pointLocation} />
+        <PointLocateRow code={briefing.pointCode} location={briefing.pointLocation} />
       </div>
 
       <div className="rounded-xl bg-white p-3 space-y-2">
@@ -1742,7 +1797,7 @@ function BriefConfirmPage(props: { briefingId: number; currentUser: ModuleProps[
               <span className="text-xs font-semibold text-stone-800">交底人：{briefing.briefingUser}</span>
               <span className="text-[10px] text-stone-400">{fmtDateTime(briefing.createdAt)}</span>
             </div>
-            <InfoRow label="隔离点" value={briefing.pointLocation} />
+            <PointLocateRow code={briefing.pointCode} location={briefing.pointLocation} />
             <InfoRow label="被交底" value={briefing.briefedUsers} />
             <p className="text-[11px] text-stone-700 bg-violet-50/60 border border-violet-100 rounded-lg p-2.5 leading-relaxed whitespace-pre-wrap">{briefing.content}</p>
           </div>
@@ -1853,7 +1908,7 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
               <span className="text-xs font-mono text-stone-500">{ticket.code}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-600 text-white">作业中</span>
             </div>
-            <InfoRow label="隔离点" value={ticket.pointLocation} />
+            <PointLocateRow code={ticket.pointCode} location={ticket.pointLocation} />
             <InfoRow label="安全措施" value={ticket.safetyMeasures} />
           </div>
 
