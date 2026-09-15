@@ -2948,3 +2948,21 @@ Stage Summary:
 - 复现管线：node scripts/split_ppt_html.js && NODE_PATH=/usr/local/lib/node_modules node scripts/prep_slides_for_pptx.js && NODE_PATH=/usr/local/lib/node_modules node skills/pptx/batch_html2pptx.js download/slides download/<名称>.pptx
 - 经验：改 PPT 内容只改 ppt/blind-plate-system-ppt.html 后重跑三步管线；转换器三大坑=SVG 独立栅格化丢 CSS/<use>/fill:none、图标预通道 z-order 低于父形状、大圆角截断——预处理脚本已全部规避
 - 未竟：pptx 为静态页（HTML 版动画不随转换携带，如需页面切换动画可在 PowerPoint 内补）；T101/T-101 双编码、私有化 Qwen 网关参数仍待用户定夺
+
+---
+Task ID: 91-PUSH
+Agent: 主会话(Z.ai Code)
+Task: 用户「push」指令——token 失效排查与重推（Task 91 .pptx 交付物上云）
+
+Work Log:
+- 【发现】.env 中 GITHUB_TOKEN 已被平台沙箱重置抹掉（rg 命中 0，文件尾仅剩 DATABASE_URL；worklog L2539 历史先例同款）
+- 【恢复排查（全负结果）】git remote/config 无凭据、~/.git-credentials 不存在、~/.bash_history 无残留、.git/FETCH_HEAD 干净、/tmp 无脚本残留、printenv 无 token 环境变量；全项目仅 worklog 残留 token 指纹（前 12+后 6）不可复用
+- 【匿名探测】ls-remote 匿名读可通（仓库 remote HEAD=eedbe51 与本地一致）；GIT_TERMINAL_PROMPT=0 匿名 push 被拒（could not read Username）——无凭据不可写
+- 【用户重供 PAT】93 位 fine-grained PAT 追加写入 .env（rg 确认 1 处）；指纹核对长度 93 与历史一致；GET /user 鉴权身份 = liaoweimin74 本人
+- 【push】URL 方式推送成功：eedbe51..e5b0d59 main -> main（e5b0d59=平台自动快照提交【纯权限位变化 304 文件 0 行差，.env 未入库已核验】；68aca67=Task 91 正式提交【.pptx 9.3MB + slides 拆分 + 转换管线脚本 + worklog】）
+- 【三方验证】git fetch <url> + update-ref 补 tracking ref；git status -sb = main...origin/main 零偏差；ls-remote HEAD=refs/heads/main=e5b0d59 = 本地 HEAD，三方一致
+
+Stage Summary:
+- Task 91 全部产物上云完成：download/石化厂盲板管理系统-产品介绍.pptx（10 页 16:9，python-pptx 校验通过）+ HTML 拆分/预处理/转换管线脚本已推送，远程 main=e5b0d59
+- 已知风险再次实证：.env 属平台重生成文件，沙箱重置会抹掉手工键（GITHUB_TOKEN）——下轮 push 若遇 token 缺失直接向用户索取新 PAT，勿重复全盘排查
+- 待用户定夺事项不变：T101/T-101 双编码合并、私有化 Qwen 网关地址/鉴权/模型名
