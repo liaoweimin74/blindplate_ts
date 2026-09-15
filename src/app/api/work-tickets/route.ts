@@ -88,6 +88,38 @@ export async function POST(req: NextRequest) {
       return jsonError('监护人、作业人员、签发人和安全措施不能为空')
     }
 
+    // 逐人验资（需求 15）：workerCerts JSON [{name,idCard,idPhotoId,idPhotoUrl,qualPhotoIds,qualPhotoUrls}]
+    // 校验：姓名唯一、身份证号 15/18 位、身份证照片必传——不合格整单拒绝（零副作用）
+    let workerCerts: string | null = null
+    if (body.workerCerts !== undefined && body.workerCerts !== null && body.workerCerts !== '') {
+      const rawCerts = Array.isArray(body.workerCerts) ? body.workerCerts : (() => { try { return JSON.parse(String(body.workerCerts)) } catch { return null } })()
+      if (!Array.isArray(rawCerts)) return jsonError('作业人员验资数据格式错误')
+      const seen = new Set<string>()
+      const certs = rawCerts.map((c: Record<string, unknown>) => {
+        const name = str(c.name)
+        const idCard = str(c.idCard)
+        const idPhotoUrl = str(c.idPhotoUrl) || null
+        const idPhotoId = num(c.idPhotoId)
+        const qualPhotoIds = Array.isArray(c.qualPhotoIds) ? c.qualPhotoIds.map((x: unknown) => num(x)).filter((x: number | null): x is number => x !== null) : []
+        const qualPhotoUrls = Array.isArray(c.qualPhotoUrls) ? c.qualPhotoUrls.map((x: unknown) => str(x)).filter(Boolean) : []
+        return { name, idCard, idPhotoId, idPhotoUrl, qualPhotoIds, qualPhotoUrls }
+      })
+      if (!certs.length) return jsonError('作业人员验资清单不能为空')
+      for (const c of certs) {
+        if (!c.name) return jsonError('作业人员验资：存在未填写姓名的人员')
+        if (seen.has(c.name)) return jsonError(`作业人员验资：${c.name} 重复出现`)
+        seen.add(c.name)
+        if (!/^\d{15}$|^\d{17}[\dXx]$/.test(c.idCard)) return jsonError(`作业人员验资：${c.name} 的身份证号无效（需 15/18 位）`)
+        if (!c.idPhotoUrl) return jsonError(`作业人员验资：${c.name} 未上传身份证照片（人证核验与现场交底比对必需）`)
+      }
+      workerCerts = JSON.stringify(certs)
+      // 一致性：workers 逗号名单与验资名单对齐（以验资清单为准回写，避免两处不一致）
+      const namesFromCerts = certs.map((c) => c.name).join(',')
+      if (workers.replace(/，/g, ',').split(',').map((s: string) => s.trim()).filter(Boolean).join(',') !== namesFromCerts) {
+        return jsonError('作业人员名单与验资清单不一致，请逐人核对姓名')
+      }
+    }
+
     // 安全硬约束：逐点位校验管线占用（任一冲突 → 全部拒绝，零副作用）
     const allConflicts: PipelineTicketConflict[] = []
     for (const pt of schemePoints) {
@@ -125,6 +157,7 @@ export async function POST(req: NextRequest) {
           workers,
           issuer,
           safetyMeasures,
+          workerCerts,
           status: 'PENDING_REVIEW',
         },
       })

@@ -18,8 +18,9 @@ import { useToast } from '@/hooks/use-toast'
 import {
   ShieldCheck, FileSignature, FlaskConical, TicketCheck, History, RefreshCw,
   ClipboardList, User, Clock, CheckCircle2, XCircle, Send, Inbox, Stamp, Search, Download,
-  BellRing, AlarmClock, AlertTriangle,
+  BellRing, AlarmClock, AlertTriangle, FileText, Users,
 } from 'lucide-react'
+import { CrewWall, parseWorkerCerts } from '@/components/bp/crew'
 
 // ============ 类型 ============
 interface PendingReqBrief { id: number; code: string; title: string; status: string; workType: string; unitName: string | null; applicantName: string }
@@ -27,7 +28,7 @@ interface IsoPointItem { id: number; seq: number; location: string; medium: stri
 interface IsoPending { id: number; code: string; preparedBy: string; preparedAt: string; pointsCount: number; points: IsoPointItem[]; workRequest: PendingReqBrief | null; submittedBy: string; submittedAt: string }
 interface DispStepItem { id: number; seq: number; method: string; detail: string | null; standard: string | null }
 interface DispPending { id: number; code: string; preparedBy: string; preparedAt: string; stepsCount: number; steps: DispStepItem[]; workRequest: PendingReqBrief | null; submittedBy: string; submittedAt: string }
-interface TicketPending { id: number; code: string; issuer: string; guardian: string; workers: string; plannedStart: string; plannedEnd: string; safetyMeasures: string; createdAt: string; pointId?: number | null; pointCode?: string | null; pointLocation?: string | null; blindSpec?: string | null; blindType?: string | null; action?: string | null; workRequest: PendingReqBrief | null; submittedBy: string; submittedAt: string }
+interface TicketPending { id: number; code: string; issuer: string; guardian: string; workers: string; plannedStart: string; plannedEnd: string; safetyMeasures: string; createdAt: string; pointId?: number | null; pointCode?: string | null; pointLocation?: string | null; blindSpec?: string | null; blindType?: string | null; action?: string | null; workerCerts?: string | null; workRequest: PendingReqBrief | null; submittedBy: string; submittedAt: string }
 interface ApprovalRecordItem { id: number; bizType: string; bizId: number; bizCode: string | null; action: string; operator: string; comment: string | null; createdAt: string }
 type ReminderBizType = 'ISOLATION_SCHEME' | 'DISPOSAL_SCHEME' | 'WORK_TICKET'
 interface ReminderItem { bizType: ReminderBizType; bizId: number; code: string; workCode: string | null; label: string; title: string | null; pendingHours: number; submittedBy: string | null; submittedAt: string | null }
@@ -63,7 +64,7 @@ const REVIEW_ROLES: Record<string, string[]> = {
 type ReviewTarget =
   | { kind: 'isolation'; id: number; code: string }
   | { kind: 'disposal'; id: number; code: string }
-  | { kind: 'ticket'; id: number; code: string }
+  | { kind: 'ticket'; id: number; code: string; ticket?: TicketPending }
 
 export default function ApprovalCenterModule({ currentUser, initialTab }: ModuleProps) {
   const { toast } = useToast()
@@ -419,7 +420,7 @@ export default function ApprovalCenterModule({ currentUser, initialTab }: Module
                           </div>
                         </div>
                         {canReview('ticket') ? (
-                          <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white shrink-0" onClick={() => openReview({ kind: 'ticket', id: t.id, code: t.code })}>
+                          <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white shrink-0" onClick={() => openReview({ kind: 'ticket', id: t.id, code: t.code, ticket: t })}>
                             <Stamp className="w-3.5 h-3.5 mr-1" />批准
                           </Button>
                         ) : (
@@ -549,6 +550,35 @@ export default function ApprovalCenterModule({ currentUser, initialTab }: Module
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {/* 作业票票面详情 + 逐人验资照片墙（需求 15：审核时核验材料） */}
+            {review?.kind === 'ticket' && review.ticket && (
+              <div className="max-h-[46vh] space-y-2.5 overflow-y-auto bp-thin-scrollbar rounded-md border border-amber-200 bg-amber-50/40 p-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+                  <FileText className="h-3.5 w-3.5" />票面信息
+                  {review.ticket.pointCode && <span className="rounded border border-teal-300 bg-teal-50 px-1.5 py-0.5 font-mono text-teal-700">{review.ticket.pointCode}</span>}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                  <Kv label="隔离位置" value={review.ticket.pointLocation ?? '-'} />
+                  <Kv label="盲板" value={`${review.ticket.blindType ?? '-'} ${review.ticket.blindSpec ?? ''}`} />
+                  <Kv label="计划开始" value={fmtDateTime(review.ticket.plannedStart)} />
+                  <Kv label="计划结束" value={fmtDateTime(review.ticket.plannedEnd)} />
+                  <Kv label="监护人" value={review.ticket.guardian} />
+                  <Kv label="签发人" value={review.ticket.issuer} />
+                </div>
+                {review.ticket.safetyMeasures && (
+                  <div className="rounded-md bg-white/80 border border-stone-100 px-2.5 py-1.5">
+                    <div className="text-[10px] text-stone-400">安全措施</div>
+                    <div className="whitespace-pre-wrap text-[11px] leading-relaxed text-stone-600">{review.ticket.safetyMeasures}</div>
+                  </div>
+                )}
+                <div>
+                  <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+                    <Users className="h-3.5 w-3.5" />作业人员验资（{parseWorkerCerts(review.ticket.workerCerts).length} 人）
+                  </div>
+                  <CrewWall workerCerts={review.ticket.workerCerts} workers={review.ticket.workers} compact />
+                </div>
+              </div>
+            )}
             <div>
               <label className="text-xs text-stone-500 mb-1 block">审核意见 {review?.kind !== 'ticket' && <span className="text-stone-300">（驳回必填）</span>}</label>
               <Textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={3}

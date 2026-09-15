@@ -32,8 +32,10 @@ import { useToast } from '@/hooks/use-toast'
 import {
   ClipboardList, Plus, Search, Send, Ban, Eye, MapPin, FileText, ShieldCheck,
   Stamp, Ticket as TicketIcon, CheckCircle2, Loader2, Trash2, XCircle, ChevronRight, Download, History, Printer, Factory,
-  X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert, Megaphone,
+  X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert, Megaphone, ScanLine,
 } from 'lucide-react'
+import IsoScanSheet from '@/components/bp/iso-scan-sheet'
+import { CrewEditor, crewGaps, type WorkerCert } from '@/components/bp/crew'
 import { ISO_STATE_STYLE, IsoState } from '@/components/bp/pid-config'
 import { PidLocateDialog, toLocatePoints, type LocatePoint } from '@/components/bp/pid-locate'
 import { exportCsv } from '@/lib/bp-export'
@@ -318,9 +320,10 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
   useEffect(() => {
     setConfirmForm((f) => (f.confirmer ? f : { ...f, confirmer: currentUser.name }))
   }, [currentUser.name])
-  // 开票（一票一板：按隔离点批量开票）
+  // 开票（一票一板：按隔离点批量开票）；workers 由验资清单姓名自动生成，两处永不脱节
   const [ticketOpen, setTicketOpen] = useState(false)
-  const [ticketForm, setTicketForm] = useState({ plannedStart: '', plannedEnd: '', guardian: '', workers: '', issuer: '', safetyMeasures: DEFAULT_MEASURES })
+  const [ticketForm, setTicketForm] = useState({ plannedStart: '', plannedEnd: '', guardian: '', issuer: '', safetyMeasures: DEFAULT_MEASURES })
+  const [ticketCrew, setTicketCrew] = useState<WorkerCert[]>([])
   const [ticketPointIds, setTicketPointIds] = useState<number[]>([])
   // 处置步骤逐项确认 Dialog（stepId null=关闭）
   const [stepConfirmFor, setStepConfirmFor] = useState<{ id: number; seq: number; detail: string } | null>(null)
@@ -762,7 +765,8 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
   }
 
   const openTicket = () => {
-    setTicketForm({ plannedStart: toLocalInput(detail?.plannedStart), plannedEnd: toLocalInput(detail?.plannedEnd), guardian: '', workers: '', issuer: currentUser.name, safetyMeasures: DEFAULT_MEASURES })
+    setTicketForm({ plannedStart: toLocalInput(detail?.plannedStart), plannedEnd: toLocalInput(detail?.plannedEnd), guardian: '', issuer: currentUser.name, safetyMeasures: DEFAULT_MEASURES })
+    setTicketCrew([])
     // 默认勾选尚未办票的点位（一票一板：已办票点位禁选）
     const activePointIds = new Set((detail?.tickets ?? []).filter((t) => t.status !== 'VOID' && t.status !== 'CLOSED').map((t) => t.pointId))
     setTicketPointIds((detail?.isolationScheme?.points ?? []).filter((p) => !activePointIds.has(p.id)).map((p) => p.id))
@@ -776,19 +780,23 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
     if (!ticketPointIds.length) {
       toast({ title: '请选择要办票的隔离点位', description: '一票一板：每个选中点位将分别开具一张作业票', variant: 'destructive' }); return
     }
-    if (!ticketForm.plannedStart || !ticketForm.plannedEnd || !ticketForm.guardian || !ticketForm.workers) {
-      toast({ title: '请完善作业票信息', description: '计划时间、监护人、作业人员为必填', variant: 'destructive' }); return
+    const crewGapsList = crewGaps(ticketCrew)
+    if (!ticketForm.plannedStart || !ticketForm.plannedEnd || !ticketForm.guardian || crewGapsList.length) {
+      toast({ title: '请完善作业票信息', description: crewGapsList.length ? `验资待完善：${crewGapsList.join('；')}` : '计划时间、监护人、作业人员为必填', variant: 'destructive' }); return
     }
+    const workers = ticketCrew.map((c) => c.name.trim()).join(',')
     setBusy(true)
     try {
       const r = await apiPost<{ tickets: { code: string }[] }>('/api/work-tickets', {
         workRequestId: detail.id,
         pointIds: ticketPointIds,
         ...ticketForm,
+        workers,
+        workerCerts: ticketCrew,
         plannedStart: new Date(ticketForm.plannedStart).toISOString(),
         plannedEnd: new Date(ticketForm.plannedEnd).toISOString(),
       })
-      toast({ title: `已开具 ${r.tickets.length} 张作业票（一票一板）`, description: `${r.tickets.map((t) => t.code).join('、')} 已提交审批` })
+      toast({ title: `已开具 ${r.tickets.length} 张作业票（一票一板）`, description: `${r.tickets.map((t) => t.code).join('、')} 已提交审批（${ticketCrew.length} 人验资材料已随票归档）` })
       setTicketOpen(false); reloadDetail(detail.id); loadList()
     } catch (e) {
       toast({ title: '开票失败', description: e instanceof Error ? e.message : '', variant: 'destructive' })
@@ -1765,15 +1773,26 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
               </Select>
             </Field>
             <Field label="签发人"><Input className="h-8 text-xs" value={ticketForm.issuer} onChange={(e) => setTicketForm({ ...ticketForm, issuer: e.target.value })} /></Field>
-            <div className="col-span-2"><Field label="作业人员 *（多人用逗号分隔）"><Input className="h-8 text-xs" placeholder="如：王班长,赵师傅" value={ticketForm.workers} onChange={(e) => setTicketForm({ ...ticketForm, workers: e.target.value })} /></Field></div>
+            <div className="col-span-2">
+              <Field label="作业人员逐人验资 *（GB 30871：身份证照片必传，审批页将核验材料）">
+                <div className="max-h-72 overflow-y-auto bp-thin-scrollbar rounded-md pr-0.5">
+                  <CrewEditor certs={ticketCrew} onChange={setTicketCrew} currentUser={currentUser} />
+                </div>
+              </Field>
+            </div>
             <div className="col-span-2"><Field label="安全措施"><Textarea className="text-xs" rows={6} value={ticketForm.safetyMeasures} onChange={(e) => setTicketForm({ ...ticketForm, safetyMeasures: e.target.value })} /></Field></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTicketOpen(false)}>取消</Button>
             <Button
               className="bg-emerald-700 hover:bg-emerald-800"
-              disabled={busy || occConflicts.length > 0 || !ticketPointIds.length}
-              title={!ticketPointIds.length ? '请先勾选要办票的隔离点位（一票一板：每点一张）' : occConflicts.length > 0 ? '管线占用冲突解除后才能开票（一条管线同一时间只允许一张生效作业票）' : undefined}
+              disabled={busy || occConflicts.length > 0 || !ticketPointIds.length || crewGaps(ticketCrew).length > 0}
+              title={
+                !ticketPointIds.length ? '请先勾选要办票的隔离点位（一票一板：每点一张）'
+                : occConflicts.length > 0 ? '管线占用冲突解除后才能开票（一条管线同一时间只允许一张生效作业票）'
+                : crewGaps(ticketCrew).length > 0 ? `验资待完善：${crewGaps(ticketCrew).join('；')}`
+                : undefined
+              }
               onClick={saveTicket}
             >{busy ? '提交中…' : `开具 ${ticketPointIds.length} 张作业票并提交审批`}</Button>
           </DialogFooter>
@@ -2162,6 +2181,9 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
 }) {
   const [pipe, setPipe] = useState('none')
   const [point, setPoint] = useState('none')
+  // 扫码加入（Task 96/96-b）：模拟扫隔离点标签二维码加入引用清单（复用共享 IsoScanSheet）
+  const [scanOpen, setScanOpen] = useState(false)
+  const { toast } = useToast()
   const pipePoints = pipe === 'none' ? [] : pointMasters.filter((m) => String(m.pipelineId ?? '') === pipe)
   const addRef = () => {
     const m = pointMasters.find((x) => String(x.id) === point)
@@ -2169,6 +2191,17 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
     if (refs.some((r) => r.masterPointId === m.id)) { setPoint('none'); return }
     onChange([...refs, { masterPointId: m.id, code: m.code, name: m.name, pipelineName: m.pipelineName ?? m.pipeline?.name ?? null }])
     setPoint('none')
+  }
+  // 扫码命中：按编码找主数据点位并加入（与 addRef 同款去重/组装逻辑）
+  const addRefByScan = (code: string) => {
+    const m = pointMasters.find((x) => x.code === code)
+    if (!m) return
+    if (refs.some((r) => r.masterPointId === m.id)) {
+      toast({ title: '该点位已在引用清单', description: `${m.code} ${m.name} 无需重复添加` })
+      return
+    }
+    onChange([...refs, { masterPointId: m.id, code: m.code, name: m.name, pipelineName: m.pipelineName ?? m.pipeline?.name ?? null }])
+    toast({ title: `${m.code} 扫码加入成功`, description: `${m.name} 已加入引用点位列表` })
   }
   return (
     <div className="rounded-md border border-teal-200 bg-teal-50/50 p-2.5 space-y-2">
@@ -2195,6 +2228,11 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
         <Button size="sm" variant="outline" className="h-8 text-xs border-teal-300 text-teal-700 hover:bg-teal-100 hover:text-teal-800" disabled={point === 'none'} onClick={addRef}>
           <Plus className="w-3 h-3 mr-1" />添加该管线隔离点
         </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-teal-300 bg-white text-teal-700 hover:bg-teal-100 hover:text-teal-800"
+          onClick={() => setScanOpen(true)}
+          title="现场扫描隔离点标签二维码加入引用清单（演示环境为模拟扫码）">
+          <ScanLine className="w-3 h-3 mr-1 text-teal-600" />扫码加入
+        </Button>
         {aiAction && (
           <Button size="sm" variant="outline" className="h-8 text-xs border-violet-300 bg-white text-violet-700 hover:bg-violet-100" disabled={aiAction.busy}
             onClick={aiAction.onRun} title="AI 按作业位置/设备位号/介质/原因从隔离点主数据中推举本次应引用的点位（含设备进/出口相连管线上的隔离点，仅限主数据真值，附推荐理由）">
@@ -2208,6 +2246,15 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
       ) : (
         <p className="text-[11px] text-stone-400">未引用隔离点主数据</p>
       )}
+      {/* 扫码加入（模拟扫隔离点标签二维码；Task 96-b 布局：取景框恒悬浮+名单滚动） */}
+      <IsoScanSheet
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        title="扫码加入勘察点位"
+        points={pointMasters.map((m) => ({ code: m.code, name: m.name, location: m.location ?? null }))}
+        doneCodes={refs.map((r) => r.code)}
+        onScan={(code) => addRefByScan(code)}
+      />
     </div>
   )
 }

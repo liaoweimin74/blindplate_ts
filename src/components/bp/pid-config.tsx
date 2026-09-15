@@ -5128,6 +5128,36 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       </svg>
                     </div>
                   )}
+
+                  {/* 隔离点状态图例（查看模式）：画布右下角浮动浮层，单行紧凑、无左侧标签占位；
+                      俯瞰图开启时自动上移至俯瞰图上方，窄屏横向滚动不换行 */}
+                  {mode === 'view' && activeId != null && !detailLoading && (
+                    <div
+                      role="list"
+                      aria-label="隔离点状态图例"
+                      className={cn(
+                        'absolute right-2.5 z-10 flex max-w-[calc(100%-1.25rem)] flex-nowrap items-center gap-x-2 gap-y-0 overflow-x-auto rounded-lg border border-stone-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur bp-thin-scrollbar',
+                        minimapOpen ? 'bottom-[10.5rem] sm:bottom-[11.75rem]' : 'bottom-2.5',
+                      )}
+                    >
+                      {ISO_STATE_KEYS.map((k) => {
+                        const st = ISO_STATE_STYLE[k]
+                        return (
+                          <span
+                            key={k}
+                            role="listitem"
+                            className={cn(
+                              'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-stone-200 px-1.5 py-0.5 text-[10px] text-stone-600',
+                              st.legendBg,
+                            )}
+                          >
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: st.dot }} />
+                            {st.legend}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
                   </>
                 )}
 
@@ -5824,27 +5854,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           </div>
         )}
 
-        {/* 底部图例（查看模式；单行紧凑：无左侧标签占位，窄屏横向滚动不换行） */}
-        {mode === 'view' && activeId != null && !detailLoading && (
-          <div className="flex flex-nowrap items-center gap-x-2.5 gap-y-0 overflow-x-auto border-t pt-3 bp-thin-scrollbar" role="list" aria-label="隔离点状态图例">
-            {ISO_STATE_KEYS.map((k) => {
-              const st = ISO_STATE_STYLE[k]
-              return (
-                <span
-                  key={k}
-                  role="listitem"
-                  className={cn(
-                    'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-stone-200 px-2 py-0.5 text-[11px] text-stone-600',
-                    st.legendBg,
-                  )}
-                >
-                  <span className="h-2 w-2 rounded-full" style={{ background: st.dot }} />
-                  {st.legend}
-                </span>
-              )
-            })}
-          </div>
-        )}
+        {/* 底部图例（查看模式）已移至画布右下角浮动浮层（用户要求：右下角显示，见视图控制浮层后） */}
       </CardContent>
 
       {/* 新建组态图 */}

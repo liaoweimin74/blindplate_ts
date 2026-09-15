@@ -43,14 +43,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     } catch { signed = [] }
     if (signed.includes(userId)) return jsonError(`${name} 已签到，请扫描下一位被交底人的身份码`)
 
+    // 人证核验拍照留痕（需求 17）：签到必须携带现场照（与票面身份证照片比对后拍摄），无照不签
+    const crewPhotoUrl = str(body.crewPhoto) || str((body.crewPhoto as Record<string, unknown> | undefined)?.photoUrl)
+    if (!crewPhotoUrl) {
+      return jsonError('缺少人证核验现场照片：请现场拍摄该人员照片并与作业票身份证照片比对相符后再签到')
+    }
+
     signed.push(userId)
-    const allDone = roster.every((u) => signed.includes(u))
     const now = new Date()
+
+    // 人证拍照台账：{ [userId]: { photoUrl, verifiedName, verifiedAt } }
+    let crewPhotos: Record<string, { photoUrl: string; verifiedName: string; verifiedAt: string }> = {}
+    try { crewPhotos = briefing.crewPhotos ? (JSON.parse(briefing.crewPhotos) as typeof crewPhotos) : {} } catch { crewPhotos = {} }
+    crewPhotos[userId] = { photoUrl: crewPhotoUrl, verifiedName: name, verifiedAt: now.toISOString() }
+
+    // photoGap 机制：全员签到且全员人证拍照齐备才生效（photoGap=已签到但缺拍照人数，正常流程恒为 0）
+    const allSigned = roster.every((u) => signed.includes(u))
+    const photoGap = roster.filter((u) => signed.includes(u) && !crewPhotos[u]).length
+    const allDone = allSigned && photoGap === 0
 
     const updated = await db.briefing.update({
       where: { id: bid },
       data: {
         confirmedUserIds: JSON.stringify(signed),
+        crewPhotos: JSON.stringify(crewPhotos),
         ...(allDone
           ? {
               status: 'CONFIRMED',
@@ -70,13 +86,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         entity: 'BRIEFING',
         entityId: bid,
         entityCode: briefing.ticketCode ?? '',
-        detail: `${briefing.ticketCode ?? `交底#${bid}`}：待作业方确认 → 已确认（全员扫码签到完成（${signed.length}/${roster.length}，末位：${name}），交底生效，该作业票具备开工条件）`,
+        detail: `${briefing.ticketCode ?? `交底#${bid}`}：待作业方确认 → 已确认（全员扫码签到且人证拍照齐备（${signed.length}/${roster.length}，末位：${name}），交底生效，该作业票具备开工条件）`,
       })
       await pushNotifications({
         targetRoles: ['GUARDIAN'],
         type: 'EXECUTE',
         title: '现场交底已确认',
-        content: `${briefing.ticketCode ?? ''} 交底全员扫码签到完成（${signed.length}/${roster.length}），可安排开工`,
+        content: `${briefing.ticketCode ?? ''} 交底全员扫码签到且人证核验拍照齐备（${signed.length}/${roster.length}），可安排开工`,
         bizType: 'TICKET',
         bizId: briefing.ticketId ?? undefined,
         bizCode: briefing.ticketCode ?? undefined,
@@ -90,7 +106,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         entity: 'BRIEFING',
         entityId: bid,
         entityCode: briefing.ticketCode ?? '',
-        detail: `${name} 扫码签到确认交底（${signed.length}/${roster.length}），等待其余被交底人签到`,
+        detail: `${name} 扫码签到确认交底并完成人证核验拍照（${signed.length}/${roster.length}），等待其余被交底人签到拍照`,
       })
     }
 
@@ -99,6 +115,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       signedCount: signed.length,
       rosterCount: roster.length,
       allDone,
+      allSigned,
+      photoGap,
     })
   } catch (e) {
     console.error('[POST /api/briefings/[id]/sign]', e)

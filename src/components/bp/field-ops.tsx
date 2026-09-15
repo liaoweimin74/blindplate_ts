@@ -18,6 +18,8 @@ import {
   AttachmentWall, AiCheckCard, InconsistentWarning, PhotoPicker, VoiceRecorder,
   type AttachmentDto, type PhotoCheckDto,
 } from '@/components/bp/bp-media'
+import { parseWorkerCerts, type WorkerCert } from '@/components/bp/crew'
+import IsoScanSheet from '@/components/bp/iso-scan-sheet'
 import {
   ChevronLeft, ChevronDown, MapPin, ClipboardCheck, Megaphone, HardHat, ListChecks, RefreshCw,
   Loader2, Camera, Mic, Sparkles, CircleCheck, AlertTriangle, ChevronRight,
@@ -54,10 +56,11 @@ interface BriefingRow {
   content: string; status: string
   confirmedBy: string | null; confirmedAt: string | null; confirmRemark: string | null
   aiCheckResult: string | null
+  crewPhotos?: string | null
   createdAt: string
 }
 interface UserLite { id: string; username: string; name: string; role: string; department?: string | null; active: boolean }
-interface SignResult { briefing: BriefingRow; signedCount: number; rosterCount: number; allDone: boolean }
+interface SignResult { briefing: BriefingRow; signedCount: number; rosterCount: number; allDone: boolean; allSigned?: boolean; photoGap?: number }
 interface MasterPoint { id: number; code: string; name: string; location: string | null; pipelineId: number | null; pipeline?: { code: string; name: string } | null }
 interface DisposalStepRow {
   id: number; seq: number; method: string; detail: string; standard: string | null
@@ -121,10 +124,13 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
   const surveyTodos = useMemo(() => hasRole(role, ROLES.survey) ? reqs.filter((r) => r.status === 'PENDING_SURVEY') : [], [reqs, role])
   const confirmTodos = useMemo(() => hasRole(role, ROLES.confirm) ? reqs.filter((r) => r.status === 'PENDING_CONFIRM') : [], [reqs, role])
   // 交底：已批准的票（需求处于 TICKET_APPROVED）；区分 未交底 / 已交底待确认
+  // 修复（Task 97-R）：排除已有生效交底（CONFIRMED）的票——避免重复交底入口（该类票已属 execStartTodos 待开工区）
   const briefNewTodos = useMemo(() => {
     if (!hasRole(role, ROLES.briefNew)) return []
-    return tickets.filter((t) => t.status === 'APPROVED' && reqs.find((r) => r.id === t.workRequestId)?.status === 'TICKET_APPROVED')
-  }, [tickets, reqs, role])
+    return tickets.filter((t) => t.status === 'APPROVED'
+      && reqs.find((r) => r.id === t.workRequestId)?.status === 'TICKET_APPROVED'
+      && !briefings.some((b) => b.ticketId === t.id && b.status === 'CONFIRMED'))
+  }, [tickets, reqs, briefings, role])
   const briefConfirmTodos = useMemo(() => hasRole(role, ROLES.briefConfirm) ? briefings.filter((b) => b.status === 'PENDING') : [], [briefings, role])
   // 作业：进行中 + 已批准且交底已确认（待开工）
   const execStartTodos = useMemo(() => {
@@ -136,13 +142,20 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
   // 已完结记录：验收通过（COMPLETED）的需求，供现场人员事后查询（完成即从待办消失，这里补查询入口）
   const completedCount = useMemo(() => reqs.filter((r) => r.status === 'COMPLETED').length, [reqs])
 
+  // 开工确认（需求 16）：先扫票面隔离点二维码核对，命中后才调开工 API
+  const [startGate, setStartGate] = useState<TicketLite | null>(null)
   const startTicket = async (ticket: TicketLite) => {
+    setStartGate(ticket)
+  }
+  const startTicketConfirmed = async (ticket: TicketLite) => {
     try {
       await apiPost(`/api/work-tickets/${ticket.id}/start`, { __actorId: currentUser?.id, __actorName: currentUser?.name })
-      toast({ title: '已开工', description: `作业票 ${ticket.code} 进入作业中——请先拍摄作业位置照片并完成 AI 核对` })
+      toast({ title: '扫码核对通过，已开工', description: `作业票 ${ticket.code} 进入作业中——请先拍摄作业位置照片并完成 AI 核对` })
       await refresh()
     } catch (e) {
       toast({ variant: 'destructive', title: '开工被拒绝', description: e instanceof Error ? e.message : '请稍后重试' })
+    } finally {
+      setStartGate(null)
     }
   }
 
@@ -249,7 +262,7 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
                         </div>
                         <p className="text-xs font-medium text-stone-800 truncate">{t.pointCode ? `[${t.pointCode}] ` : ''}{t.pointLocation ?? ''}</p>
                         <Button size="sm" className="h-8 w-full bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => void startTicket(t)}>
-                          <PlayCircle className="w-3.5 h-3.5 mr-1" />确认开工
+                          <PlayCircle className="w-3.5 h-3.5 mr-1" />确认开工（扫码核对隔离点）
                         </Button>
                       </div>
                     ))}
@@ -284,6 +297,23 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
         {view.kind === 'brief-confirm' && <BriefConfirmPage briefingId={view.briefingId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'exec' && <ExecPage ticketId={view.ticketId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
         {view.kind === 'accept' && <AcceptPage reqId={view.reqId} currentUser={currentUser} onBack={async () => { setView({ kind: 'todo' }); await refresh() }} />}
+
+        {/* 开工扫码核对 gate（需求 16）：扫票面隔离点二维码命中后才真正开工 */}
+        <IsoScanSheet
+          open={!!startGate}
+          onClose={() => setStartGate(null)}
+          title="开工扫码核对隔离点"
+          points={startGate?.pointCode ? [{ code: startGate.pointCode, name: startGate.pointLocation ?? null }] : []}
+          hint={`请扫描作业票 ${startGate?.code ?? ''} 对应隔离点的现场标签二维码`}
+          onScan={(code) => {
+            if (!startGate) return
+            if (code === startGate.pointCode) {
+              void startTicketConfirmed(startGate)
+            } else {
+              toast({ variant: 'destructive', title: '二维码不符', description: `扫描到 ${code}，与本票隔离点 ${startGate.pointCode ?? '-'} 不一致，请核对现场标签` })
+            }
+          }}
+        />
       </div>
     </div>
   )
@@ -610,33 +640,75 @@ function QrSignSheet(props: {
   const signedIds = useMemo(() => {
     try { return briefing.confirmedUserIds ? (JSON.parse(briefing.confirmedUserIds) as string[]) : [] } catch { return [] }
   }, [briefing.confirmedUserIds])
+  const crewPhotoMap = useMemo(() => {
+    try { return briefing.crewPhotos ? (JSON.parse(briefing.crewPhotos) as Record<string, { photoUrl: string; verifiedName: string; verifiedAt: string }>) : {} } catch { return {} }
+  }, [briefing.crewPhotos])
   const [users, setUsers] = useState<UserLite[]>([])
   const [phase, setPhase] = useState<'idle' | 'scanning'>('idle')
   const [manual, setManual] = useState('')
   const [signing, setSigning] = useState(false)
+  // 人证核验（需求 17）：扫码后进入逐人核验步——比对票面身份证照片并现场拍照留痕后方可签到
+  const [verifying, setVerifying] = useState<{ userId: string; name: string; shot: string | null } | null>(null)
+  // 人证比对基准：票面验资材料（workerCerts）
+  const [ticketCerts, setTicketCerts] = useState<WorkerCert[] | null>(null)
 
   const remaining = useMemo(() => rosterIds.filter((id) => !signedIds.includes(id)), [rosterIds, signedIds])
   const userName = (id: string) => users.find((u) => u.id === id)?.name ?? briefing.briefedUsers?.split(/[,，、]/)?.find((n) => n.trim()) ?? id
+  // photoGap：已签到但缺人证拍照的人数（补齐后才生效）
+  const photoGap = rosterIds.filter((id) => signedIds.includes(id) && !crewPhotoMap[id]).length
 
   useEffect(() => {
     apiGet<UserLite[]>('/api/users').then((us) => setUsers(us.filter((u) => u.active))).catch(() => setUsers([]))
   }, [])
 
+  // 拉票面验资材料（人证比对基准）：被交底人身份证照片 vs 现场拍照
+  useEffect(() => {
+    if (!briefing.ticketId) { setTicketCerts(null); return }
+    apiGet<{ workerCerts: string | null }>(`/api/work-tickets/${briefing.ticketId}`)
+      .then((t) => setTicketCerts(parseWorkerCerts(t.workerCerts)))
+      .catch(() => setTicketCerts(null))
+  }, [briefing.ticketId])
+
+  // 模拟现场拍照（演示环境）：canvas 生成带姓名/时间戳的现场核验留痕照（正式版 uniapp 调用相机）
+  const shootCrewPhoto = (name: string): string => {
+    const cv = document.createElement('canvas')
+    cv.width = 320; cv.height = 240
+    const ctx = cv.getContext('2d')
+    if (!ctx) return 'demo:crew-photo'
+    ctx.fillStyle = '#1c1917'; ctx.fillRect(0, 0, 320, 240)
+    ctx.strokeStyle = 'rgba(94,234,212,0.18)'
+    for (let x = 0; x <= 320; x += 20) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 240); ctx.stroke() }
+    for (let y = 0; y <= 240; y += 20) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(320, y); ctx.stroke() }
+    ctx.fillStyle = '#57534e'
+    ctx.beginPath(); ctx.arc(160, 100, 38, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.ellipse(160, 190, 62, 50, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#5eead4'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center'
+    ctx.fillText('现场人证核验留痕', 160, 32)
+    ctx.fillStyle = '#fafaf9'; ctx.font = '14px sans-serif'
+    ctx.fillText(name, 160, 226)
+    ctx.fillStyle = '#a8a29e'; ctx.font = '10px sans-serif'
+    ctx.fillText(new Date().toLocaleString('zh-CN', { hour12: false }), 160, 212)
+    return cv.toDataURL('image/jpeg', 0.72)
+  }
+
   // 扫码动画：1.1s 扫描线后由调用方决定识别结果（模拟识别 → 取景框内出现身份码）
-  const doSign = async (userId: string, name: string) => {
+  const doSign = async (userId: string, name: string, crewPhotoUrl: string) => {
     if (signing) return
     setSigning(true)
     try {
       const r = await apiPost<SignResult>(`/api/briefings/${briefing.id}/sign`, {
         userId, name,
+        crewPhoto: crewPhotoUrl,
         __actorId: currentUser?.id, __actorName: currentUser?.name,
       })
       onUpdated(r.briefing)
       if (r.allDone) {
-        toast({ title: '全员签到完成', description: `交底生效（${r.signedCount}/${r.rosterCount}），该作业票具备开工条件` })
+        toast({ title: '全员签到完成，人证核验齐备', description: `交底生效（${r.signedCount}/${r.rosterCount}），该作业票具备开工条件` })
         onClose()
+      } else if (r.photoGap && r.photoGap > 0) {
+        toast({ title: `${name} 已签到（缺人证拍照）`, description: `photoGap=${r.photoGap}：请补拍后交底才能生效` })
       } else {
-        toast({ title: `${name} 已签到`, description: `进度 ${r.signedCount}/${r.rosterCount}，请扫描下一位` })
+        toast({ title: `${name} 人证核验通过，已签到`, description: `进度 ${r.signedCount}/${r.rosterCount}，请扫描下一位` })
       }
     } catch (e) {
       toast({ variant: 'destructive', title: '签到失败', description: e instanceof Error ? e.message : '请重试' })
@@ -646,88 +718,164 @@ function QrSignSheet(props: {
     }
   }
 
-  // 模拟识别：演示环境从「未签到名单」中选一位（等同于该被交底人出示身份码被扫到）
+  // 模拟识别：演示环境从「未签到名单」中选一位（等同于该被交底人出示身份码被扫到）→ 进入人证核验步
   const simulateScan = (userId: string) => {
-    if (phase === 'scanning' || signing) return
+    if (phase === 'scanning' || signing || verifying) return
     setPhase('scanning')
     setTimeout(() => {
       const name = userName(userId)
-      void doSign(userId, name)
+      setPhase('idle')
+      setVerifying({ userId, name, shot: null })
     }, 1100)
   }
 
-  // 手动输入身份码（BPID|userId|name|role）或直接输入姓名匹配
+  // 人证核验确认：现场拍照留痕后签到（无照不签，后端同口径校验）
+  const confirmVerify = () => {
+    if (!verifying) return
+    const shot = verifying.shot ?? shootCrewPhoto(verifying.name)
+    const { userId, name } = verifying
+    void doSign(userId, name, shot)
+    setVerifying(null)
+  }
+
+  // 手动输入身份码（BPID|userId|name|role）或直接输入姓名匹配 → 进入人证核验步
   const manualSign = () => {
     const raw = manual.trim()
     if (!raw) return
     const parsed = parseIdCode(raw)
-    if (parsed) { void doSign(parsed.userId, parsed.name); setManual(''); return }
+    if (parsed) { setVerifying({ userId: parsed.userId, name: parsed.name, shot: null }); setManual(''); return }
     const byName = users.find((u) => u.name === raw)
-    if (byName) { void doSign(byName.id, byName.name); setManual(''); return }
+    if (byName) { setVerifying({ userId: byName.id, name: byName.name, shot: null }); setManual(''); return }
     toast({ variant: 'destructive', title: '身份码无法识别', description: '请扫描「我的-我的身份码」二维码或输入正确姓名' })
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60" onClick={onClose}>
-      <div className="w-full max-w-md rounded-t-2xl bg-stone-100 p-4 space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2">
-          <QrCode className="w-4 h-4 text-violet-600" />
-          <p className="text-sm font-bold text-stone-800">扫码签到确认交底</p>
-          <span className="ml-auto text-[11px] text-stone-500 tabular-nums">已签到 {signedIds.length}/{rosterIds.length}</span>
-          <button onClick={onClose} className="w-7 h-7 rounded-full bg-white border border-stone-200 flex items-center justify-center" aria-label="关闭扫码签到">
-            <X className="w-3.5 h-3.5 text-stone-500" />
-          </button>
-        </div>
-
-        {/* 进度条 */}
-        <div className="h-1.5 rounded-full bg-stone-200 overflow-hidden">
-          <div className="h-full bg-teal-500 transition-all" style={{ width: rosterIds.length ? `${(signedIds.length / rosterIds.length) * 100}%` : '0%' }} />
-        </div>
-
-        {/* 取景框（演示：点击未签到成员模拟其出示身份码） */}
-        <div className="rounded-xl bg-stone-900 p-4 space-y-3">
-          <div className="relative mx-auto w-40 h-40 rounded-xl border-2 border-stone-600 overflow-hidden">
-            <ScanLine className={cn('absolute left-1/2 -translate-x-1/2 w-full h-0.5 text-teal-300 shadow-[0_0_12px_2px_rgba(94,234,212,0.8)]',
-              phase === 'scanning' ? 'bp-scan-sweep top-0' : 'top-1/2 -translate-y-1/2')} />
-            {phase === 'idle' && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-stone-400">
-                <QrCode className="w-8 h-8 mb-1.5" />
-                <p className="text-[10px] text-center px-3 leading-relaxed">请被交底人出示「我的-我的身份码」<br />点击下方成员模拟扫到其身份码</p>
-              </div>
-            )}
-            {phase === 'scanning' && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Loader2 className="w-6 h-6 text-teal-300 animate-spin" />
-              </div>
-            )}
-          </div>
-          <p className="text-[10px] text-stone-400 text-center">正式版 uniapp 调用相机扫码；演示环境以模拟识别代替</p>
-        </div>
-
-        {/* 未签到名单（模拟识别入口） */}
-        <div className="rounded-xl bg-white p-3 space-y-1.5">
-          <p className="text-[10px] font-semibold text-stone-500">未签到成员（点击模拟扫描其身份码）</p>
-          {remaining.length === 0 ? (
-            <p className="text-[11px] text-teal-600 flex items-center gap-1 py-1"><CircleCheck className="w-3 h-3" />全部签到完成</p>
-          ) : remaining.map((id) => (
-            <button key={id} type="button" onClick={() => simulateScan(id)} disabled={phase === 'scanning' || signing}
-              className="w-full flex items-center gap-2 rounded-lg border border-stone-200 px-2.5 py-2 text-left hover:border-teal-300 hover:bg-teal-50/50 transition-colors disabled:opacity-60">
-              <QrCode className="w-3.5 h-3.5 text-stone-400 shrink-0" />
-              <span className="text-[11px] font-medium text-stone-700">{userName(id)}</span>
-              <span className="ml-auto text-[10px] text-teal-600">出示身份码 <ChevronRight className="w-3 h-3 inline" /></span>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60" onClick={onClose} role="dialog" aria-modal="true" aria-label="扫码签到确认交底">
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-t-2xl bg-stone-100 p-4" onClick={(e) => e.stopPropagation()}>
+        {/* ===== 固定区：标题 + 进度 + 取景框（Task 96-b 布局铁律） ===== */}
+        <div className="shrink-0 space-y-3">
+          <div className="flex items-center gap-2">
+            <QrCode className="w-4 h-4 text-violet-600" />
+            <p className="text-sm font-bold text-stone-800">扫码签到 · 人证核验</p>
+            <span className="ml-auto text-[11px] tabular-nums text-stone-500">已签到 {signedIds.length}/{rosterIds.length}{photoGap > 0 ? ` · 缺拍照 ${photoGap} 人` : ''}</span>
+            <button onClick={onClose} className="w-7 h-7 rounded-full bg-white border border-stone-200 flex items-center justify-center" aria-label="关闭扫码签到">
+              <X className="w-3.5 h-3.5 text-stone-500" />
             </button>
-          ))}
+          </div>
+
+          {/* 进度条 */}
+          <div className="h-1.5 rounded-full bg-stone-200 overflow-hidden">
+            <div className="h-full bg-teal-500 transition-all" style={{ width: rosterIds.length ? `${(signedIds.length / rosterIds.length) * 100}%` : '0%' }} />
+          </div>
+
+          {/* 取景框（演示：点击未签到成员模拟其出示身份码） */}
+          <div className="rounded-xl bg-stone-900 p-4 space-y-3">
+            <div className="relative mx-auto w-40 h-40 rounded-xl border-2 border-stone-600 overflow-hidden">
+              <ScanLine className={cn('absolute left-1/2 -translate-x-1/2 w-full h-0.5 text-teal-300 shadow-[0_0_12px_2px_rgba(94,234,212,0.8)]',
+                phase === 'scanning' ? 'bp-scan-sweep top-0' : 'top-1/2 -translate-y-1/2')} />
+              {phase === 'idle' && !verifying && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-stone-400">
+                  <QrCode className="w-8 h-8 mb-1.5" />
+                  <p className="text-[10px] text-center px-3 leading-relaxed">请被交底人出示「我的-我的身份码」<br />点击下方成员模拟扫到其身份码</p>
+                </div>
+              )}
+              {phase === 'scanning' && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 text-teal-300 animate-spin" />
+                </div>
+              )}
+              {verifying && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-900/90">
+                  {verifying.shot ? (
+                     
+                    <img src={verifying.shot} alt={`${verifying.name} 现场核验照`} className="h-full w-full object-cover" />
+                  ) : (
+                    <>
+                      <UserCheck className="w-8 h-8 mb-1 text-teal-300" />
+                      <p className="text-[11px] font-medium text-teal-200">{verifying.name}</p>
+                      <p className="mt-1 px-3 text-center text-[9px] text-stone-400">与票面身份证照片比对后拍照留痕</p>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <p className="text-[10px] text-stone-400 text-center">正式版 uniapp 调用相机扫码；演示环境以模拟识别代替</p>
+          </div>
         </div>
 
-        {/* 手动输入（身份码内容或姓名） */}
-        <div className="rounded-xl bg-white p-3 space-y-1.5">
-          <p className="text-[10px] font-semibold text-stone-500">无法扫码时手动输入身份码内容或姓名</p>
-          <div className="flex gap-1.5">
-            <Input value={manual} onChange={(e) => setManual(e.target.value)} className="h-8 text-[11px] font-mono" placeholder="BPID|… 或 姓名" />
-            <Button size="sm" className="h-8 px-3 bg-teal-600 hover:bg-teal-700 text-white text-xs" onClick={manualSign} disabled={signing || !manual.trim()}>
-              签到
-            </Button>
-          </div>
+        {/* ===== 滚动区：人证核验面板 / 未签到名单 + 手动输入 ===== */}
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bp-thin-scrollbar">
+          {/* 人证核验面板（需求 17）：比对基准 + 现场拍照 + 确认 */}
+          {verifying && (
+            <div className="space-y-2 rounded-xl border border-teal-300 bg-teal-50/60 p-3">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-teal-600" />
+                <p className="text-[11px] font-bold text-teal-800">人证核验 · {verifying.name}</p>
+                <button type="button" className="ml-auto text-[10px] text-stone-400 hover:text-stone-600" onClick={() => setVerifying(null)}>返回</button>
+              </div>
+              {/* 比对基准：票面身份证照片（workerCerts；无材料则提示人工核对） */}
+              {(() => {
+                const cert = ticketCerts?.find((c) => c.name === verifying.name)
+                return cert?.idPhotoUrl ? (
+                  <div className="flex items-center gap-2">
+                    { }
+                    <img src={cert.idPhotoUrl} alt={`${verifying.name} 身份证照片`} className="h-14 w-20 rounded-md border border-stone-200 object-cover" />
+                    <div className="text-[10px] leading-relaxed text-stone-500">
+                      <p className="font-medium text-stone-700">票面身份证照片</p>
+                      <p className="font-mono text-[9px]">{cert.idCard}</p>
+                      <p className="text-stone-400">请现场比对是否本人</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-amber-600">
+                    {ticketCerts === null ? '该票未采集验资材料，请人工核对人证相符后拍照留痕' : '票面无该人员身份证照片，请人工核对人证相符后拍照留痕'}
+                  </p>
+                )
+              })()}
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="outline" className="h-8 flex-1 border-teal-300 bg-white text-xs text-teal-700 hover:bg-teal-100"
+                  disabled={signing}
+                  onClick={() => setVerifying((v) => (v ? { ...v, shot: shootCrewPhoto(v.name) } : v))}>
+                  <Camera className="w-3.5 h-3.5 mr-1" />{verifying.shot ? '重拍' : '现场拍照（模拟）'}
+                </Button>
+                <Button size="sm" className="h-8 flex-1 bg-teal-600 hover:bg-teal-700 text-xs text-white" disabled={signing} onClick={confirmVerify}>
+                  <UserCheck className="w-3.5 h-3.5 mr-1" />{verifying.shot ? '人证相符，签到' : '拍照后签到'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* 未签到名单（模拟识别入口） */}
+          {!verifying && (
+            <div className="rounded-xl bg-white p-3 space-y-1.5">
+              <p className="text-[10px] font-semibold text-stone-500">未签到成员（点击模拟扫描其身份码，逐人核验拍照）</p>
+              {remaining.length === 0 ? (
+                <p className="text-[11px] text-teal-600 flex items-center gap-1 py-1"><CircleCheck className="w-3 h-3" />{photoGap > 0 ? `全员已签到，但仍有 ${photoGap} 人缺人证拍照（photoGap）` : '全部签到完成'}</p>
+              ) : remaining.map((id) => (
+                <button key={id} type="button" onClick={() => simulateScan(id)} disabled={phase === 'scanning' || signing}
+                  className="w-full flex items-center gap-2 rounded-lg border border-stone-200 px-2.5 py-2 text-left hover:border-teal-300 hover:bg-teal-50/50 transition-colors disabled:opacity-60">
+                  <QrCode className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                  <span className="text-[11px] font-medium text-stone-700">{userName(id)}</span>
+                  {crewPhotoMap[id]
+                    ? <span className="ml-auto text-[9px] text-teal-600">已留痕</span>
+                    : <span className="ml-auto text-[10px] text-teal-600">出示身份码 <ChevronRight className="w-3 h-3 inline" /></span>}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* 手动输入（身份码内容或姓名） */}
+          {!verifying && (
+            <div className="rounded-xl bg-white p-3 space-y-1.5">
+              <p className="text-[10px] font-semibold text-stone-500">无法扫码时手动输入身份码内容或姓名</p>
+              <div className="flex gap-1.5">
+                <Input value={manual} onChange={(e) => setManual(e.target.value)} className="h-8 text-[11px] font-mono" placeholder="BPID|… 或 姓名" />
+                <Button size="sm" className="h-8 px-3 bg-teal-600 hover:bg-teal-700 text-white text-xs" onClick={manualSign} disabled={signing || !manual.trim()}>
+                  签到
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

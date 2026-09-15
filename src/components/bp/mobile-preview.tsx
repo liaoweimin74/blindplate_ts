@@ -28,8 +28,10 @@ import {
   MapPin, RefreshCw, LogOut, BellRing, Trash2, Info, Download, CloudOff, Smartphone, ScanSearch,
   Route, Ban, KeyRound, Megaphone, Building2, Phone, Eye, EyeOff, Check, X,
   AlertTriangle, BellOff, CheckCheck, MonitorSmartphone, History, FolderOpen, HardHat,
+  Ticket as TicketIcon, Stamp,
 } from 'lucide-react'
 import FieldOpsModule from '@/components/bp/field-ops'
+import { TicketNewPage, TicketReviewPage } from '@/components/bp/ticket-mobile'
 
 // ============ 类型 ============
 interface UnitRow { id: number; name: string; code: string }
@@ -268,6 +270,9 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
   // 执行确认
   const [execPoint, setExecPoint] = useState<PointRow | null>(null)
   const [execOperator, setExecOperator] = useState('')
+
+  // 移动端票务子页（需求 16）：开作业票 / 作业票审批（从任务 Tab 快捷入口进入）
+  const [mobilePage, setMobilePage] = useState<'none' | 'ticket-new' | 'ticket-review'>('none')
 
   // 扫码 Tab（模拟扫码：输入面板/快捷选择 → 扫描线动画 → 盲板档案卡，历史存内存）
   const [scanInputOpen, setScanInputOpen] = useState(false)
@@ -680,13 +685,32 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
         {/* 屏幕内容区 */}
         <div className="flex-1 min-h-0 overflow-y-auto bg-stone-100">
           {/* ===== 任务 Tab ===== */}
-          {tab === 'tasks' && !openTask && (
+          {tab === 'tasks' && !openTask && mobilePage === 'none' && (
             <div className="p-3.5 space-y-3">
               <div className="flex items-center justify-between px-1">
                 <h3 className="text-base font-bold text-stone-800">我的任务</h3>
                 <button onClick={() => void loadTasks()} className="flex items-center gap-1 text-[11px] text-stone-400 hover:text-emerald-700">
                   <RefreshCw className="w-3 h-3" />刷新
                 </button>
+              </div>
+              {/* 票务快捷入口（需求 16）：开作业票（班长/管理员）· 作业票审批（领导/审核人/管理员），移动端全流程闭环 */}
+              <div className="grid grid-cols-2 gap-2">
+                {['FOREMAN', 'ADMIN'].includes(currentUser.role) && (
+                  <button onClick={() => setMobilePage('ticket-new')}
+                    className="rounded-2xl bg-white p-3 shadow-sm border border-teal-100 text-left active:scale-[0.99] transition-transform">
+                    <TicketIcon className="w-4 h-4 text-teal-600" />
+                    <p className="mt-1.5 text-xs font-semibold text-stone-800">开作业票</p>
+                    <p className="text-[10px] text-stone-400">一票一板 · 逐人验资</p>
+                  </button>
+                )}
+                {['MANAGER', 'REVIEWER', 'ADMIN'].includes(currentUser.role) && (
+                  <button onClick={() => setMobilePage('ticket-review')}
+                    className="rounded-2xl bg-white p-3 shadow-sm border border-amber-100 text-left active:scale-[0.99] transition-transform">
+                    <Stamp className="w-4 h-4 text-amber-600" />
+                    <p className="mt-1.5 text-xs font-semibold text-stone-800">作业票审批</p>
+                    <p className="text-[10px] text-stone-400">票面 · 验资照片核验</p>
+                  </button>
+                )}
               </div>
               {tasksLoading ? (
                 Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)
@@ -829,6 +853,22 @@ export default function MobilePreviewModule({ currentUser, onLogout, onNavigate 
               )}
               <div className="h-2" />
             </div>
+          )}
+
+          {/* ===== 移动端票务子页（需求 16）：开作业票 / 作业票审批 ===== */}
+          {tab === 'tasks' && mobilePage === 'ticket-new' && (
+            <TicketNewPage
+              currentUser={currentUser}
+              onBack={() => setMobilePage('none')}
+              onDone={() => { setMobilePage('none'); void loadTasks() }}
+            />
+          )}
+          {tab === 'tasks' && mobilePage === 'ticket-review' && (
+            <TicketReviewPage
+              currentUser={currentUser}
+              onBack={() => setMobilePage('none')}
+              onDone={() => setMobilePage('none')}
+            />
           )}
 
           {/* ===== 扫码 Tab（模拟扫码：输入面板/快捷选择 → 扫描线动画 → 盲板档案卡） ===== */}

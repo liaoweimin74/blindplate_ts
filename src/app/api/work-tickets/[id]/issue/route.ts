@@ -34,6 +34,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       },
     })
     const request = await db.workRequest.findUnique({ where: { id: ticket.workRequestId } })
+    // 状态聚合修复（Task 96）：单独签发 DRAFT 票后需求状态同步——需求仍为 CONFIRMED（工艺处置已确认）时推进到 TICKET_ISSUED，
+    // 与批量开票 POST /api/work-tickets 的需求状态口径一致，避免「票已待批、需求仍显示可开票」的脱节
+    if (request && request.status === 'CONFIRMED') {
+      await db.workRequest.update({ where: { id: request.id }, data: { status: 'TICKET_ISSUED' } })
+    }
     await pushNotifications({
       targetRoles: ['MANAGER'],
       type: 'APPROVAL',
