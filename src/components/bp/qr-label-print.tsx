@@ -95,7 +95,6 @@ export default function QrLabelPrint({ open, onClose, points, title }: {
               <div key={p.code} className="flex gap-2 rounded-md border-2 border-stone-800 p-1.5" style={{ width: '62mm', height: '36mm' }}>
                 <div className="flex shrink-0 flex-col items-center justify-center">
                   {qrs[p.code] ? (
-                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={qrs[p.code]} alt={`${p.code} 二维码`} style={{ width: '24mm', height: '24mm' }} />
                   ) : (
                     <div className="flex items-center justify-center rounded border border-dashed border-stone-300" style={{ width: '24mm', height: '24mm' }}>
