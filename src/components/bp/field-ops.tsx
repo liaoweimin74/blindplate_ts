@@ -20,6 +20,7 @@ import {
 } from '@/components/bp/bp-media'
 import { parseWorkerCerts, type WorkerCert } from '@/components/bp/crew'
 import IsoScanSheet from '@/components/bp/iso-scan-sheet'
+import QrLabelPrint, { type QrLabelPoint } from '@/components/bp/qr-label-print'
 import {
   ChevronLeft, ChevronDown, MapPin, ClipboardCheck, Megaphone, HardHat, ListChecks, RefreshCw,
   Loader2, Camera, Mic, Sparkles, CircleCheck, AlertTriangle, ChevronRight,
@@ -144,6 +145,8 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
 
   // 开工确认（需求 16）：先扫票面隔离点二维码核对，命中后才调开工 API
   const [startGate, setStartGate] = useState<TicketLite | null>(null)
+  // 需求10：开工扫码时现场无码 → 打印该隔离点二维码标签
+  const [startGateLabel, setStartGateLabel] = useState<{ open: boolean; points: QrLabelPoint[] }>({ open: false, points: [] })
   const startTicket = async (ticket: TicketLite) => {
     setStartGate(ticket)
   }
@@ -313,6 +316,14 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
               toast({ variant: 'destructive', title: '二维码不符', description: `扫描到 ${code}，与本票隔离点 ${startGate.pointCode ?? '-'} 不一致，请核对现场标签` })
             }
           }}
+          onPrintLabel={(p) => setStartGateLabel({ open: true, points: [p] })}
+        />
+        {/* 需求10：开工扫码现场无码 → 打印二维码标签 */}
+        <QrLabelPrint
+          open={startGateLabel.open}
+          onClose={() => setStartGateLabel({ open: false, points: [] })}
+          points={startGateLabel.points}
+          title="隔离点二维码标签"
         />
       </div>
     </div>

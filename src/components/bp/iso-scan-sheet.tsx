@@ -3,7 +3,7 @@
 // 布局铁律（Task 96-b）：固定区（标题+进度+取景框）shrink-0 恒在顶部，名单/手动输入在滚动区 flex-1 min-h-0
 // → 列表再长取景框不被顶走；演示环境以「点击名单项=模拟扫到其二维码」代替真实相机
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { QrCode, ScanLine, ChevronRight, X, Loader2, CircleCheck, MapPin, ScanSearch } from 'lucide-react'
+import { QrCode, ScanLine, ChevronRight, X, Loader2, CircleCheck, MapPin, ScanSearch, Printer } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +34,8 @@ interface IsoScanSheetProps {
   hint?: string
   /** 识别成功回调：code 为点位编码（调用方负责核对与提交） */
   onScan: (code: string, point: ScanPoint) => void | Promise<void>
+  /** 需求10：现场无码时为该点打印二维码标签（传入则名单行显示打印按钮） */
+  onPrintLabel?: (point: ScanPoint) => void
 }
 
 /**
@@ -43,7 +45,7 @@ interface IsoScanSheetProps {
  * - 核对语义：扫码结果必须命中候选名单（调用方兜底校验），扫到名单外编码视为错误二维码
  */
 export default function IsoScanSheet(props: IsoScanSheetProps) {
-  const { open, onClose, title, points, doneCodes = [], busy, hint, onScan } = props
+  const { open, onClose, title, points, doneCodes = [], busy, hint, onScan, onPrintLabel } = props
   const { toast } = useToast()
   const [phase, setPhase] = useState<'idle' | 'scanning'>('idle')
   const [manual, setManual] = useState('')
@@ -155,20 +157,39 @@ export default function IsoScanSheet(props: IsoScanSheetProps) {
               </p>
             ) : (
               remaining.map((p) => (
-                <button
+                <div
                   key={p.code}
-                  type="button"
-                  onClick={() => fireScan(p)}
-                  disabled={phase === 'scanning' || busy}
-                  className="flex w-full items-center gap-2 rounded-lg border border-stone-200 px-2.5 py-2 text-left transition-colors hover:border-teal-300 hover:bg-teal-50/50 disabled:opacity-60"
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-lg border border-stone-200 px-2.5 py-2 text-left transition-colors hover:border-teal-300 hover:bg-teal-50/50',
+                    (phase === 'scanning' || busy) && 'opacity-60',
+                  )}
                 >
-                  <MapPin className="w-3.5 h-3.5 shrink-0 text-stone-400" />
-                  <span className="text-[11px] font-medium text-stone-700">{p.name || p.code}</span>
-                  {p.name && p.code && <span className="font-mono text-[10px] text-stone-400">{p.code}</span>}
-                  <span className="ml-auto flex shrink-0 items-center text-[10px] text-teal-600">
-                    扫描 <ChevronRight className="inline w-3 h-3" />
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => fireScan(p)}
+                    disabled={phase === 'scanning' || busy}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <MapPin className="w-3.5 h-3.5 shrink-0 text-stone-400" />
+                    <span className="text-[11px] font-medium text-stone-700">{p.name || p.code}</span>
+                    {p.name && p.code && <span className="font-mono text-[10px] text-stone-400">{p.code}</span>}
+                    <span className="ml-auto flex shrink-0 items-center text-[10px] text-teal-600">
+                      扫描 <ChevronRight className="inline w-3 h-3" />
+                    </span>
+                  </button>
+                  {onPrintLabel && (
+                    <button
+                      type="button"
+                      onClick={() => onPrintLabel(p)}
+                      disabled={phase === 'scanning' || busy}
+                      title={`现场无码？打印 ${p.code} 二维码标签`}
+                      aria-label={`打印 ${p.code} 二维码标签`}
+                      className="shrink-0 rounded-md border border-stone-200 p-1.5 text-stone-400 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-40"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               ))
             )}
           </div>

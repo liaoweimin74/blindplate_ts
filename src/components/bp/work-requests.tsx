@@ -35,6 +35,7 @@ import {
   X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert, Megaphone, ScanLine,
 } from 'lucide-react'
 import IsoScanSheet from '@/components/bp/iso-scan-sheet'
+import QrLabelPrint, { type QrLabelPoint } from '@/components/bp/qr-label-print'
 import { CrewEditor, crewGaps, type WorkerCert } from '@/components/bp/crew'
 import { ISO_STATE_STYLE, IsoState } from '@/components/bp/pid-config'
 import { PidLocateDialog, toLocatePoints, type LocatePoint } from '@/components/bp/pid-locate'
@@ -2183,6 +2184,8 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
   const [point, setPoint] = useState('none')
   // 扫码加入（Task 96/96-b）：模拟扫隔离点标签二维码加入引用清单（复用共享 IsoScanSheet）
   const [scanOpen, setScanOpen] = useState(false)
+  // 需求10：现场无码时打印二维码标签（引用点位批量 / 扫码名单单点）
+  const [labelPrint, setLabelPrint] = useState<{ open: boolean; points: QrLabelPoint[] }>({ open: false, points: [] })
   const { toast } = useToast()
   const pipePoints = pipe === 'none' ? [] : pointMasters.filter((m) => String(m.pipelineId ?? '') === pipe)
   const addRef = () => {
@@ -2233,6 +2236,12 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
           title="现场扫描隔离点标签二维码加入引用清单（演示环境为模拟扫码）">
           <ScanLine className="w-3 h-3 mr-1 text-teal-600" />扫码加入
         </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+          disabled={refs.length === 0}
+          onClick={() => setLabelPrint({ open: true, points: refs.map((r) => ({ code: r.code, name: r.name })) })}
+          title="为引用点位批量打印二维码标签（现场无码时先打印张贴）">
+          <Printer className="w-3 h-3 mr-1 text-emerald-600" />打印标签
+        </Button>
         {aiAction && (
           <Button size="sm" variant="outline" className="h-8 text-xs border-violet-300 bg-white text-violet-700 hover:bg-violet-100" disabled={aiAction.busy}
             onClick={aiAction.onRun} title="AI 按作业位置/设备位号/介质/原因从隔离点主数据中推举本次应引用的点位（含设备进/出口相连管线上的隔离点，仅限主数据真值，附推荐理由）">
@@ -2246,7 +2255,7 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
       ) : (
         <p className="text-[11px] text-stone-400">未引用隔离点主数据</p>
       )}
-      {/* 扫码加入（模拟扫隔离点标签二维码；Task 96-b 布局：取景框恒悬浮+名单滚动） */}
+      {/* 扫码加入（模拟扫隔离点标签二维码；Task 96-b 布局：取景框恒悬浮+名单滚动）；需求10：现场无码可从名单行直接打印标签 */}
       <IsoScanSheet
         open={scanOpen}
         onClose={() => setScanOpen(false)}
@@ -2254,6 +2263,14 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
         points={pointMasters.map((m) => ({ code: m.code, name: m.name, location: m.location ?? null }))}
         doneCodes={refs.map((r) => r.code)}
         onScan={(code) => addRefByScan(code)}
+        onPrintLabel={(p) => setLabelPrint({ open: true, points: [p] })}
+      />
+      {/* 需求10：二维码标签打印预览（A4 3×8 网格，BPISO 协议与扫码一致） */}
+      <QrLabelPrint
+        open={labelPrint.open}
+        onClose={() => setLabelPrint({ open: false, points: [] })}
+        points={labelPrint.points}
+        title="隔离点二维码标签"
       />
     </div>
   )
