@@ -29,7 +29,7 @@ export default function QrLabelPrint({ open, onClose, points, title }: {
 
   useEffect(() => {
     if (!open) return
-    setPrintedAt(fmtDateTime(new Date()))
+    const ts = fmtDateTime(new Date())
     const map: Record<string, string> = {}
     Promise.all(
       points.map(async (p) => {
@@ -39,7 +39,10 @@ export default function QrLabelPrint({ open, onClose, points, title }: {
           map[p.code] = ''
         }
       }),
-    ).then(() => setQrs({ ...map }))
+    ).then(() => {
+      setQrs({ ...map })
+      setPrintedAt(ts)
+    })
   }, [open, points])
 
   // 打印时隐藏其余内容（与 ticket-print 同款可见性切换方案）
