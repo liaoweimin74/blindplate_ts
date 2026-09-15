@@ -9,7 +9,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, Link2, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
-  MousePointer2, Map as MapIcon, Move, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
+  MousePointer2, Map as MapIcon, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
   Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
 } from 'lucide-react'
 import { ModuleProps, entryActionEventName } from '@/lib/bp-types'
@@ -108,6 +108,7 @@ export interface PidShape {
 export interface SymbolPart {
   id: string
   type: PidShape['type']
+  stdId?: string // type='std' 部件：标准图例符号 ID（需求3：画布 std 实例「存为自定义图元」时展开携带，ShapeBody 递归渲染依赖）
   x: number
   y: number
   w: number
@@ -3044,11 +3045,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     })
   }
 
-  /** 属性面板「存为自定义图元」：以画布选中的图元为基础（自定义图元实例则展开为部件并居中） */
+  /** 属性面板/浮动工具条「存为自定义图元」：以画布选中的图元为基础（自定义图元实例展开为部件并居中；
+   *  需求3：std 标准图例实例携带 stdId 进入设计空间，否则编辑器渲染空白——这是「图元没复制进编辑页」的根因） */
   const enterEditorFromShape = (s: PidShape) => {
     clearPlacementStates()
+    const fitK = (bw: number, bh: number) => Math.min(1, (EDITOR_SIZE - 16) / Math.max(bw, bh, 1))
     if (s.type === 'symbol' && s.designW && s.designH && s.parts?.length) {
-      const k = Math.min(1, (EDITOR_SIZE - 16) / Math.max(s.designW, s.designH))
+      const k = fitK(s.designW, s.designH)
       const offX = Math.round((EDITOR_SIZE - s.designW * k) / 2)
       const offY = Math.round((EDITOR_SIZE - s.designH * k) / 2)
       setSymbolEditor({
@@ -3061,12 +3064,25 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       })
       return
     }
-    const k = Math.min(1, (EDITOR_SIZE - 16) / Math.max(s.w, s.h))
+    if (s.type === 'std' && s.stdId) {
+      // 标准图例实例：单部件携带 stdId 进入编辑器（ShapeBody 经 stdId 查表渲染，可拖拽/缩放/改配色后存为新图元）
+      const k = fitK(s.w, s.h)
+      const w = Math.max(12, Math.round(s.w * k))
+      const h = Math.max(10, Math.round(s.h * k))
+      setSymbolEditor({
+        mode: 'create', basedOn: s.label,
+        parts: [{ id: uid('p'), type: 'std', stdId: s.stdId, x: Math.round((EDITOR_SIZE - w) / 2), y: Math.round((EDITOR_SIZE - h) / 2), w, h, label: '', fill: s.fill, stroke: s.stroke }],
+      })
+      return
+    }
+    const k = fitK(s.w, s.h)
     const w = Math.max(12, Math.round(s.w * k))
     const h = Math.max(10, Math.round(s.h * k))
+    // 兑底：std 无 stdId / symbol 无 parts 的异常数据不能生成空白部件，降级为同尺寸矩形保留可视基础
+    const fallbackType = s.type === 'std' || s.type === 'symbol' ? 'rect' : s.type
     setSymbolEditor({
       mode: 'create', basedOn: s.label,
-      parts: [{ id: uid('p'), type: s.type, x: Math.round((EDITOR_SIZE - w) / 2), y: Math.round((EDITOR_SIZE - h) / 2), w, h, label: '', fill: s.fill, stroke: s.stroke }],
+      parts: [{ id: uid('p'), type: fallbackType, x: Math.round((EDITOR_SIZE - w) / 2), y: Math.round((EDITOR_SIZE - h) / 2), w, h, label: '', fill: s.fill, stroke: s.stroke }],
     })
   }
 
@@ -4378,7 +4394,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           </div>
         ) : (
           <div ref={canvasRowRef} className="flex items-stretch gap-3" style={canvasH > 0 ? { height: canvasH } : undefined}>
-            {/* 左侧图元库（编辑模式）：设备图元 + 基础图形两组 */}
+            {/* 左侧图元库（编辑模式）：内建图元 + 基础图形 + 自定义三页签 */}
             {mode === 'edit' && (
               <div className={cn('flex shrink-0 flex-col overflow-hidden rounded-lg border bg-white transition-[width] duration-200', libCollapsed ? 'w-9 items-center gap-2 py-2' : 'w-60')}>
                 {libCollapsed ? (
@@ -5023,14 +5039,6 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     >
                       <Link2 className="h-4 w-4" />
                     </button>
-                    <div className="mx-0.5 h-4 w-px bg-stone-200" />
-                    <span
-                      className="hidden select-none items-center gap-1 pr-1.5 text-[10px] text-stone-400 sm:flex"
-                      title="按住空白处拖拽平移画布 · 滚轮缩放 · 画布无边界，跑远了可用俯瞰图或重置找回 · 切换图后视图自动重置"
-                    >
-                      <Move className="h-3 w-3" />
-                      拖拽平移 · 滚轮缩放 · 画布无限大
-                    </span>
                   </div>
 
                   {/* 俯瞰图（工具栏开关控制）：整图缩略 + 图元/连线/隔离点简化轮廓 + 当前视口 amber 框，点击/拖拽快速定位（无限画布下远距离找回的主要手段） */}
@@ -5352,9 +5360,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         const stdHit = (sym: StdSymbol) =>
                           !q || sym.label.toLowerCase().includes(q) || sym.desc.toLowerCase().includes(q) || sym.id.toLowerCase().includes(q)
                         const libHit = (label: string) => !q || label.toLowerCase().includes(q)
-                        // 七个分组：设备图元/基础图形默认展开，标准图例五大类默认收起；搜索时自动展开有命中的组并隐藏空组
+                        // 六个分组：基础图形默认展开，标准图例五大类默认收起；搜索时自动展开有命中的组并隐藏空组
+                        // （需求4：废弃的「设备图元」分组已从更换对话框彻底移除，equip 定义仅保留供旧图渲染/AI 导入兼容）
                         const defs: { key: string; label: string; defaultOpen: boolean; cells: ReactNode }[] = [
-                          { key: 'equip', label: '设备图元', defaultOpen: true, cells: SHAPE_LIBRARY.filter((d) => d.group === 'equip' && libHit(d.label)).map(libCell) },
                           { key: 'basic', label: '基础图形', defaultOpen: true, cells: SHAPE_LIBRARY.filter((d) => d.group === 'basic' && d.type !== 'line' && libHit(d.label)).map(libCell) },
                           ...STD_MAJOR_ORDER.map((mj) => ({
                             key: `std-${mj}`,

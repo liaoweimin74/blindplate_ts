@@ -22,7 +22,7 @@ import {
   CANVAS_W, CANVAS_H, GRID_S, GRID_L, LINE, STROKE, ROSE, minimapBoundsOf,
   IsoState, ISO_STATE_KEYS, ISO_STATE_STYLE, PidContent, PidMark,
 } from './pid-config'
-import { MapPin, Crosshair, ZoomIn, ZoomOut, ImageOff, LocateFixed, Workflow, Layers, Move, Map as MapIcon, X } from 'lucide-react'
+import { MapPin, Crosshair, ZoomIn, ZoomOut, ImageOff, LocateFixed, Workflow, Layers, Map as MapIcon, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /** 可定位的隔离点（兼容方案隔离点 / 作业票点位两种来源） */
@@ -491,13 +491,6 @@ export function PidLocateDialog({
                     <Crosshair className="mr-0.5 h-3 w-3" />定位
                   </Button>
                 )}
-                <span
-                  className="hidden select-none items-center gap-1 pr-1.5 text-[10px] text-stone-400 sm:flex"
-                  title="按住画布拖拽平移 · 滚轮缩放 · 画布无边界，跑远了可用俯瞰图找回"
-                >
-                  <Move className="h-3 w-3" />
-                  拖拽平移 · 滚轮缩放
-                </span>
               </div>
 
               {/* 俯瞰图（开关控制，画布右下角）：整图缩略 + 图元/连线/隔离点简化轮廓 + 当前视口 amber 框 + 定位点 amber 光环，点击/拖拽快速定位 */}
