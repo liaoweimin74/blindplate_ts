@@ -2050,6 +2050,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
   }
 
   const doSubmit = async () => {
+    const pass = leak && restore && ledger // 修复：pass 原误留 submit 作用域，doSubmit 引用必 ReferenceError（验收提交必败）
     setSubmitting(true)
     try {
       const res = await apiPost<{ request?: { status: string } }>('/api/acceptances', {

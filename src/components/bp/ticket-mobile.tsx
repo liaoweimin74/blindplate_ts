@@ -1,7 +1,7 @@
 'use client'
 // 移动端开票 / 作业票审批（需求 16）：TicketNewPage 开作业票（含逐人验资）+ TicketReviewPage 作业票审批（票面详情+CrewWall 照片墙）
 // 复用 web 端同一套 API（/api/work-tickets 含 workerCerts 校验）与共享组件（CrewEditor/CrewWall），移动端呈现为底部抽屉/全屏页形态
-import { useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { apiGet, apiPost, fmtDateTime } from '@/lib/bp-api'
 import { TICKET_STATUS_MAP } from '@/lib/bp-types'
 import { cn } from '@/lib/utils'
@@ -17,6 +17,7 @@ import {
   ShieldCheck, UserCheck, XCircle, HardHat, FileText,
 } from 'lucide-react'
 import { CrewEditor, CrewWall, crewGaps, type WorkerCert } from '@/components/bp/crew'
+import { PidLocateDialog, type LocatePoint } from '@/components/bp/pid-locate'
 import type { ModuleProps } from '@/lib/bp-types'
 
 // ============ 共享小件 ============
@@ -51,6 +52,38 @@ interface MobileTicket {
 }
 interface MobileUser { id: string; name: string; role: string; active: boolean }
 
+// ============ 需求11扩展：开票/审批页隔离点 → PID 放大定位（与 field-ops 同款 Context 模式） ============
+const LocateCtx = createContext<(code: string, location?: string | null, preferUnitId?: number | null) => void>(() => {})
+
+/** 紧凑 PID 定位按钮（有编码才显示；嵌入 label/卡片时传 stop 防触发外层点击） */
+function TicketLocateBtn({ code, location, preferUnitId, stop }: { code?: string | null; location?: string | null; preferUnitId?: number | null; stop?: boolean }) {
+  const openLocate = useContext(LocateCtx)
+  if (!code) return null
+  return (
+    <button
+      type="button"
+      onClick={(e) => { if (stop) { e.stopPropagation(); e.preventDefault() } openLocate(code, location, preferUnitId ?? null) }}
+      title="在 PID 组态图中放大定位该隔离点"
+      aria-label={`在 PID 图中定位 ${code}`}
+      className="inline-flex shrink-0 items-center gap-0.5 rounded border border-teal-200 bg-white px-1.5 py-0.5 text-[10px] text-teal-700 transition-colors hover:bg-teal-50"
+    >
+      <MapPin className="h-3 w-3" />PID
+    </button>
+  )
+}
+
+/** 开票/审批页共用：定位弹窗状态 + 受控 PidLocateDialog（preferUnitId 让本装置图优先命中） */
+function useTicketLocate() {
+  const [locateState, setLocateState] = useState<{ points: LocatePoint[]; preferUnitId: number | null } | null>(null)
+  const openLocate = useCallback((code: string, location?: string | null, preferUnitId?: number | null) => {
+    setLocateState({ points: [{ key: code, code, name: null, masterPointId: null, masterCode: null, sub: location ?? null }], preferUnitId: preferUnitId ?? null })
+  }, [])
+  const dialog = (
+    <PidLocateDialog open={!!locateState} onClose={() => setLocateState(null)} points={locateState?.points ?? []} preferUnitId={locateState?.preferUnitId ?? null} />
+  )
+  return { openLocate, dialog }
+}
+
 // ============ ① 开作业票（移动端） ============
 export function TicketNewPage(props: { currentUser: ModuleProps['currentUser']; onBack: () => void; onDone: () => void }) {
   const { currentUser, onBack, onDone } = props
@@ -66,6 +99,8 @@ export function TicketNewPage(props: { currentUser: ModuleProps['currentUser']; 
   const [measures, setMeasures] = useState('1. 作业前确认工艺处置到位、压力已泄放\n2. 现场气体检测合格（LEL 0%）\n3. 佩戴防护面罩、防化手套\n4. 监护人全程在场，作业人员站位安全')
   const [crew, setCrew] = useState<WorkerCert[]>([])
   const [busy, setBusy] = useState(false)
+  // 需求11扩展：所选隔离点 → PID 放大定位（本装置图优先命中）
+  const locate = useTicketLocate()
 
   const loadReqs = async () => {
     setLoading(true)
@@ -90,7 +125,7 @@ export function TicketNewPage(props: { currentUser: ModuleProps['currentUser']; 
     setPointIds([])
     apiGet<{ isolationScheme?: { points: (MobileSchemePoint & { workRequestId: number })[] } | null; tickets?: { pointId: number | null; status: string }[] }>(`/api/work-requests/${reqId}`)
       .then((d) => {
-        const ticketed = new Set((d.tickets ?? []).filter((t) => t.status !== 'VOID' && t.status !== 'CLOSED').map((t) => t.pointId))
+        const ticketed = new Set((d.tickets ?? []).flatMap((t) => (t.status !== 'VOID' && t.status !== 'CLOSED' && t.pointId != null ? [t.pointId] : [])))
         setDetail({ points: d.isolationScheme?.points ?? [], ticketedPointIds: [...ticketed] })
         if (!d.isolationScheme?.points?.length) toast({ title: '该需求尚无隔离方案点位', description: '一票一板模式下必须先编制并审核隔离方案', variant: 'destructive' })
       })
@@ -125,6 +160,7 @@ export function TicketNewPage(props: { currentUser: ModuleProps['currentUser']; 
   }
 
   return (
+    <LocateCtx.Provider value={locate.openLocate}>
     <PageShell title="开作业票（一票一板）" sub="GB 30871：每个隔离点分别一张作业票，逐人验资" onBack={onBack}>
       {loading ? (
         <div className="flex items-center justify-center py-10 text-stone-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
@@ -167,6 +203,7 @@ export function TicketNewPage(props: { currentUser: ModuleProps['currentUser']; 
                     <p className="text-[11px] font-medium text-stone-700 truncate">{p.masterCode || p.code} · {p.location}</p>
                     <p className="text-[9px] text-stone-400">{p.action === 'ADD' ? '加装' : '拆除'}盲板 {p.blindType} {p.blindSpec}{ticketed ? ' · 已办票（一票一板）' : ''}</p>
                   </div>
+                  <TicketLocateBtn code={p.masterCode || p.code} location={p.location} preferUnitId={reqs.find((r) => r.id === reqId)?.unit?.id ?? null} stop />
                 </label>
               )
             }) : <p className="text-[11px] text-stone-400">该需求尚无隔离方案点位</p>}
@@ -211,6 +248,8 @@ export function TicketNewPage(props: { currentUser: ModuleProps['currentUser']; 
         </div>
       )}
     </PageShell>
+    {locate.dialog}
+    </LocateCtx.Provider>
   )
 }
 
@@ -223,6 +262,8 @@ export function TicketReviewPage(props: { currentUser: ModuleProps['currentUser'
   const [detail, setDetail] = useState<MobileTicket | null>(null)
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
+  // 需求11扩展：票面隔离点 → PID 放大定位（列表卡与详情页均可）
+  const locate = useTicketLocate()
 
   const load = async () => {
     setLoading(true)
@@ -252,11 +293,12 @@ export function TicketReviewPage(props: { currentUser: ModuleProps['currentUser'
 
   if (detail) {
     return (
+      <LocateCtx.Provider value={locate.openLocate}>
       <PageShell title={`作业票审批 · ${detail.code}`} sub={detail.workRequest ? `${detail.workRequest.code} ${detail.workRequest.title}` : undefined} onBack={() => setDetail(null)}>
         <div className="space-y-3">
           {/* 票面信息 */}
           <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
-            <p className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800"><FileText className="w-3.5 h-3.5" />票面信息{detail.pointCode && <span className="rounded border border-teal-300 bg-teal-50 px-1.5 py-0.5 font-mono text-teal-700">{detail.pointCode}</span>}</p>
+            <p className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800"><FileText className="w-3.5 h-3.5" />票面信息{detail.pointCode && <span className="rounded border border-teal-300 bg-teal-50 px-1.5 py-0.5 font-mono text-teal-700">{detail.pointCode}</span>}<span className="ml-auto"><TicketLocateBtn code={detail.pointCode} location={detail.pointLocation} /></span></p>
             <div className="space-y-1 text-[11px] text-stone-600">
               <p>隔离位置：{detail.pointLocation ?? '-'}</p>
               <p>盲板：{detail.blindType ?? '-'} {detail.blindSpec ?? ''}（{detail.action === 'ADD' ? '加装' : '拆除'}）</p>
@@ -291,10 +333,13 @@ export function TicketReviewPage(props: { currentUser: ModuleProps['currentUser'
           </div>
         </div>
       </PageShell>
+      {locate.dialog}
+      </LocateCtx.Provider>
     )
   }
 
   return (
+    <LocateCtx.Provider value={locate.openLocate}>
     <PageShell title="作业票审批" sub={`待批准 ${tickets.length} 张 · 批准后方可交底开工`} onBack={onBack}>
       {loading ? (
         <div className="flex items-center justify-center py-10 text-stone-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
@@ -306,8 +351,10 @@ export function TicketReviewPage(props: { currentUser: ModuleProps['currentUser'
         <div className="space-y-2">
           <button type="button" onClick={() => void load()} className="ml-auto flex items-center gap-1 text-[10px] text-stone-400"><RefreshCw className="w-3 h-3" />刷新</button>
           {tickets.map((t) => (
-            <button key={t.id} type="button" onClick={() => setDetail(t)}
-              className="w-full rounded-xl border border-amber-200 bg-white p-3 text-left transition-colors hover:border-amber-300 hover:bg-amber-50/40">
+            <div key={t.id} role="button" tabIndex={0}
+              onClick={() => setDetail(t)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetail(t) } }}
+              className="w-full cursor-pointer rounded-xl border border-amber-200 bg-white p-3 text-left transition-colors hover:border-amber-300 hover:bg-amber-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60">
               <div className="flex items-center gap-2">
                 <TicketIcon className="w-3.5 h-3.5 shrink-0 text-amber-600" />
                 <span className="font-mono text-xs font-semibold text-stone-800">{t.code}</span>
@@ -316,14 +363,17 @@ export function TicketReviewPage(props: { currentUser: ModuleProps['currentUser'
                 </Badge>
               </div>
               {t.workRequest && <p className="mt-1 truncate text-[10px] text-stone-500">{t.workRequest.title}</p>}
-              <p className="mt-0.5 text-[10px] text-stone-400">
-                {t.pointCode ? `[${t.pointCode}] ` : ''}{t.pointLocation ?? ''} · 作业人 {t.workers}
+              <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-stone-400">
+                <span className="min-w-0 flex-1">{t.pointCode ? `[${t.pointCode}] ` : ''}{t.pointLocation ?? ''} · 作业人 {t.workers}</span>
+                <TicketLocateBtn code={t.pointCode} location={t.pointLocation} stop />
               </p>
               <p className="mt-1 flex items-center gap-1 text-[10px] text-teal-600">查看票面与验资照片 <ChevronLeft className="w-3 h-3 rotate-180" /></p>
-            </button>
+            </div>
           ))}
         </div>
       )}
     </PageShell>
+    {locate.dialog}
+    </LocateCtx.Provider>
   )
 }
