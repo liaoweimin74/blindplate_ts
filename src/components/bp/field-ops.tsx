@@ -1,7 +1,7 @@
 'use client'
 // 现场作业（移动端）：勘察拍照 / 工艺处置现场确认 / 现场交底（拍照+录音+扫被交底人身份码签到+AI位置核对） / 作业拍照核对 / 验收拍照核对
 // 移动优先单列布局（真机全宽，桌面居中）；配色：AI=violet、teal 主操作、rose 不一致警告、amber 定位
-import { useCallback, useContext, useEffect, useMemo, useState, useRef } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useRef } from 'react'
 import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPatch, apiDelete, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import type { ModuleProps } from '@/lib/bp-types'
