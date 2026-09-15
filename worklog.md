@@ -2966,3 +2966,31 @@ Stage Summary:
 - Task 91 全部产物上云完成：download/石化厂盲板管理系统-产品介绍.pptx（10 页 16:9，python-pptx 校验通过）+ HTML 拆分/预处理/转换管线脚本已推送，远程 main=e5b0d59
 - 已知风险再次实证：.env 属平台重生成文件，沙箱重置会抹掉手工键（GITHUB_TOKEN）——下轮 push 若遇 token 缺失直接向用户索取新 PAT，勿重复全盘排查
 - 待用户定夺事项不变：T101/T-101 双编码合并、私有化 Qwen 网关地址/鉴权/模型名
+
+---
+Task ID: 97-R
+Agent: 主会话(Z.ai Code)
+Task: 代码丢失排查与 Task 92~97 全量重建（用户报「服务没有启动」+「之前修改的一些代码丢失了」+「盲板状态图例重新显示在画布右下角」）
+
+Work Log:
+- 【丢失排查】dev server 卡死（pid 1141 CPU 115%）kill 后双 fork 重启恢复；git 核验：本地 HEAD=a852378 与远程 main=e5b0d59 均为 Task 91 后快照，Task 92~97 代码从未进入任何 git 提交；git fsck dangling commits（最晚 2026-09-13）不含 iso-scan-sheet/CrewEditor 等产物 → 全部丢失，无备份可恢复
+- 【基线恢复】从巡检 cron 387258 payload 提取完整基线：Task 92（八项需求，内容不明）+ 93（隔离点标志主数据编辑）+ 94（DictCombobox）+ 95（字典实际值补录）+ 96（移动端扫码三需求+issue 聚合修复）+ 96-b（扫码 sheet 悬浮取景框）+ 97（用户需求 13~17 全部）
+- 【重建·需求14】盲板状态图例从底部条改为画布右下角浮动浮层（pid-config.tsx 查看模式 absolute right-2.5 bottom-2.5，minimapOpen 时自动上移 bottom-[10.5rem] 避让俯瞰图）；单行 flex-nowrap 无左侧标签占位、胶囊 px-1.5 py-0.5 text-[10px] 紧凑化、窄屏横向滚动；pid-locate.tsx 六态图例同步单行紧凑化；agent-browser 测量 offset 右/底各 11px、6 项 fit 单行 + 截图三张验证（含俯瞰图开启避让）
+- 【重建·需求13】PID 操作指引五分组重写（pid-config.tsx 5755+）：一、图元与放置（三页签/126 符号/搜索/分类折叠/放置模式/Esc 取消）二、选择与编辑（浮条五按钮/拖动/四角手柄/X-Y 精调/Shift+点击多选批量/Ctrl+D/Delete）三、连线与锚点（点哪连哪 Task 86-2 口径/端点拖拽改接/中点 × 删除）四、隔离点标注（从主数据或自由挂标/沿线拖动/绑定角标开关/查看模式档案抽屉）五、视图与整图工具（平移缩放重置/俯瞰/全屏/四个显示开关/自动布局/生成主数据/自动标注/AI 识别导入/保存）；kbd 键帽样式；对照界面 snapshot 逐按钮核实后撰写
+- 【重建·schema】WorkTicket+workerCerts String?（验资 JSON）；Briefing+crewPhotos String?（人证拍照台账）；db push + generate 成功
+- 【重建·需求15】①API POST /api/work-tickets 接收 workerCerts：姓名唯一/15-18 位身份证正则/身份证照片必传/workers 与验资名单一致性校验，不合格整单 409 零副作用；②共享组件 crew.tsx：WorkerCert 类型+parseWorkerCerts+certComplete+crewGaps+CrewEditor（逐人卡片：姓名/身份证号/身份证照片必传/资质照片多张，CertPhotoSlot 走 uploadFile+compressImage bizType=TICKET_CREW）+CrewWall 照片墙（存量票降级显示逗号名单）；③web 开票表单（work-requests.tsx）：workers 改由验资清单自动生成（两处永不脱节）、CrewEditor max-h-72 滚动、提交按钮三重 disabled gate；④审批中心（approval-center.tsx）：review 弹窗加票面信息区（点位/盲板/计划/监护/安全措施）+CrewWall 照片墙（max-h-[46vh] 滚动），ReviewTarget 携带完整票对象
+- 【重建·需求17】①sign API：body.crewPhoto 必传（无照 409 拒签）、crewPhotos JSON 台账（photoUrl/verifiedName/verifiedAt）、photoGap 机制（全员签到且拍照齐备才 CONFIRMED）、审计文案含「人证核验拍照」；②新建 POST /api/briefings/[id]/crew-photo 补拍端点（photoGap 兜底路径，补齐自动 CONFIRMED+通知+审计）；③QrSignSheet（field-ops.tsx）重构为固定区+滚动区：扫码 1.1s 后进入人证核验步（verifying 态：取景框显示该人名/现场照，滚动区核验面板=票面身份证照片比对基准[GET /api/work-tickets/[id] 拉 workerCerts]+现场拍照[canvas 生成带姓名/时间戳 JPEG data URL]）+「人证相符，签到」确认；photoGap 标题栏提示+名单「已留痕」徽标；④briefNewTodos 过滤修复：排除已有 CONFIRMED 交底的票（避免重复交底入口，与 execStartTodos 衔接）
+- 【重建·需求16】①新建 ticket-mobile.tsx：TicketNewPage（需求列表→点位多选[已办票禁选]→票面表单→CrewEditor→提交）+TicketReviewPage（待批票列表→票面详情+CrewWall→批准/驳回），复用 web 同款 API；②mobile-preview.tsx 任务 Tab 角色化快捷入口（开票=FOREMAN/ADMIN、审批=MANAGER/REVIEWER/ADMIN）+子页路由 mobilePage 状态；③开工扫码 gate（field-ops.tsx）：「确认开工」→IsoScanSheet 扫票面隔离点二维码→命中才调 start API，不符 toast 报错
+- 【重建·Task96/96-b】新建 iso-scan-sheet.tsx 共享扫码 sheet：固定区（标题+进度+取景框）shrink-0 + 滚动区（待处理名单+手动输入 BPISO|code）flex-1 min-h-0 bp-thin-scrollbar；openRef 防幽灵 onScan；三场景接线=勘察扫码加入（PointRefPicker 内「扫码加入」按钮）+开工扫码核对（field-ops）+开工确认（需求 16 同款）
+- 【issue 修复】POST /api/work-tickets/[id]/issue 签发后 workRequest 仍 CONFIRMED 时同步置 TICKET_ISSUED（与批量开票口径一致）
+- 【commit 保险】教训吸取：完成即 git commit 14d358d（12 文件 +1354 行），E2E 后再 commit 清理态
+- 【E2E·agent-browser】①审批中心票审批弹窗：票面信息+CrewWall 渲染（王铁柱材料齐全+身份证/资质双图、李工资质「未上传」占位）截图×2；②移动端审批页：入口→列表→详情照片墙（photoCount=3、两人名断言）截图；③移动端开票页：需求列表「可开票」→详情→CrewEditor 添加人员卡（姓名/身份证号输入框断言）+提交 disabled=true gate 断言；④勘察扫码加入全链路：QA97 注入需求→详情→扫码加入→IsoScanSheet 结构断言（待处理名单/手动输入）→点 IP-E101-01→toast「扫码加入成功/已加入引用点位列表」+chips 断言+截图；⑤测试数据注入→验证→删除还原闭环（WR-202609-QA97 已删、票 19 workerCerts 已还原 null、临时脚本已 rm）
+- 【lint】src/ 全量 0 errors 0 warnings（--fix 清理未使用 disable 注释）
+- 【已知未闭环】需求 17 QrSignSheet 人证核验步 UI+API 已实现并 lint 通过，但「briefing 注入→扫码→核验→拍照→签到→photoGap」全链路 E2E 未跑（时间考量）——下轮巡检优先补跑；Task 93/94/95（标志编辑/DictCombobox/字典补录）与 Task 92 八项需求本轮未重建
+
+Stage Summary:
+- 代码丢失事故闭环：确认 Task 92~97 全丢且无备份 → 依据 cron payload 基线重建用户明确需求的全部功能（需求 13~17 + Task 96/96-b + issue 修复），git commit 14d358d 兜底，本地 HEAD=14d358d 领先远程（待用户「push」）
+- 重建产物：iso-scan-sheet.tsx（共享扫码 sheet）、crew.tsx（CrewEditor/CrewWall）、ticket-mobile.tsx（移动端开票/审批两页）三个新文件 + work-requests/field-ops/approval-center/mobile-preview/pid-config/pid-locate 改造 + sign/crew-photo/work-tickets/issue 四个 API
+- E2E 已验证：PID 指引五分组、图例右下角浮动（含俯瞰避让）、CrewWall web/移动端双端、CrewEditor gate、勘察扫码加入全链路；未验证：QrSignSheet 人证核验全链路（下轮优先）
+- 【待用户确认】Task 92「八项需求」原始清单无法恢复（cron payload 仅记名称），请用户提供清单或授权按 QA 增强自主重建；Task 93/94/95 将由下轮巡检重建
+- 遗留决策项不变：T101/T-101 双编码、PRESSURE PN/MPa 口径、私有化 Qwen 网关
