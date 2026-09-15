@@ -3,7 +3,7 @@
 // 安全纪律：识别结果仅作草稿，逐项人工确认后才写库；位号为空的项无法导入；主数据按编码幂等（已存在自动复用）
 import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Copy, FileImage, Loader2, Sparkles, Upload, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Copy, FileImage, Loader2, Maximize2, Scan, Sparkles, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { apiGet, apiPost } from '@/lib/bp-api'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -85,6 +85,13 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
 
   const [step, setStep] = useState<'upload' | 'preview' | 'done'>('upload')
   const [imgData, setImgData] = useState<string | null>(null)
+  // 需求6：原图查看器——保留未压缩原始尺寸图（imgData 为 AI 用的 ≤1600px 压缩版）
+  const [origData, setOrigData] = useState<string | null>(null)
+  const [origNatural, setOrigNatural] = useState<{ w: number; h: number } | null>(null)
+  const [viewerOpen, setViewerOpen] = useState(false)
+  const [zoom, setZoom] = useState(1) // 1 = 原始尺寸 100%
+  const ZOOM_MIN = 0.2
+  const ZOOM_MAX = 4
   const [extracting, setExtracting] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [importing, setImporting] = useState(false)
@@ -114,6 +121,10 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
   const reset = useCallback(() => {
     setStep('upload')
     setImgData(null)
+    setOrigData(null)
+    setOrigNatural(null)
+    setViewerOpen(false)
+    setZoom(1)
     setExtracting(false)
     setImporting(false)
     setDiagName('')
@@ -143,6 +154,16 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
     }
     let dataUrl: string
     try {
+      // 需求6：原图未压缩保留（FileReader 直读），供原图查看器按原始尺寸展示
+      const origUrl = await new Promise<string>((res, rej) => {
+        const fr = new FileReader()
+        fr.onload = () => res(String(fr.result))
+        fr.onerror = () => rej(new Error('原图读取失败'))
+        fr.readAsDataURL(file)
+      })
+      setOrigData(origUrl)
+      setOrigNatural(null)
+      setZoom(1)
       dataUrl = await loadImageAsDataUrl(file)
     } catch (err) {
       toast({ title: '图片读取失败', description: (err as Error).message, variant: 'destructive' })
@@ -273,6 +294,7 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
     + pts.filter((x) => x.enabled && x.code.trim()).length
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => { if (!extracting && !importing) onOpenChange(v) }}>
       <DialogContent className="sm:max-w-[880px]">
         <DialogHeader>
@@ -337,10 +359,19 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
           <div className="space-y-3">
             <div className="flex gap-3">
               {imgData && (
-                <div className="relative hidden w-44 shrink-0 overflow-hidden rounded-md border bg-stone-50 sm:block">
+                <button
+                  type="button"
+                  onClick={() => setViewerOpen(true)}
+                  title="点击查看原始尺寸原图（支持放大缩小）"
+                  aria-label="查看原始尺寸原图"
+                  className="group relative hidden w-44 shrink-0 overflow-hidden rounded-md border bg-stone-50 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:block"
+                >
                   <Image src={imgData} alt="上传的 PID 图纸预览" width={176} height={132} className="h-auto w-full object-contain" unoptimized />
                   <span className="absolute bottom-1 right-1 rounded bg-stone-800/70 px-1 text-[10px] text-white">原图</span>
-                </div>
+                  <span className="absolute inset-0 hidden items-center justify-center bg-stone-900/40 text-white group-hover:flex">
+                    <ZoomIn className="h-5 w-5" />
+                  </span>
+                </button>
               )}
               <div className="grid flex-1 gap-2.5">
                 <div className="grid gap-1.5">
@@ -498,6 +529,93 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
         )}
       </DialogContent>
     </Dialog>
+
+    {/* 原图查看器（需求6）：跳出窗口按原始尺寸展示未压缩原图，支持放大缩小/1:1/适应窗口，容器滚动/拖动查看细节 */}
+    <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+      <DialogContent className="flex max-w-[94vw] flex-col gap-3 p-3 sm:p-4">
+        <DialogHeader className="space-y-0.5">
+          <DialogTitle className="flex items-center gap-2 text-base text-violet-800">
+            <FileImage className="h-4 w-4 text-violet-600" />
+            PID 图纸原图
+            {origNatural && (
+              <Badge variant="outline" className="font-mono text-[10px] font-normal text-stone-500">
+                {origNatural.w}×{origNatural.h}px
+              </Badge>
+            )}
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            默认按原始尺寸 100% 显示；滚动/拖动查看细节，可放大至 400% 或缩小至 20%
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-0.5 rounded-lg border bg-white px-1 py-1">
+          <button
+            type="button"
+            title="缩小"
+            aria-label="缩小原图"
+            className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={zoom <= ZOOM_MIN + 0.001}
+            onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z / 1.25))}
+          >
+            <ZoomOut className="h-4 w-4" />
+          </button>
+          <span className="w-12 select-none text-center font-mono text-xs font-medium text-stone-600">{Math.round(zoom * 100)}%</span>
+          <button
+            type="button"
+            title="放大"
+            aria-label="放大原图"
+            className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={zoom >= ZOOM_MAX - 0.001}
+            onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z * 1.25))}
+          >
+            <ZoomIn className="h-4 w-4" />
+          </button>
+          <div className="mx-0.5 h-4 w-px bg-stone-200" />
+          <button
+            type="button"
+            title="原始尺寸（100%）"
+            aria-label="重置为原始尺寸"
+            className={cn('rounded p-1.5 transition-colors', zoom === 1 ? 'bg-violet-50 text-violet-700' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-800')}
+            onClick={() => setZoom(1)}
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="适应窗口宽度"
+            aria-label="适应窗口宽度"
+            className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+            onClick={() => {
+              if (!origNatural) return
+              const containerW = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) * 0.86)
+              setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, containerW / origNatural.w)))
+            }}
+          >
+            <Scan className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="h-[66vh] overflow-auto rounded-md border bg-stone-200/60 bp-thin-scrollbar">
+          {origData ? (
+            <Image
+              src={origData}
+              alt="PID 图纸原图"
+              width={origNatural?.w ?? 1600}
+              height={origNatural?.h ?? 1200}
+              unoptimized
+              draggable={false}
+              className="block max-w-none select-none"
+              style={{ width: origNatural ? Math.round(origNatural.w * zoom) : 'auto', height: 'auto' }}
+              onLoad={(e) => {
+                const t = e.currentTarget
+                setOrigNatural((prev) => (prev ?? { w: t.naturalWidth, h: t.naturalHeight }))
+              }}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-xs text-stone-400">未加载原图</div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
 
