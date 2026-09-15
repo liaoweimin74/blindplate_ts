@@ -269,6 +269,7 @@ model WorkTicket {
   workers       String // 作业人员(逗号分隔)
   issuer        String // 签发人
   safetyMeasures String // 安全措施(多行)
+  workerCerts   String? // 作业人员验资 JSON：[{name, idCard, idPhotoId, idPhotoUrl, qualPhotoIds:number[], qualPhotoUrls:string[]}]（逐人身份证必传+资质证书照片）
   status        String    @default("DRAFT") // DRAFT待签发 PENDING_REVIEW待批准 APPROVED已批准 IN_PROGRESS作业中 FINISHED已完工 CLOSED已关闭 VOID已作废
   comment       String?
   approvedBy    String?
@@ -469,6 +470,7 @@ model Briefing {
   confirmedAt    DateTime?
   confirmRemark  String? // 确认备注
   aiCheckResult  String? // 最新 AI 位置核对结论快照 CONSISTENT | INCONSISTENT | UNCERTAIN
+  crewPhotos     String? // 人证核验拍照留痕 JSON：{[userId]:{photoUrl,verifiedName,verifiedAt,matched:boolean}}（签到时逐人现场拍照与票面身份证比对）
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

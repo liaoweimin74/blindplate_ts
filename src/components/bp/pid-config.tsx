@@ -5755,32 +5755,62 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                   ) : (
                     <div className="space-y-3">
                       <div className="text-xs font-medium text-stone-700">操作指引</div>
-                      <ol className="space-y-2.5 text-xs leading-relaxed text-stone-500">
-                        <li className="flex gap-2">
-                          <MousePointer2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
-                          <span><b className="text-stone-700">放置</b>：点击左侧图元（内建图元/基础图形/自定义），再点击画布位置</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <Copy className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
-                          <span><b className="text-stone-700">复制改造</b>：选中图元后点「以此图元为基础新建副本」或 Ctrl+D，在副本上修改</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <Move className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
-                          <span><b className="text-stone-700">拖拽</b>：按住图元或标注拖动调整位置</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <Expand className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
-                          <span><b className="text-stone-700">缩放</b>：选中图元后拖动四角手柄（圆形自动锁定正圆比例）</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <Spline className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
-                          <span><b className="text-stone-700">连线</b>：先点一个图元的边框环带，再点目标图元任意位置（自动吸附最近边），折线自动生成；点空白处取消</span>
-                        </li>
-                        <li className="flex gap-2">
-                          <Shapes className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
-                          <span><b className="text-stone-700">自定义图元</b>：工具条「新建图元」进入独立编辑器，用基础图形或已有图元组合，保存后进入「自定义」页签</span>
-                        </li>
-                      </ol>
+                      <div className="space-y-3 text-xs leading-relaxed text-stone-500">
+                        {/* 一、图元与放置 */}
+                        <section>
+                          <div className="mb-1 flex items-center gap-1.5 font-medium text-stone-700">
+                            <MousePointer2 className="h-3.5 w-3.5 shrink-0 text-teal-600" />一、图元与放置
+                          </div>
+                          <ul className="ml-5 list-disc space-y-1">
+                            <li>左侧图元库三个页签：<b className="text-stone-700">内建图元</b>（设备/管道与管件/阀门/仪表与控制/电气与安全 5 大类 126 符号）、<b className="text-stone-700">基础图形</b>、<b className="text-stone-700">自定义</b>；顶部搜索框按名称/说明过滤，点击分类标题展开折叠</li>
+                            <li>点击图元进入放置模式，画布上移动选位、再次点击落位，可连续放置；<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Esc</kbd> 取消放置</li>
+                          </ul>
+                        </section>
+                        {/* 二、选择与编辑 */}
+                        <section>
+                          <div className="mb-1 flex items-center gap-1.5 font-medium text-stone-700">
+                            <Copy className="h-3.5 w-3.5 shrink-0 text-teal-600" />二、选择与编辑
+                          </div>
+                          <ul className="ml-5 list-disc space-y-1">
+                            <li>点选图元，右上角浮出工具条：编辑源图元 · 以此图元为基础新建副本 · 存为自定义图元 · 替换成…（保留位置/尺寸/名称/连线）· 删除</li>
+                            <li>按住图元拖动移位；选中后拖动四角手柄缩放（圆形自动锁定正圆比例）；属性面板 X/Y 数值精调</li>
+                            <li>Shift/Ctrl/Cmd 点击可多选，多选后浮条支持批量替换与批量删除；<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Ctrl+D</kbd> 快速复制，<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Delete</kbd> 删除选中</li>
+                          </ul>
+                        </section>
+                        {/* 三、连线与锚点 */}
+                        <section>
+                          <div className="mb-1 flex items-center gap-1.5 font-medium text-stone-700">
+                            <Spline className="h-3.5 w-3.5 shrink-0 text-teal-600" />三、连线与锚点
+                          </div>
+                          <ul className="ml-5 list-disc space-y-1">
+                            <li>点一个图元的边框环带挂起连线，再点目标图元本体或边框任意位置完成——<b className="text-stone-700">点哪连哪</b>，锚点即点击位置在最近边上的落点，正交折线自动生成</li>
+                            <li>拖动/缩放图元后连线实时跟随；按住连线端点可拖拽改接到其他图元或锚点</li>
+                            <li>连线中点出现 ×，点击删除连线；<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Esc</kbd> 取消连线挂起</li>
+                          </ul>
+                        </section>
+                        {/* 四、隔离点标注 */}
+                        <section>
+                          <div className="mb-1 flex items-center gap-1.5 font-medium text-stone-700">
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-amber-600" />四、隔离点标注
+                          </div>
+                          <ul className="ml-5 list-disc space-y-1">
+                            <li>顶部工具栏「标注隔离点」：从主数据选择或自由挂标；标注自动吸附所在管线，拖动沿线调整位置（只能沿管线移动）</li>
+                            <li>底部工具条「绑定角标显示开关」控制图元绑定角标的显示/隐藏；查看模式点击标注可打开该点位盲板作业全生命周期档案</li>
+                          </ul>
+                        </section>
+                        {/* 五、视图与整图工具 */}
+                        <section>
+                          <div className="mb-1 flex items-center gap-1.5 font-medium text-stone-700">
+                            <Wand2 className="h-3.5 w-3.5 shrink-0 text-violet-600" />五、视图与整图工具
+                          </div>
+                          <ul className="ml-5 list-disc space-y-1">
+                            <li>导航：拖拽平移 · 滚轮缩放 · 底部 ±/重置视图（1:1 全景）；「俯瞰图」开关在画布右下角显示缩略导航，点击/拖拽快速移动视口；全屏 <kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Esc</kbd> 退出</li>
+                            <li>显示开关：设备名 / 管线名 / 标注文字 / 绑定角标，按需切换画面信息密度</li>
+                            <li>整图工具：自动布局（按管线连接自左向右分层排列）· 生成主数据（先预览变更计划，幂等生成设备/管线/隔离点并回填绑定）· 自动标注隔离点（拓扑推导+AI 语义分析）· AI 识别导入（上传图纸一键生成组态图）</li>
+                            <li>编辑后点「保存」持久化；工具条「新建图元」进入独立编辑器，用基础图形或已有图元组合，保存后进入「自定义」页签</li>
+                          </ul>
+                        </section>
+                      </div>
                       <div className="rounded-md bg-stone-50 p-2.5 text-[11px] leading-relaxed text-stone-400">
                         快捷键：Delete 删除选中 · Ctrl+D 复制图元 · Esc 取消放置/连线/选中 · 连线中点出现 × 可点击删除
                       </div>
@@ -5794,17 +5824,17 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           </div>
         )}
 
-        {/* 底部图例（查看模式） */}
+        {/* 底部图例（查看模式；单行紧凑：无左侧标签占位，窄屏横向滚动不换行） */}
         {mode === 'view' && activeId != null && !detailLoading && (
-          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-            <span className="mr-1 text-xs text-stone-400">隔离点状态图例：</span>
+          <div className="flex flex-nowrap items-center gap-x-2.5 gap-y-0 overflow-x-auto border-t pt-3 bp-thin-scrollbar" role="list" aria-label="隔离点状态图例">
             {ISO_STATE_KEYS.map((k) => {
               const st = ISO_STATE_STYLE[k]
               return (
                 <span
                   key={k}
+                  role="listitem"
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-full border border-stone-200 px-2.5 py-1 text-xs text-stone-600',
+                    'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-stone-200 px-2 py-0.5 text-[11px] text-stone-600',
                     st.legendBg,
                   )}
                 >

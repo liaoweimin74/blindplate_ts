@@ -603,14 +603,13 @@ export function PidLocateDialog({
           )}
         </div>
 
-        {/* 六态图例 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-stone-500">
-          <span className="font-medium text-stone-600">状态图例</span>
+        {/* 六态图例（单行紧凑：无左侧标签占位，窄屏横向滚动不换行） */}
+        <div className="flex flex-nowrap items-center gap-x-3 gap-y-0 overflow-x-auto bp-thin-scrollbar" role="list" aria-label="状态图例">
           {ISO_STATE_KEYS.map((k) => {
             const st = ISO_STATE_STYLE[k]
             return (
-              <span key={k} className="inline-flex items-center gap-1">
-                <span className="inline-block h-2.5 w-2.5 rotate-45 rounded-[2px] border" style={{ background: st.fill, borderColor: st.stroke }} />
+              <span key={k} role="listitem" className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+                <span className="inline-block h-2.5 w-2.5 shrink-0 rotate-45 rounded-[2px] border" style={{ background: st.fill, borderColor: st.stroke }} />
                 {st.legend}
               </span>
             )
