@@ -3103,3 +3103,19 @@ Stage Summary:
 - 需求 11 覆盖面扩展完成：现场端（field-ops 各页）+ 票务端（开票/审批移动双页）全部有隔离点数据的页面均可一键 PID 放大定位
 - 意外收获：修复作业验收提交必败 bug（doSubmit pass 作用域）——该路径上次 E2E 未覆盖，本轮 tsc 全量检查暴露
 - 遗留：验收页扫码 gate 全流程 E2E 仍建议下轮补跑；本地领先远程 1 提交（da7c8f0）待 push
+
+---
+Task ID: 99-PUSH
+Agent: 主会话(Z.ai Code)
+Task: 用户「push」——Task 99 提交上云（token 第 3 次被平台抹除→用户重供 PAT）
+
+Work Log:
+- 【token 缺失】push 前现取 .env GITHUB_TOKEN 为空（平台重置第 3 次抹除）；按纪律直接向用户索取，未重复全盘排查
+- 【新 PAT 入库】93 位 PAT 追加 .env（rg 确认 1 处），GET /user 鉴权 = liaoweimin74 本人
+- 【推送前核验】工作区发现 8 文件「修改」均为权限位变化（平台快照恢复 644→755，0 行内容差异），git checkout 还原干净；待推 3 提交（da7c8f0 功能 / bdd3249 worklog / d2513ec 平台快照 db）；敏感串扫描零命中
+- 【推送】33cb84b..d2513ec main -> main 成功（输出 sed 脱敏）；三方验证：fetch+update-ref 后本地 origin/main = 远程 ls-remote = d2513ec，status 零偏差
+- 【收尾】本节记录追加 worklog 即时 commit + 二次推送
+
+Stage Summary:
+- 远程 main = 本地 main（Task 99-PUSH 记录提交后以实际 HEAD 为准）：需求 11 扩展（票务双页 PID 定位）+ 验收 doSubmit 真 bug 修复全部上云
+- 运维事实固化：GITHUB_TOKEN 已 3 次被平台抹除——今后 push 遇缺失直接要 PAT
