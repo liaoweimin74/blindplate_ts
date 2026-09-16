@@ -42,17 +42,8 @@ const BLIND_BADGE_CLS: Record<string, string> = {
 /** 通盲状态查询结果模块级缓存（code → 结果），避免多页重复请求 */
 const blindStateCache = new Map<string, { state: string | null; label: string } | null>()
 
-/** 需求25：勘察现场人工核实的通盲状态三态（与需求20台账推导口径对齐；WORKING 为动态作业态不开放人工选） */
-type SurveyBlindState = 'THROUGH' | 'BLINDED' | 'OPEN'
-function isSurveyBlindState(v: unknown): v is SurveyBlindState {
-  return v === 'THROUGH' || v === 'BLINDED' || v === 'OPEN'
-}
-const SURVEY_BLIND_STATES: { value: SurveyBlindState; label: string; activeCls: string }[] = [
-  { value: 'THROUGH', label: '常通', activeCls: 'border-stone-500 bg-stone-600 text-white' },
-  { value: 'BLINDED', label: '盲断', activeCls: 'border-rose-500 bg-rose-600 text-white' },
-  { value: 'OPEN', label: '导通', activeCls: 'border-emerald-500 bg-emerald-600 text-white' },
-]
-const surveyBlindLabel = (v: SurveyBlindState) => SURVEY_BLIND_STATES.find((s) => s.value === v)?.label ?? v
+/** 需求25：候选隔离点列表直接展示台账推导的通盲状态（需求20 口径，只读展示；null = 常通） */
+const BLIND_STATE_LABEL: Record<string, string> = { BLINDED: '盲断', OPEN: '导通', WORKING: '作业中' }
 
 const LocateCtx = createContext<(code: string, location?: string | null) => void>(() => {})
 
@@ -1039,8 +1030,6 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
   const [req, setReq] = useState<(ReqLite & { survey?: { id: number; siteCondition: string; hazardPoints: string | null; suggestion: string | null; isSafe: boolean; pointRefs: string | null } }) | null>(null)
   const [masters, setMasters] = useState<MasterPoint[]>([])
   const [selected, setSelected] = useState<number[]>([])
-  // 需求25：每个选中隔离点的人工核实通盲状态（默认常通；随勘察 pointRefs 快照落库）
-  const [blindByPoint, setBlindByPoint] = useState<Record<number, SurveyBlindState>>({})
   const [photosByPoint, setPhotosByPoint] = useState<Record<string, AttachmentDto[]>>({})
   const [generalPhotos, setGeneralPhotos] = useState<AttachmentDto[]>([])
   const [condition, setCondition] = useState('')
@@ -1069,10 +1058,8 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
           setSuggestion(detail.survey.suggestion ?? '')
           setIsSafe(detail.survey.isSafe ?? true)
           try {
-            const refs = JSON.parse(detail.survey.pointRefs ?? '[]') as { masterPointId: number; blindState?: string }[]
+            const refs = JSON.parse(detail.survey.pointRefs ?? '[]') as { masterPointId: number }[]
             setSelected(refs.map((r) => r.masterPointId).filter(Boolean))
-            // 需求25：回显人工核实的通盲状态快照
-            setBlindByPoint(Object.fromEntries(refs.filter((r) => r.masterPointId && isSurveyBlindState(r.blindState)).map((r) => [r.masterPointId, r.blindState as SurveyBlindState])))
           } catch { /* 忽略 */ }
         }
       } finally {
@@ -1085,16 +1072,15 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
 
   const filteredMasters = useMemo(() => {
     const k = kw.trim().toLowerCase()
-    if (!k) return masters
-    return masters.filter((m) => `${m.code} ${m.name} ${m.location ?? ''}`.toLowerCase().includes(k))
-  }, [masters, kw])
+    const base = !k ? masters : masters.filter((m) => `${m.code} ${m.name} ${m.location ?? ''}`.toLowerCase().includes(k))
+    // 需求25：已选中的隔离点置顶展示（稳定排序，未选中的保持主数据原序）
+    return [...base].sort((a, b) => Number(selected.includes(b.id)) - Number(selected.includes(a.id)))
+  }, [masters, kw, selected])
   const selectedPoints = masters.filter((m) => selected.includes(m.id))
   const allPhotos = [...generalPhotos, ...Object.values(photosByPoint).flat()]
 
   const togglePoint = (id: number) => {
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
-    // 需求25：新选中点位初始化默认通盲状态（常通）
-    if (!selected.includes(id)) setBlindByPoint((prev) => ({ ...prev, [id]: prev[id] ?? 'THROUGH' }))
   }
 
   // AI 勘察要点：按介质/压力/位置定制生成现场核对清单（仅参考不落库）
@@ -1153,8 +1139,6 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
       const pointRefs = selectedPoints.map((m) => ({
         masterPointId: m.id, code: m.code, name: m.name,
         pipelineName: m.pipeline?.name ?? null,
-        blindState: blindByPoint[m.id] ?? ('THROUGH' as SurveyBlindState),
-        blindLabel: surveyBlindLabel(blindByPoint[m.id] ?? 'THROUGH'),
       }))
       await apiPost(`/api/work-requests/${reqId}/survey`, {
         surveyor: currentUser?.name ?? '现场勘察',
@@ -1167,7 +1151,7 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
         photoIds: allPhotos.map((p) => p.id),
         __actorId: currentUser?.id, __actorName: currentUser?.name,
       })
-      toast({ title: '勘察已提交', description: `需求进入 JSA 分析环节（照片 ${allPhotos.length} 张，${selectedPoints.length} 个隔离点通盲状态已核实，将作为交底核对基准）` })
+      toast({ title: '勘察已提交', description: `需求进入 JSA 分析环节（照片 ${allPhotos.length} 张，将作为交底核对基准）` })
       onBack()
     } catch (e) {
       toast({ variant: 'destructive', title: '勘察提交失败', description: e instanceof Error ? e.message : '请重试' })
@@ -1244,11 +1228,21 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
             <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
               {filteredMasters.map((m) => {
                 const on = selected.includes(m.id)
+                const st = m.blindState ?? null
+                const stLabel = st ? BLIND_STATE_LABEL[st] ?? st : '常通'
                 return (
                   <button key={m.id} type="button" onClick={() => togglePoint(m.id)} aria-pressed={on}
-                    className={cn('px-2 py-1 rounded-full text-[10px] border transition-colors max-w-full truncate',
+                    title={st ? `当前通盲状态：${m.blindLabel ?? stLabel}` : '当前无通盲作业，处于常通状态'}
+                    className={cn('flex items-center gap-1 px-2 py-1 rounded-full text-[10px] border transition-colors max-w-full',
                       on ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-stone-600 border-stone-200 hover:border-teal-300')}>
-                    {on && '✓ '}{m.code} {m.name}
+                    <span className="truncate">{on ? '✓ ' : ''}{m.code} {m.name}</span>
+                    {/* 需求25：候选列表直接展示台账推导的通盲状态（盲断 rose/导通 emerald/作业中 violet/常通 stone） */}
+                    <span className={cn('shrink-0 rounded-full border px-1 text-[9px] leading-4 font-medium',
+                      on ? 'border-white/40 bg-white/15 text-white'
+                        : st ? BLIND_BADGE_CLS[st] ?? 'border-stone-200 bg-stone-50 text-stone-500'
+                        : 'border-stone-200 bg-stone-50 text-stone-400')}>
+                      {stLabel}
+                    </span>
                   </button>
                 )
               })}
@@ -1256,46 +1250,14 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
             </div>
           </div>
 
-          {/* 按点位拍照（含需求25：现场通盲核实三态选择） */}
-          {selectedPoints.map((m) => {
-            const cur = blindByPoint[m.id] ?? 'THROUGH'
-            // 台账推导态映射到人工三态口径参与一致性判断（WORKING 作业中为动态态，不参与判断）
-            const derived = m.blindState === 'BLINDED' ? 'BLINDED' : m.blindState === 'OPEN' ? 'OPEN' : m.blindState === 'WORKING' ? null : 'THROUGH'
-            const mismatch = derived !== null && derived !== cur
-            return (
+          {/* 按点位拍照 */}
+          {selectedPoints.map((m) => (
             <div key={m.id} className="rounded-xl bg-white p-3 space-y-2">
-              <Label className="text-xs font-semibold text-stone-700 flex items-center gap-1 flex-wrap">
+              <Label className="text-xs font-semibold text-stone-700 flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5 text-teal-600" />{m.code} {m.name}
                 <span className="text-[10px] text-stone-400 font-normal">多角度拍照</span>
                 <SurveyLocateBtn code={m.code} location={m.location ?? null} />
               </Label>
-              {/* 需求25：现场通盲核实（快照随勘察记录落库，供方案编制参考；与台账推导不一致时 amber 提示复核） */}
-              <div className="rounded-lg border border-stone-100 bg-stone-50/60 px-2.5 py-2 space-y-1.5">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-[10px] font-medium text-stone-500">现场通盲核实</span>
-                  {m.blindLabel && (
-                    <span className={cn('text-[10px]', mismatch ? 'text-amber-600' : 'text-stone-400')} title="隔离点主数据台账推导的当前通盲状态">
-                      台账推导：{m.blindLabel}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5" role="radiogroup" aria-label={`隔离点 ${m.code} 现场通盲状态`}>
-                  {SURVEY_BLIND_STATES.map((s) => {
-                    const on = cur === s.value
-                    return (
-                      <button key={s.value} type="button" role="radio" aria-checked={on}
-                        onClick={() => setBlindByPoint((prev) => ({ ...prev, [m.id]: s.value }))}
-                        className={cn('flex-1 rounded-md border py-1.5 text-[11px] font-medium transition-colors',
-                          on ? s.activeCls : 'border-stone-200 bg-white text-stone-400 hover:border-stone-300 hover:text-stone-600')}>
-                        {s.label}
-                      </button>
-                    )
-                  })}
-                </div>
-                {mismatch && (
-                  <p className="text-[10px] leading-snug text-amber-600">⚠ 与台账推导不一致，请现场复核确认</p>
-                )}
-              </div>
               <PhotoPicker
                 photos={photosByPoint[m.code] ?? []}
                 onChange={(ps) => setPhotosByPoint((prev) => ({ ...prev, [m.code]: ps }))}
@@ -1304,8 +1266,7 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
                 compact
               />
             </div>
-            )
-          })}
+          ))}
 
           {/* 环境全貌 */}
           <div className="rounded-xl bg-white p-3 space-y-2">
