@@ -452,3 +452,20 @@ Stage Summary:
 - 需求闭环：WEB 端「作业任务→开作业票」与「作业需求」详情弹窗的每张作业票现在都可展开「票面明细」查看安全措施全文+逐人验资材料照片（身份证/资质，点击看原图）；task-mgmt 审批弹窗同步加照片墙——至此 WEB 端三处作业票场景（开票页签/审批弹窗/需求详情）+ 审批中心 + 移动端全部具备验资照片查看能力，体验统一
 - 复用 CrewWall 零新组件；后端零改动；教育固化：MultiEdit 失败先盘点再补剩余
 - 本地领先远程 1 提交（1c2fbf1）待用户「push」
+
+---
+Task ID: 112
+Agent: 主会话(Z.ai Code)
+Task: 用户报——「BP-202609-019的作业票批准以后，为什么在移动端预览界面无法确认开工？」
+
+Work Log:
+- 【根因】一票一板部分批准的场景缺陷：review API 聚合语义=全部生效票批准后工单才推进 TICKET_APPROVED（016 有 8 张票，用户批了 019/020 两张，工单仍 TICKET_ISSUED）；而移动端 field-ops 待交底区（briefNewTodos）与交底创建 API（briefings POST）均硬卡工单状态=TICKET_APPROVED → 已批准的票在移动端既无「去交底」入口、也无「待开工」入口（开工前提是交底 CONFIRMED）——链路在第一环就断，用户看到的正是「无法确认开工」
+- 【修复】两处放宽：①field-ops.tsx briefNewTodos 工单条件 ['TICKET_ISSUED','TICKET_APPROVED']（票级 APPROVED 已足够表达可交底）②briefings POST 门禁 in ['TICKET_ISSUED','TICKET_APPROVED','IN_PROGRESS']；开工 API 无需改动（本就纯票级校验：APPROVED + 交底 CONFIRMED + 移动端扫码强校验 + 管线占用/同管线互斥三重硬约束兜底）
+- 【E2E·agent-browser】移动端现场 Tab：**待交底区出现 BP-202609-019「去交底」卡（修复前不出现，根因直接证据）** → 交底表单渲染完整（要点预填/被交底人预选/拍照/录音）→ curl 创建交底（修复前该调用 400）→「待作业方确认」→ curl 确认（CONFIRMED）→ **「待开工（交底已确认）」区出现 019** → 确认开工 → 扫码 gate（取景框+待处理点位 IP-E103-01+手动输入）→ 核对 → **「扫码核对通过，已开工」+ 019 进「作业中（拍照核对）」区** ✅ 全链路打通
+- 【数据还原·零残留】开工副作用三处还原（ticket 26→APPROVED/startedAt null、workTask 20→PENDING/actualStart null、workRequest 33→TICKET_ISSUED）；QA 临时交底 2 条删除（id 17+误重发的 16——curl 响应结构 {briefing:{}} 解析失误导致重发一次）；审计流水按惯例保留；终态复核 wr=TICKET_ISSUED/ticket=APPROVED/交底 0 条 ✅
+- 【commit】49acf2e（2 文件 +6/-4，最小修复）；本地领先远程 4 提交待用户「push」
+
+Stage Summary:
+- 用户问题闭环：不是开工功能坏了，而是一票一板「部分票批准」的中间态被两端门禁卡死——已批准的票现在可以立即走 交底→确认→扫码开工，无需等其他 6 张票批准
+- 设计要点：票级流程（交底/开工）用票级状态门禁，工单聚合状态（TICKET_APPROVED=全批）只做展示/统计——两套状态解耦，各管各的
+- 巡检 cron 390107 在位（15 分钟 webDevReview）；tsc/eslint 零新增错误
