@@ -64,8 +64,8 @@ interface PointMaster {
   pipeline?: { id: number; code: string; name: string; medium?: string | null; pressure?: string | null } | null
 }
 
-/** 勘察/JSA 引用的隔离点位（pointRefs JSON 反序列化结构；reason 为 AI 推举理由，仅会话内参考不入读取端） */
-interface PointRef { masterPointId: number; code: string; name: string; pipelineName?: string | null; reason?: string }
+/** 勘察/JSA 引用的隔离点位（pointRefs JSON 反序列化结构；reason 为 AI 推举理由仅会话内参考；blindState 为移动端勘察现场核实的通盲状态快照，需求25） */
+interface PointRef { masterPointId: number; code: string; name: string; pipelineName?: string | null; blindState?: string | null; reason?: string }
 
 /** 管线占用冲突行（GET /api/pipeline-occupancy：同管线已有其他需求生效作业票） */
 interface PipelineConflict {
@@ -90,6 +90,7 @@ function parsePointRefs(raw?: string | null): PointRef[] {
         code: String(x.code),
         name: String(x.name ?? ''),
         pipelineName: typeof x.pipelineName === 'string' ? x.pipelineName : null,
+        blindState: typeof x.blindState === 'string' ? x.blindState : null,
       }))
   } catch { return [] }
 }
@@ -2140,6 +2141,15 @@ function useAiRefPoints(opts: {
   return { refBusy, genRefPoints }
 }
 
+/** 需求25：勘察核实通盲状态快照徽章（与 pipeline-master BLIND_STATE_CLS / field-ops BLIND_BADGE_CLS 同口径） */
+const POINT_BLIND_LABEL: Record<string, string> = { BLINDED: '盲断', OPEN: '导通', THROUGH: '常通', WORKING: '作业中' }
+const POINT_BLIND_CLS: Record<string, string> = {
+  BLINDED: 'border-rose-200 bg-rose-50 text-rose-700',
+  OPEN: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  THROUGH: 'border-stone-200 bg-stone-100 text-stone-600',
+  WORKING: 'border-violet-200 bg-violet-50 text-violet-700',
+}
+
 function PointRefChips({ refs, onRemove }: { refs: PointRef[]; onRemove?: (id: number) => void }) {
   if (!refs.length) return null
   return (
@@ -2150,6 +2160,12 @@ function PointRefChips({ refs, onRemove }: { refs: PointRef[]; onRemove?: (id: n
           <span className="font-mono">{ref.code}</span>
           {ref.name ? <span>{ref.name}</span> : null}
           {ref.pipelineName ? <span className="text-teal-500">·{ref.pipelineName}</span> : null}
+          {ref.blindState ? (
+            <span title={`勘察现场核实的通盲状态：${POINT_BLIND_LABEL[ref.blindState] ?? ref.blindState}`}
+              className={cn('shrink-0 rounded-full border px-1.5 text-[9px] font-medium leading-4', POINT_BLIND_CLS[ref.blindState] ?? 'border-stone-200 bg-stone-50 text-stone-500')}>
+              {POINT_BLIND_LABEL[ref.blindState] ?? ref.blindState}
+            </span>
+          ) : null}
           {onRemove && (
             <button type="button" className="ml-0.5 text-teal-400 hover:text-rose-600" title="移除" onClick={() => onRemove(ref.masterPointId)}>
               <X className="h-3 w-3" />
@@ -2180,7 +2196,7 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
     const m = pointMasters.find((x) => String(x.id) === point)
     if (!m) return
     if (refs.some((r) => r.masterPointId === m.id)) { setPoint('none'); return }
-    onChange([...refs, { masterPointId: m.id, code: m.code, name: m.name, pipelineName: m.pipelineName ?? m.pipeline?.name ?? null }])
+    onChange([...refs, { masterPointId: m.id, code: m.code, name: m.name, pipelineName: m.pipelineName ?? m.pipeline?.name ?? null, blindState: 'THROUGH' }])
     setPoint('none')
   }
   return (
