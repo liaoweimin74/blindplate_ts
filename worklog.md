@@ -347,3 +347,20 @@ Stage Summary:
 - 需求25 完成：移动端勘察选隔离点时现场核实通盲状态（三态 radiogroup + 台账推导参考 + 不一致复核警示），快照随 pointRefs 落库、WEB 端勘察记录/JSA 引用处徽章回读，桌面编辑不丢移动端数据
 - 架构决策：通盲核实走「勘察快照」而非改 IsoPointMaster 落库——台账真实通盲仍由需求20 动态推导唯一可信源，人工核实是时点快照供方案编制参考，二者不一致时 UI 主动提示复核形成闭环
 - E2E 新经验：React 受控 file input 需 eval+DataTransfer 注入（agent-browser upload 无效）；移动端预览侧边导航用 eval 点全部同名按钮最稳（closest('aside') 会失配）
+
+---
+Task ID: 107-b
+Agent: 主会话(Z.ai Code)
+Task: 用户纠正需求25理解——候选隔离点列表中就应有通盲状态 + 已选隔离点置顶
+
+Work Log:
+- 【纠正】用户明确：不是在拍照卡做人工核实三态（Task 107 误解产物），而是①候选隔离点列表直接展示通盲状态 ②已选中的隔离点在候选列表最前面显示
+- 【重做 field-ops.tsx】①候选 chip 改 flex 结构：文本 truncate + 内嵌通盲徽章（st = masters.blindState 台账推导只读展示，复用 BLIND_BADGE_CLS：盲断 rose/导通 emerald/作业中 violet，null→常通 stone 灰；选中态徽章白底半透明反白；title 提示完整推导 label）②filteredMasters useMemo 加已选置顶排序（稳定 sort，未选中保持主数据原序，依赖加 selected，与搜索过滤叠加生效）③撤除拍照卡「现场通盲核实」区块、blindByPoint state、回显、togglePoint 初始化、提交 blindState/blindLabel 写入、SURVEY_BLIND_STATES/surveyBlindLabel/isSurveyBlindState 常量，提交链路恢复为勘察 4 字段原形态
+- 【保留】work-requests.tsx 的 parsePointRefs blindState 解析与 PointRefChips 徽章渲染（通用管道向后兼容，未来如恢复人工核实或 AI 填状态可直接复用）；MasterPoint 接口的 blindState/blindLabel 字段（候选徽章数据源）
+- 【QA·agent-browser】勘察页候选列表徽章混合展示 ✅（IP-E101-01/02 盲断、IP-E101-02-2 常通、IP-E106-01 导通）→ 选 IP-E101-04：aria-pressed=true 且排第一 ✅ → 再选 IP-E105-01：两选均置顶（E101-04、E105-01 排前二）✅ → 拍照卡无核实器残留 ✅；tsc/eslint 零错误、dev.log 无运行时错误
+- 【踩坑】rg 快照验证置顶时 pattern 'button "IP-' 匹配不到带 ✓ 前缀的 accessibility name（'✓ IP-E101-04…'），一度误判未生效——改用 eval 读 DOM aria-pressed + slice(0,3) 验证实际排序
+- 【commit】9e351de（+24/-63，净删除误解产物）；本地领先远程 11 提交待用户「push」
+
+Stage Summary:
+- 需求25 按用户意图重做完成：候选隔离点列表每个 chip 直接展示台账推导通盲状态（需求20 数据，只读）+ 已选隔离点置顶；无落库变更、无后端改动，纯前端展示/排序增强
+- Task 107 的人工核实三态已完整回退（UI/state/提交链路），保留 WEB 端通用徽章管道
