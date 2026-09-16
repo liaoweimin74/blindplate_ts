@@ -311,3 +311,20 @@ Work Log:
 Stage Summary:
 - 脱苯装置主数据归位闭环：8 台设备 + 29 条管线全部从 Flying Team 迁入，设备识别→管线展开→候选构造→受限推举全链路打通，WR-202609-016「T102塔所有连接管线」推举从 1 点位恢复到 6 点位
 - 数据修正全程用 id 精确定位（设备 8 台/管线 29 条），Flying Team 未误伤；T-201(unitId=null) 仍未归属，留待用户定夺
+
+---
+Task ID: 106
+Agent: 主会话(Z.ai Code)
+Task: 用户需求24——PID组态中选择管线编辑主数据方式对齐设备（可修改管线名称）
+
+Work Log:
+- 【侦察】pid-config 属性面板三选中态：设备（绑定设备+eqForm 内联编辑 位号/名称/类型/装置）、连线（绑定管线+只读信息卡，无主数据编辑）、隔离点标注（mpForm）；后端 PUT /api/pipelines/[id] 已支持 code/name/unitId 部分更新（code 唯一性 409 校验），纯前端改造
+- 【实现】PipeOption 类型扩展 unitId（GET /api/pipelines 列表本身返回，loadBindOptions 映射带上，免二次详情请求——与设备拉详情补 unitId 的差异点）；新增 pipeEditOpen/pipeForm/pipeSaving state + openPipeEdit/savePipeMaster（apiPut → toast → loadBindOptions 刷新）；选中变化 useEffect 收起表单；连线信息卡改 flex 结构加「编辑主数据」按钮（teal，对齐设备 emerald 按钮范式）+ 内联表单（编码 mono/名称/所属装置 select）+ 落库同步说明文案
+- 【QA·agent-browser】登录（演示账号 admin + 验证码 RGRW，验证码一次一换踩坑一次）→ 台账管理→PID 组态→脱苯装置图编辑模式 → 点 E103-T102 管线徽章选中连线 → 绑定管线下拉选 E103-T102(id=45) → 信息卡+编辑按钮在位 → 展开表单预填正确（编码/名称/装置 12）→ 改名「E103至T102管线」保存 → GET /api/pipelines 落库验证 name/unitId=12 ✅ → UI 信息卡同步 ✅ → 还原名称 E103-T102 ✅ → 离开编辑器未保存图（连线绑定草稿丢弃，主数据改动已精确还原）
+- 【验证】tsc src/ 零错误；eslint pid-config 零错误；dev.log 无运行时错误
+- 【commit】feat(pid) 1 文件 +88/-5；本地领先远程 8 提交待用户「push」
+
+Stage Summary:
+- 需求24 完成：PID 组态连线属性面板现支持就地编辑管线主数据（编码/名称/所属装置），交互与设备编辑完全对齐（按钮位置/表单结构/保存刷新链路一致），管线名称修改即时落库并同步全站引用
+- MultiEdit 非原子性踩坑：部分成功后重复编辑报「did not appear verbatim」——后续大文件多编辑应先验证每处 old_str 唯一性与相邻性
+- QA 数据零残留：管线名称已还原、图编辑未保存、验证码会话一次性
