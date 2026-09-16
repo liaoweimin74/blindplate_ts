@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { auditFlowDetail, extractActor, jsonError, logAudit, parseId, readBody, resolveActor } from '@/lib/bp-server-utils'
 import { findPointPipelineConflicts, findRequestPipelineConflicts, findSamePipelineRunningTicket, formatPipelineConflictMessage } from '@/lib/bp-pipeline-occupancy'
-import { isScanReject, verifyPointScan } from '@/lib/bp-scan-verify'
+import { isMobileClient, isScanReject, verifyPointScan } from '@/lib/bp-scan-verify'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,18 +70,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // 提取操作人（body 可为空：无 __actor 时回落任务负责人快照）
     const body = await readBody(req)
     const extracted = extractActor(body)
-    // 安全硬约束⓪：扫码核对强校验（服务端比对票面隔离点编码，失败留痕并拒绝）
-    const scan = await verifyPointScan({
-      expected: ticket.pointCode,
-      scanned: body.scannedPointCode,
-      actorId: extracted.actorId,
-      actorName: extracted.actorName,
-      entity: 'WORK_TICKET',
-      entityId: tid,
-      entityCode: ticket.code,
-      scene: '开工',
-    })
-    if (isScanReject(scan)) return scan
+    // 安全硬约束⓪：扫码核对强校验（需求23：移动端专属环节——仅对携带 X-Client: mobile 的请求强制比对；桌面端免扫码）
+    if (isMobileClient(req)) {
+      const scan = await verifyPointScan({
+        expected: ticket.pointCode,
+        scanned: body.scannedPointCode,
+        actorId: extracted.actorId,
+        actorName: extracted.actorName,
+        entity: 'WORK_TICKET',
+        entityId: tid,
+        entityCode: ticket.code,
+        scene: '开工',
+      })
+      if (isScanReject(scan)) return scan
+    }
     const now = new Date()
     const updated = await db.workTicket.update({
       where: { id: tid },

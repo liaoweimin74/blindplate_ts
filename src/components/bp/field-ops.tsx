@@ -30,16 +30,61 @@ import {
 } from 'lucide-react'
 
 // ============ 需求11：隔离点 → PID 放大定位（Context 免 prop 钻透，各页可一键查看） ============
+/** 移动端来源标记（需求23）：扫码核对强校验仅对携带此头的请求生效，桌面端免扫码 */
+const MOBILE_HEADERS = { 'X-Client': 'mobile' } as const
+
+/** 通盲状态徽章配色（与桌面端 pipeline-master BLIND_STATE_CLS 口径一致） */
+const BLIND_BADGE_CLS: Record<string, string> = {
+  BLINDED: 'border-rose-200 bg-rose-50 text-rose-700',
+  OPEN: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  WORKING: 'border-violet-200 bg-violet-50 text-violet-700',
+}
+/** 通盲状态查询结果模块级缓存（code → 结果），避免多页重复请求 */
+const blindStateCache = new Map<string, { state: string | null; label: string } | null>()
+
 const LocateCtx = createContext<(code: string, location?: string | null) => void>(() => {})
 
-/** 隔离点信息行 + 「PID」定位按钮（有编码才可定位） */
+/** 隔离点信息行 + 「PID」定位按钮 + 通盲状态徽章（需求22：查看隔离点信息时同步展示当前通盲状态） */
 function PointLocateRow({ code, location }: { code?: string | null; location?: string | null }) {
   const openLocate = useContext(LocateCtx)
+  // 通盲状态：按编码精确查询主数据（模块级缓存防重复请求；辅助信息，失败静默不阻塞主流程）。
+  // cache 命中走 useMemo 同步展示（避免 effect 内同步 setState 触发级联渲染），未命中异步拉取后 setFetched
+  const [fetched, setFetched] = useState<{ code: string; val: { state: string | null; label: string } | null } | null>(null)
+  const blind = useMemo(() => {
+    if (!code) return undefined
+    if (blindStateCache.has(code)) return blindStateCache.get(code) ?? null
+    return fetched && fetched.code === code ? fetched.val : undefined
+  }, [code, fetched])
+  useEffect(() => {
+    if (!code || blindStateCache.has(code)) return
+    let alive = true
+    void (async () => {
+      try {
+        const res = await apiGet<{ list?: { code: string; blindState: string | null; blindLabel: string }[] }>(
+          `/api/iso-point-masters?keyword=${encodeURIComponent(code)}`
+        )
+        const hit = (res.list ?? []).find((m) => m.code === code) ?? null
+        const val = hit ? { state: hit.blindState, label: hit.blindLabel } : null
+        blindStateCache.set(code, val)
+        if (alive) setFetched({ code, val })
+      } catch { /* 辅助信息静默失败 */ }
+    })()
+    return () => { alive = false }
+  }, [code])
   if (!code && !location) return null
   return (
     <div className="flex items-center gap-2 text-[11px] leading-relaxed">
       <span className="shrink-0 text-stone-400">隔离点</span>
       <span className="break-all text-stone-700">{code ? `[${code}] ` : ''}{location ?? ''}</span>
+      {blind && (
+        <span
+          title={blind.state ? `当前通盲状态：${blind.label}` : '当前无通盲作业，处于常通状态'}
+          className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-medium',
+            blind.state ? BLIND_BADGE_CLS[blind.state] ?? 'border-stone-200 bg-stone-50 text-stone-600' : 'border-stone-200 bg-stone-50 text-stone-500')}
+        >
+          {blind.state ? blind.label : '常通'}
+        </span>
+      )}
       {code && (
         <button
           type="button"
@@ -197,7 +242,8 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
   const startTicketConfirmed = async (ticket: TicketLite, scannedPointCode?: string) => {
     try {
       // 后端扫码强校验：提交扫描得到的核对编码，服务端比对票面隔离点编码（不匹配 403）
-      await apiPost(`/api/work-tickets/${ticket.id}/start`, { __actorId: currentUser?.id, __actorName: currentUser?.name, scannedPointCode: scannedPointCode ?? ticket.pointCode ?? '' })
+      // X-Client: mobile 标记移动端来源——扫码核对为移动端专属环节（需求23），桌面端免扫码
+      await apiPost(`/api/work-tickets/${ticket.id}/start`, { __actorId: currentUser?.id, __actorName: currentUser?.name, scannedPointCode: scannedPointCode ?? ticket.pointCode ?? '' }, MOBILE_HEADERS)
       toast({ title: '扫码核对通过，已开工', description: `作业票 ${ticket.code} 进入作业中——请先拍摄作业位置照片并完成 AI 核对` })
       await refresh()
     } catch (e) {
@@ -990,6 +1036,9 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
   const [kw, setKw] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
+  // AI 勘察辅助（需求22a，对齐 WEB 端三能力）：要点清单 / 记录起草 / 推举点位
+  const [aiBusy, setAiBusy] = useState<'checklist' | 'draft' | 'points' | null>(null)
+  const [checklist, setChecklist] = useState<string[] | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -1028,6 +1077,54 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
 
   const togglePoint = (id: number) => {
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  }
+
+  // AI 勘察要点：按介质/压力/位置定制生成现场核对清单（仅参考不落库）
+  const genChecklist = async () => {
+    if (aiBusy) return
+    setAiBusy('checklist')
+    try {
+      const res = await apiPost<{ checklist: string[] }>('/api/ai/survey/checklist', { workRequestId: reqId })
+      setChecklist(res.checklist)
+      toast({ title: 'AI 勘察要点已生成', description: `${res.checklist.length} 条要点供现场逐项核对，请结合实际确认` })
+    } catch (e) {
+      toast({ title: 'AI 勘察要点生成失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' })
+    } finally { setAiBusy(null) }
+  }
+  // AI 起草勘察记录：以已随手记的条件为素材预填表单（不代填「具备作业条件」判断）
+  const genDraft = async () => {
+    if (aiBusy) return
+    setAiBusy('draft')
+    try {
+      const res = await apiPost<{ draft: { siteCondition: string; pipelineVerify: string; hazardPoints: string; suggestion: string } }>(
+        '/api/ai/draft/survey', { workRequestId: reqId, notes: condition }
+      )
+      setCondition(res.draft.siteCondition || condition)
+      setHazards(res.draft.hazardPoints || hazards)
+      setSuggestion(res.draft.suggestion || suggestion)
+      toast({ title: 'AI 草稿已填入表单', description: '请逐项核对修改后提交（AI 不代填「具备作业条件」判断）' })
+    } catch (e) {
+      toast({ title: 'AI 草稿生成失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' })
+    } finally { setAiBusy(null) }
+  }
+  // AI 推举隔离点位：受限选点（后端 masterCode 校验防幻觉），合并去重预填
+  const genPoints = async () => {
+    if (aiBusy) return
+    setAiBusy('points')
+    try {
+      const res = await apiPost<{ refs: { masterPointId: number; code: string; reason?: string }[] }>(
+        '/api/ai/survey/points', { workRequestId: reqId, siteCondition: condition, hazardPoints: hazards }
+      )
+      const fresh = res.refs.filter((r) => !selected.includes(r.masterPointId))
+      if (!fresh.length) { toast({ title: 'AI 推荐点位均已在列表中', description: '未新增选中点位' }); return }
+      setSelected((prev) => [...prev, ...fresh.map((r) => r.masterPointId)])
+      toast({
+        title: `AI 推举 ${fresh.length} 个隔离点位已勾选`,
+        description: fresh.map((r) => `${r.code}${r.reason ? `（${r.reason}）` : ''}`).join('；').slice(0, 120),
+      })
+    } catch (e) {
+      toast({ title: 'AI 推举点位失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' })
+    } finally { setAiBusy(null) }
   }
 
   const submit = async () => {
@@ -1070,6 +1167,48 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
             <InfoRow label="压力" value={req.pressure} />
             <InfoRow label="温度" value={req.temperature} />
             {req.survey && <p className="text-[10px] text-teal-600 bg-teal-50 border border-teal-100 rounded px-1.5 py-0.5 inline-block">已有勘察记录，本次提交将更新</p>}
+          </div>
+
+          {/* AI 勘察辅助（需求22a）：violet AI 能力区，对齐 WEB 端三能力 */}
+          <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+              <span className="text-[11px] font-medium text-violet-800 flex-1">AI 勘察辅助：要点清单 / 记录起草 / 推举点位</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <Button type="button" variant="outline" className="h-8 text-[11px] px-1 border-violet-300 bg-white text-violet-700 hover:bg-violet-100" disabled={aiBusy !== null}
+                onClick={() => void genChecklist()} title="按介质/压力/位置定制生成现场勘察要点清单">
+                {aiBusy === 'checklist' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ListChecks className="w-3.5 h-3.5" />}
+                <span className="ml-0.5">{aiBusy === 'checklist' ? '生成中' : '勘察要点'}</span>
+              </Button>
+              <Button type="button" variant="outline" className="h-8 text-[11px] px-1 border-violet-300 bg-white text-violet-700 hover:bg-violet-100" disabled={aiBusy !== null}
+                onClick={() => void genDraft()} title="基于作业信息起草勘察记录，已随手记的条件将作为素材">
+                {aiBusy === 'draft' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                <span className="ml-0.5">{aiBusy === 'draft' ? '起草中' : '起草记录'}</span>
+              </Button>
+              <Button type="button" variant="outline" className="h-8 text-[11px] px-1 border-violet-300 bg-white text-violet-700 hover:bg-violet-100" disabled={aiBusy !== null}
+                onClick={() => void genPoints()} title="AI 推举本作业相关隔离点位（受限选点防幻觉）">
+                {aiBusy === 'points' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+                <span className="ml-0.5">{aiBusy === 'points' ? '推举中' : '推举点位'}</span>
+              </Button>
+            </div>
+            {checklist && (
+              <div className="rounded-lg border border-violet-200 bg-white px-2.5 py-2 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-violet-800">AI 勘察要点清单（逐项核对参考）</span>
+                  <button type="button" className="text-stone-300 hover:text-rose-500" title="收起要点清单" aria-label="收起要点清单" onClick={() => setChecklist(null)}><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <ul className="space-y-0.5">
+                  {checklist.map((c, i) => (
+                    <li key={i} className="flex gap-1.5 text-[11px] text-stone-700 leading-relaxed">
+                      <span className="font-mono text-violet-400 shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                      <span>{c}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[10px] text-stone-400">要点由 AI 基于作业信息生成，仅供现场核对参考，不替代现场实际确认</p>
+              </div>
+            )}
           </div>
 
           {/* 隔离点位选择 */}
@@ -1892,8 +2031,8 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
   const finishConfirmed = async (scannedPointCode?: string) => {
     setFinishing(true)
     try {
-      // 后端扫码强校验：提交扫描得到的核对编码，服务端比对票面隔离点编码（不匹配 403）
-      await apiPost(`/api/work-tickets/${ticketId}/finish`, { __actorId: currentUser?.id, __actorName: currentUser?.name, scannedPointCode: scannedPointCode ?? ticket?.pointCode ?? '' })
+      // 后端扫码强校验：提交扫描得到的核对编码，服务端比对票面隔离点编码（不匹配 403）；X-Client: mobile 标记移动端来源（需求23）
+      await apiPost(`/api/work-tickets/${ticketId}/finish`, { __actorId: currentUser?.id, __actorName: currentUser?.name, scannedPointCode: scannedPointCode ?? ticket?.pointCode ?? '' }, MOBILE_HEADERS)
       toast({ title: '作业已完工', description: '等待作业验收（验收将再次拍照 AI 核对）' })
       onBack()
     } catch (e) {
@@ -2054,7 +2193,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
     const pass = leak && restore && ledger // 修复：pass 原误留 submit 作用域，doSubmit 引用必 ReferenceError（验收提交必败）
     setSubmitting(true)
     try {
-      // 后端扫码强校验：提交扫描得到的核对编码，服务端比对需求生效票隔离点编码（不匹配 403）
+      // 后端扫码强校验：提交扫描得到的核对编码，服务端比对需求生效票隔离点编码（不匹配 403）；X-Client: mobile 标记移动端来源（需求23）
       const res = await apiPost<{ request?: { status: string } }>('/api/acceptances', {
         workRequestId: reqId,
         acceptor: currentUser?.name ?? '验收人',
@@ -2067,7 +2206,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
         photoIds: photos.map((p) => p.id),
         scannedPointCode: scannedPointCode ?? latestTicket?.pointCode ?? '',
         __actorId: currentUser?.id, __actorName: currentUser?.name,
-      })
+      }, MOBILE_HEADERS)
       if (res.request?.status === 'COMPLETED') {
         toast({ title: '验收通过，流程闭环', description: '需求已完成，台账/变动记录已同步' })
       } else {

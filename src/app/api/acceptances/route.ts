@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { auditFlowDetail, extractActor, jsonError, logAudit, num, readBody, resolveActor, str } from '@/lib/bp-server-utils'
+import { isMobileClient } from '@/lib/bp-scan-verify'
 import { pushNotifications } from '@/lib/bp-notify'
 
 export const dynamic = 'force-dynamic'
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic'
  * GET /api/acceptances?workRequestId= → 验收记录（无则 null）
  * POST /api/acceptances 创建验收：需求必须 PENDING_ACCEPTANCE；
  * 三项检查全部通过 → PASS（需求 COMPLETED），否则 RECTIFY（需求保持）；
- * 扫码核对强校验：需求存在带编码的生效票时，必须提交与其一一致的核对编码（不匹配 403 + 审计）。
+ * 扫码核对强校验（需求23：移动端专属环节）：需求存在带编码的生效票且请求来自移动端时，必须提交与其一一致的核对编码（不匹配 403 + 审计）；桌面端免扫码。
  */
 export async function GET(req: NextRequest) {
   try {
@@ -44,8 +45,8 @@ export async function POST(req: NextRequest) {
     const acceptor = str(body.acceptor)
     if (!acceptor) return jsonError('验收人不能为空')
 
-    // 扫码核对强校验：验收扫码面向需求最新票，服务端放宽为「命中需求任一生效票编码」
-    // （多点顺序施工时验收人可在现场逐点核对，任一真实点位命中即可确认位于本需求作业区）
+    // 扫码核对强校验（需求23：移动端专属环节）：面向需求最新票，服务端放宽为「命中需求任一生效票编码」
+    // （多点顺序施工时验收人可在现场逐点核对，任一真实点位命中即可确认位于本需求作业区）；桌面端/直调免设卡
     const scanActor = extractActor(body)
     const effectiveTickets = await db.workTicket.findMany({
       where: { workRequestId: wid, status: { not: 'VOID' }, pointCode: { not: null } },
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     })
     const expectedCodes = [...new Set(effectiveTickets.map((t) => String(t.pointCode ?? '').trim()).filter(Boolean))]
-    if (expectedCodes.length > 0) {
+    if (isMobileClient(req) && expectedCodes.length > 0) {
       const scanned = String(body.scannedPointCode ?? '').trim()
       const matched = expectedCodes.some((c) => scanned.length > 0 && c.toUpperCase() === scanned.toUpperCase())
       if (!matched) {

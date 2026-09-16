@@ -34,7 +34,7 @@ import {
 import {
   TicketCheck, Route, ClipboardPlus, Gavel, PlayCircle, FlagTriangleRight, LockKeyholeOpen,
   FileCheck2, RefreshCw, Inbox, ClipboardList, User2, CalendarClock, ShieldCheck,
-  ChevronRight, CircleCheck, CircleDashed, Layers, Loader2, Printer, Download, MapPin, ScanLine,
+  ChevronRight, CircleCheck, CircleDashed, Layers, Loader2, Printer, Download, MapPin,
 } from 'lucide-react'
 import TicketPrint from '@/components/bp/ticket-print'
 import { PidLocateDialog, toLocatePoints, type LocatePoint } from '@/components/bp/pid-locate'
@@ -137,11 +137,10 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
   const [reviewComment, setReviewComment] = useState('')
 
   // 通用确认框（开始作业/完工/关闭）
-  // 后端扫码强校验（需求 12/16 服务端加固）：桌面端无相机，改为人工核对隔离点编码后手输确认
-  const [confirm, setConfirm] = useState<{ title: string; desc: string; run: (verifyCode?: string) => Promise<void>; verifyExpected?: string | null } | null>(null)
-  const [confirmCode, setConfirmCode] = useState('')
+  // 需求23：扫码核对为移动端专属环节（现场扫隔离点二维码），桌面端免扫码直接确认；
+  // 服务端仅对携带 X-Client: mobile 的请求强制比对（Task 102 强校验语义保留在移动端链路）
+  const [confirm, setConfirm] = useState<{ title: string; desc: string; run: () => Promise<void> } | null>(null)
   const [confirmBusy, setConfirmBusy] = useState(false)
-  const codeMismatch = !!confirm?.verifyExpected && confirmCode.trim().toUpperCase() !== String(confirm.verifyExpected).trim().toUpperCase()
 
   // ============ 跟踪页签数据 ============
   const [tasks, setTasks] = useState<TaskRow[]>([])
@@ -347,18 +346,16 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
   const runTicketAction = (req: WorkRequestRow, ticket: TicketRow, action: Exclude<TicketAction, null>) => {
     if (action === 'issue') { void submitIssue(req, ticket); return }
     if (action === 'review') { setReviewComment(ticket.comment ?? ''); setReviewFor({ req, ticket }); return }
-    const map: Record<string, { title: string; desc: string; run: (verifyCode?: string) => Promise<void>; ok: string; verifyExpected?: string | null }> = {
+    const map: Record<string, { title: string; desc: string; run: () => Promise<void>; ok: string }> = {
       start: {
         title: '确认开始作业？', desc: `作业票 ${ticket.code} 将进入作业中状态，任务同步开始执行`,
         ok: '作业已开始',
-        run: async (verifyCode?: string) => { await apiPost(`/api/work-tickets/${ticket.id}/start`, { __actorId: currentUser.id, __actorName: currentUser.name, scannedPointCode: verifyCode ?? '' }) },
-        verifyExpected: ticket.pointCode,
+        run: async () => { await apiPost(`/api/work-tickets/${ticket.id}/start`, { __actorId: currentUser.id, __actorName: currentUser.name }) },
       },
       finish: {
         title: '确认作业完工？', desc: `作业票 ${ticket.code} 将标记为已完工，等待作业验收`,
         ok: '作业已完工，等待验收',
-        run: async (verifyCode?: string) => { await apiPost(`/api/work-tickets/${ticket.id}/finish`, { __actorId: currentUser.id, __actorName: currentUser.name, scannedPointCode: verifyCode ?? '' }) },
-        verifyExpected: ticket.pointCode,
+        run: async () => { await apiPost(`/api/work-tickets/${ticket.id}/finish`, { __actorId: currentUser.id, __actorName: currentUser.name }) },
       },
       close: {
         title: '确认关闭作业票？', desc: `作业票 ${ticket.code} 将归档关闭，需求流程完结`,
@@ -368,8 +365,7 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
     }
     const conf = map[action]
     if (conf) {
-      setConfirmCode('')
-      setConfirm({ title: conf.title, desc: conf.desc, run: async (verifyCode?: string) => { await conf.run(verifyCode); toast({ title: conf.ok, description: ticket.code }); void loadTicketTab(); void loadTasks() }, verifyExpected: conf.verifyExpected })
+      setConfirm({ title: conf.title, desc: conf.desc, run: async () => { await conf.run(); toast({ title: conf.ok, description: ticket.code }); void loadTicketTab(); void loadTasks() } })
     }
   }
 
@@ -820,40 +816,15 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
             <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
             <AlertDialogDescription>{confirm?.desc}</AlertDialogDescription>
           </AlertDialogHeader>
-          {confirm?.verifyExpected ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2">
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
-                <ScanLine className="w-3.5 h-3.5" />
-                隔离点核对（服务端强校验）
-              </p>
-              <p className="text-[11px] leading-relaxed text-amber-700">
-                移动端现场需扫描隔离点二维码核对；桌面端请核对作业票票面编码后手动输入确认，两次不一致将无法开工/完工并记录审计。
-              </p>
-              <Input
-                value={confirmCode}
-                onChange={(e) => setConfirmCode(e.target.value)}
-                placeholder={`请输入本票隔离点编码进行核对`}
-                className="h-8 font-mono text-xs border-amber-300 focus-visible:ring-amber-400 bg-white"
-                aria-label="隔离点编码核对输入"
-              />
-              <p className={`text-[10px] font-medium ${confirmCode.trim() === '' ? 'text-amber-600' : codeMismatch ? 'text-rose-600' : 'text-emerald-600'}`}>
-                {confirmCode.trim() === ''
-                  ? '未输入核对编码，无法确认'
-                  : codeMismatch
-                    ? '输入与本票隔离点编码不一致，请核对'
-                    : '核对一致，可以确认'}
-              </p>
-            </div>
-          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction className="bg-emerald-600 hover:bg-emerald-700 text-white"
-              disabled={!!confirm?.verifyExpected && (codeMismatch || confirmCode.trim() === '')}
+              disabled={confirmBusy}
               onClick={async (e) => {
                 e.preventDefault()
                 if (!confirm || confirmBusy) return
                 setConfirmBusy(true)
-                try { await confirm.run(confirmCode.trim() || undefined); setConfirm(null) }
+                try { await confirm.run(); setConfirm(null) }
                 catch (err) {
                   toast({ variant: 'destructive', title: '操作失败', description: err instanceof Error ? err.message : '请稍后重试' })
                 } finally { setConfirmBusy(false) }

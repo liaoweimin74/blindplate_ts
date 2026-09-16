@@ -1,14 +1,17 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { logAudit } from '@/lib/bp-server-utils'
 
 /**
- * 扫码核对服务端强校验（需求 12/16 服务端加固）
+ * 扫码核对服务端强校验（需求 12/16 服务端加固；需求 23 改为移动端专属环节）
  *
  * 背景：移动端开工/完工/验收前均需扫现场隔离点二维码核对（IsoScanSheet gate），
  * 但此前比对只发生在前端，绕过前端直调 API 即可跳过位置核对。
- * 本模块把「核对」下沉到服务端：客户端必须提交 scannedPointCode（移动端扫码头取值 /
- * 桌面端人工核对输入），与票面/需求点位编码比对，不匹配一律 403 拒绝并留审计；
+ * 本模块把「核对」下沉到服务端：移动端请求（X-Client: mobile）必须提交 scannedPointCode
+ * （现场扫码头取值），与票面/需求点位编码比对，不匹配一律 403 拒绝并留审计；
  * 匹配亦留痕（SCAN_VERIFY），形成完整核对审计链。
+ *
+ * 需求 23：扫码核对是现场环节，桌面端（无相机/不在现场）免扫码——服务端仅对
+ * 携带 X-Client: mobile 的请求强制比对，桌面端与直调请求不设卡。
  *
  * 兼容策略：票面无点位编码（历史票/无主数据票）时不设卡（skipped），
  * 仅在审计中标注该票未关联隔离点编码。
@@ -38,6 +41,11 @@ export function pointCodeMatches(a: unknown, b: unknown): boolean {
   const x = String(a ?? '').trim().toUpperCase()
   const y = String(b ?? '').trim().toUpperCase()
   return x.length > 0 && x === y
+}
+
+/** 需求23：扫码核对为移动端专属环节——服务端仅对携带 X-Client: mobile 的请求强制比对，桌面端/直调免设卡 */
+export function isMobileClient(req: NextRequest): boolean {
+  return (req.headers.get('x-client') ?? '').trim().toLowerCase() === 'mobile'
 }
 
 /**

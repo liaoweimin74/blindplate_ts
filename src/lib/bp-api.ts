@@ -3,9 +3,10 @@
 
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
     cache: 'no-store',
     ...init,
+    // 默认 JSON 头；init.headers 可覆盖/追加（如移动端来源标记 X-Client）
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
   let body: unknown = null
   try {
@@ -24,13 +25,13 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
   return body as T
 }
 
-export const apiGet = <T = unknown,>(path: string) => api<T>(path)
-export const apiPost = <T = unknown,>(path: string, body?: unknown) =>
-  api<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
-export const apiPut = <T = unknown,>(path: string, body?: unknown) =>
-  api<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) })
-export const apiPatch = <T = unknown,>(path: string, body?: unknown) =>
-  api<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) })
+export const apiGet = <T = unknown,>(path: string, headers?: Record<string, string>) => api<T>(path, { headers })
+export const apiPost = <T = unknown,>(path: string, body?: unknown, headers?: Record<string, string>) =>
+  api<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body), headers })
+export const apiPut = <T = unknown,>(path: string, body?: unknown, headers?: Record<string, string>) =>
+  api<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body), headers })
+export const apiPatch = <T = unknown,>(path: string, body?: unknown, headers?: Record<string, string>) =>
+  api<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body), headers })
 export const apiDelete = <T = unknown,>(path: string) => api<T>(path, { method: 'DELETE' })
 
 /** multipart 上传（不要手动设 Content-Type，浏览器自动带 boundary） */

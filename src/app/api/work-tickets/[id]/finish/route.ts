@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { auditFlowDetail, extractActor, jsonError, logAudit, parseId, readBody, resolveActor } from '@/lib/bp-server-utils'
-import { isScanReject, verifyPointScan } from '@/lib/bp-scan-verify'
+import { isMobileClient, isScanReject, verifyPointScan } from '@/lib/bp-scan-verify'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
  * POST /api/work-tickets/[id]/finish 完工作业（IN_PROGRESS → FINISHED）
  * 一票一板：逐票完工。该需求全部生效票均完工时，任务 DONE + 需求 → PENDING_ACCEPTANCE；
  * 尚有其他票未完工时需求保持 IN_PROGRESS（多点按顺序逐票施工）。
- * 扫码核对强校验：票面有隔离点编码时必须提交一致的核对编码（移动端扫码/桌面端人工核对，不匹配 403 + 审计）。
+ * 扫码核对强校验（需求23：移动端专属环节）：携带 X-Client: mobile 的请求，票面有隔离点编码时必须提交一致的核对编码（不匹配 403 + 审计）；桌面端免扫码。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -24,18 +24,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // 提取操作人（body 可为空：无 __actor 时回落任务负责人快照）
     const body = await readBody(req)
     const extracted = extractActor(body)
-    // 扫码核对强校验（服务端比对票面隔离点编码，失败留痕并拒绝）
-    const scan = await verifyPointScan({
-      expected: ticket.pointCode,
-      scanned: body.scannedPointCode,
-      actorId: extracted.actorId,
-      actorName: extracted.actorName,
-      entity: 'WORK_TICKET',
-      entityId: tid,
-      entityCode: ticket.code,
-      scene: '完工',
-    })
-    if (isScanReject(scan)) return scan
+    // 扫码核对强校验（需求23：仅移动端来源强制比对；桌面端免扫码）
+    if (isMobileClient(req)) {
+      const scan = await verifyPointScan({
+        expected: ticket.pointCode,
+        scanned: body.scannedPointCode,
+        actorId: extracted.actorId,
+        actorName: extracted.actorName,
+        entity: 'WORK_TICKET',
+        entityId: tid,
+        entityCode: ticket.code,
+        scene: '完工',
+      })
+      if (isScanReject(scan)) return scan
+    }
     const now = new Date()
     const updated = await db.workTicket.update({
       where: { id: tid },
