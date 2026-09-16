@@ -155,3 +155,22 @@ Work Log:
 Stage Summary:
 - 归档瘦身版本上云完成；敏感命中为历史指纹文字而非完整 token，无实质泄露；文件层已清洗
 - 流程加固：扫描/push 分离执行写入手册（cron payload 后续轮次同步）
+
+---
+Task ID: 100
+Agent: 主会话(Z.ai Code)
+Task: 用户决策——彻底删除需求级「作业类型」字段 WorkRequest.workType（装/拆粒度归点位级）
+
+Work Log:
+- 【业务研判】先答用户三问：①一个需求既拆又装完全可能（换盲板先拆后装、检修包混装拆），系统早有 IsolationPoint.action 点位级权威字段且方案编制与需求类型零校验，BOTH 是低信息量兜底；②展示位直接删除（不做动态汇总替代）最简；③SQLite db:push 物理删列，历史数据一并移除，读取代码删光后无展示空洞，tsc 兜底抓残留
+- 【数据层】schema 删 WorkRequest.workType → db:push 物理删列 + prisma generate；db/custom.db 同步提交
+- 【API 层 8 文件】work-requests POST/PUT（WORK_TYPES 校验、必填文案去「作业类型」）、isolation-schemes select、approvals 三处映射（sed 批量）、blind-plates/point-dossier 两档案
+- 【AI 层 7 文件】bp-ai-retrieval.RetrievalInput 删 workTypeText+prompt 行；draft survey/jsa/disposal/isolation、survey points/checklist 六路由删「作业类型：」上下文行；isolation 动作口径改写为「按作业目的逐点位判断（新增隔离/换装新盲板=ADD，拆除旧盲板/恢复投用=REMOVE）」
+- 【前端 12 文件】bp-types 删 WORK_TYPE_MAP 导出；work-requests（WRow/form/表单Select/导出CSV/表头/详情Info）、schemes（3接口/printData/展示）、task-mgmt、approval-center Badge、field-ops WORK_TYPE_ZH、stats（接口/两CSV/两表头/两td/dark下钻）、pid-config WORK_TYPE_LABEL、plate-dossier、三打印单据（wr-print 表格改装置|紧急程度+colSpan、scheme-print 介质格colSpan=3、ticket-print 装置格colSpan=3 补栅格）
+- 【misc】search route plates extra 改 p.type 原文（原套 WORK_TYPE_MAP 本就映射不上，顺手修错位）；prisma/seed.ts 12 处同步（先 git checkout 还原后用 MultiEdit 精确删——中途 sed 整行删除误伤 const r1..r10 声明，已精确恢复）
+- 【验证】tsc src/+prisma 零错误（examples/skills 既有错误与 PPT 脚本 5 错误为基线）；ESLint 基线恢复；E2E：登录→需求列表无类型列→新建表单无类型下拉（fill 拼接异常改 curl 直验）→POST 创建(id32 无 workType 字段)/PUT 编辑→AI 勘察草稿正常生成→详情无类型 Info→统计明细表无类型列→审批中心/PID组态/移动端预览渲染正常→测试数据删除、脚本清理；SQL 日志实证 WorkRequest 查询无 workType 列
+- 【事故与修复】①dev server 快照恢复实例僵死（43min 持续 112% CPU/1.7GB RSS 不响应）→ kill -9 + rm .next 干净重启 912ms Ready；②agent-browser fill 多次对同 ref 追加拼接 → 改用 eval querySelector 文本导航 + curl 直验 API
+
+Stage Summary:
+- 需求级 workType 全链路（schema→API→AI→前端→打印→种子）彻底移除，装/拆唯一权威 = IsolationPoint.action（点位级）+ WorkTicket.action（票级快照）
+- 29 文件 +51/-123 净减 72 行；commit 6c2c7ec；测试数据零残留；本地领先远程 1 提交待用户「push」
