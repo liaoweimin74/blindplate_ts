@@ -2,6 +2,8 @@
 /**
  * QrLabelPrint（需求10）：隔离点二维码标签打印预览
  * —— 二维码协议与扫码核对一致（BPISO|{code}）；A4 网格 3×8 标签卡，复用作业票打印的样式注入范式
+ * 定位双模式（Task 113）：默认 fixed 铺浏览器视口（WEB 端 work-requests）；contained=true 时 absolute
+ * 相对宿主 positioned 容器收敛（移动端预览手机壳内，field-ops 四处调用传入），避免逃逸壳致遮挡
  */
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
@@ -17,12 +19,14 @@ export interface QrLabelPoint {
 
 const qrPayload = (code: string) => `BPISO|${code}`
 
-export default function QrLabelPrint({ open, onClose, points, title }: {
+export default function QrLabelPrint({ open, onClose, points, title, contained }: {
   open: boolean
   onClose: () => void
   points: QrLabelPoint[]
   /** 场景说明（打印提示行用） */
   title?: string
+  /** 壳内收敛模式：absolute 相对手机壳（移动端预览）；缺省 fixed 铺浏览器视口（WEB 端） */
+  contained?: boolean
 }) {
   const [qrs, setQrs] = useState<Record<string, string>>({})
   const [printedAt, setPrintedAt] = useState('')
@@ -69,7 +73,7 @@ export default function QrLabelPrint({ open, onClose, points, title }: {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[100] overflow-auto bg-stone-900/70 px-3 py-6 backdrop-blur-sm" onClick={onClose}>
+    <div className={contained ? 'absolute inset-0 z-[100] overflow-auto bg-stone-900/70 px-3 py-6 backdrop-blur-sm' : 'fixed inset-0 z-[100] overflow-auto bg-stone-900/70 px-3 py-6 backdrop-blur-sm'} onClick={onClose}>
       <div className="no-print mx-auto mb-3 flex max-w-[794px] items-center justify-between">
         <div className="text-xs text-stone-300">
           {title ?? '隔离点二维码标签'} · 共 {points.length} 张 · 二维码协议 BPISO|点位编码

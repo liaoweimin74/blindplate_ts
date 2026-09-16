@@ -421,7 +421,7 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
           onPrintLabel={(p) => setStartGateLabel({ open: true, points: [p] })}
         />
         {/* 需求10：开工扫码现场无码 → 打印二维码标签 */}
-        <QrLabelPrint
+        <QrLabelPrint contained
           open={startGateLabel.open}
           onClose={() => setStartGateLabel({ open: false, points: [] })}
           points={startGateLabel.points}
@@ -865,8 +865,9 @@ function QrSignSheet(props: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60" onClick={onClose} role="dialog" aria-modal="true" aria-label="扫码签到确认交底">
-      <div className="flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-t-2xl bg-stone-100 p-4" onClick={(e) => e.stopPropagation()}>
+    // Task 113：absolute 相对手机壳收敛（同 IsoScanSheet 定位铁律），fixed 会逃逸壳铺满浏览器视口
+    <div className="absolute inset-0 z-50 flex items-end justify-center bg-stone-900/60" onClick={onClose} role="dialog" aria-modal="true" aria-label="扫码签到确认交底">
+      <div className="flex max-h-[85%] w-full max-w-md flex-col gap-3 rounded-t-2xl bg-stone-100 p-4" onClick={(e) => e.stopPropagation()}>
         {/* ===== 固定区：标题 + 进度 + 取景框（Task 96-b 布局铁律） ===== */}
         <div className="shrink-0 space-y-3">
           <div className="flex items-center gap-2">
@@ -1342,7 +1343,7 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
         onPrintLabel={(p) => setLabelPrint({ open: true, points: [p] })}
       />
       {/* 需求10/26：扫码现场无码时打印二维码标签 */}
-      <QrLabelPrint
+      <QrLabelPrint contained
         open={labelPrint.open}
         onClose={() => setLabelPrint({ open: false, points: [] })}
         points={labelPrint.points}
@@ -2168,7 +2169,7 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
         }}
         onPrintLabel={(p) => setFinishLabel({ open: true, points: [p] })}
       />
-      <QrLabelPrint
+      <QrLabelPrint contained
         open={finishLabel.open}
         onClose={() => setFinishLabel({ open: false, points: [] })}
         points={finishLabel.points}
@@ -2342,7 +2343,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
 
           {/* 不一致时提交拦截确认 */}
           {warnOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40" role="dialog" aria-modal="true" aria-label="位置不一致警告">
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/40" role="dialog" aria-modal="true" aria-label="位置不一致警告">
               <div className="rounded-xl bg-white p-4 w-full max-w-sm space-y-3 shadow-xl">
                 <div className="flex items-center gap-2 text-rose-600">
                   <AlertTriangle className="w-5 h-5" />
@@ -2375,7 +2376,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
             }}
             onPrintLabel={(p) => setAcceptLabel({ open: true, points: [p] })}
           />
-          <QrLabelPrint
+          <QrLabelPrint contained
             open={acceptLabel.open}
             onClose={() => setAcceptLabel({ open: false, points: [] })}
             points={acceptLabel.points}

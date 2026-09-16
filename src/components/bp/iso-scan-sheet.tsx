@@ -2,6 +2,8 @@
 // 共享扫码核对 Sheet（Task 96/96-b 范式）：勘察扫码加入 / 移动端开工确认 / 隔离点执行确认 三场景共用
 // 布局铁律（Task 96-b）：固定区（标题+进度+取景框）shrink-0 恒在顶部，名单/手动输入在滚动区 flex-1 min-h-0
 // → 列表再长取景框不被顶走；演示环境以「点击名单项=模拟扫到其二维码」代替真实相机
+// 定位铁律（Task 113）：overlay 用 absolute inset-0 相对宿主 positioned 容器（移动端预览手机壳 relative）收敛——
+// 不用 fixed：fixed 会逃逸手机壳直达浏览器视口，在桌面预览里铺满整页且底部被视口边缘遮挡（用户报障）
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { QrCode, ScanLine, ChevronRight, X, Loader2, CircleCheck, MapPin, ScanSearch, Printer } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -88,9 +90,9 @@ export default function IsoScanSheet(props: IsoScanSheetProps) {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/60" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
+    <div className="absolute inset-0 z-50 flex items-end justify-center bg-stone-900/60" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
       <div
-        className="flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-t-2xl bg-stone-100 p-4"
+        className="flex max-h-[85%] w-full max-w-md flex-col gap-3 rounded-t-2xl bg-stone-100 p-4"
         onClick={(e) => e.stopPropagation()}
       >
         {/* ===== 固定区：标题 + 进度 + 取景框（Task 96-b：扫码框恒悬浮，不被列表顶走） ===== */}
