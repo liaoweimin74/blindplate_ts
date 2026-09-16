@@ -1039,6 +1039,9 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
   const [kw, setKw] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
+  // 需求26：勘察扫码加入隔离点（扫现场标签二维码直接加入已选）
+  const [scanOpen, setScanOpen] = useState(false)
+  const [labelPrint, setLabelPrint] = useState<{ open: boolean; points: QrLabelPoint[] }>({ open: false, points: [] })
   // AI 勘察辅助（需求22a，对齐 WEB 端三能力）：要点清单 / 记录起草 / 推举点位
   const [aiBusy, setAiBusy] = useState<'checklist' | 'draft' | 'points' | null>(null)
   const [checklist, setChecklist] = useState<string[] | null>(null)
@@ -1081,6 +1084,22 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
 
   const togglePoint = (id: number) => {
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  }
+
+  // 需求26：扫码加入隔离点——扫现场标签二维码（BPISO|code 协议，IsoScanSheet 已剥离前缀）命中主数据后加入已选；
+  // 已选/名单外均明确反馈，加入后自动触发已选置顶（需求25 排序）
+  const addByScan = (code: string) => {
+    const m = masters.find((x) => x.code.toLowerCase() === code.toLowerCase())
+    if (!m) {
+      toast({ variant: 'destructive', title: '二维码无法识别', description: `扫描到 ${code}，不在隔离点主数据内，请核对现场标签` })
+      return
+    }
+    if (selected.includes(m.id)) {
+      toast({ title: '该隔离点已在已选列表', description: `${m.code} ${m.name}` })
+      return
+    }
+    setSelected((prev) => [...prev, m.id])
+    toast({ title: '扫码加入成功', description: `${m.code} ${m.name} 已加入勘察点位（自动置顶）` })
   }
 
   // AI 勘察要点：按介质/压力/位置定制生成现场核对清单（仅参考不落库）
@@ -1219,7 +1238,15 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
           <div className="rounded-xl bg-white p-3 space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold text-stone-700">确认隔离点位置（多选）</Label>
-              <span className="text-[10px] text-stone-400">已选 {selected.length}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-stone-400">已选 {selected.length}</span>
+                {/* 需求26：扫码加入隔离点（扫现场标签二维码，标签破损可手动输入编码；现场无码可打印标签） */}
+                <button type="button" onClick={() => setScanOpen(true)}
+                  title="扫现场隔离点标签二维码直接加入已选（标签破损可手动输入编码）"
+                  className="inline-flex items-center gap-1 rounded-full border border-teal-300 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700 transition-colors hover:bg-teal-100">
+                  <ScanLine className="w-3 h-3" />扫码加入
+                </button>
+              </div>
             </div>
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-300" />
@@ -1302,6 +1329,24 @@ function SurveyPage(props: { reqId: number; currentUser: ModuleProps['currentUse
           </div>
         </>
       )}
+      {/* 需求26：勘察扫码加入隔离点 Sheet（已选点位打勾防重扫；名单=主数据全量，手动输入需命中） */}
+      <IsoScanSheet
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        title="扫码加入勘察隔离点"
+        points={masters.map((m) => ({ code: m.code, name: m.name, location: m.location }))}
+        doneCodes={masters.filter((m) => selected.includes(m.id)).map((m) => m.code)}
+        hint="扫描现场隔离点标签二维码，识别后自动加入已选列表；标签破损可在下方手动输入编码"
+        onScan={(code) => addByScan(code)}
+        onPrintLabel={(p) => setLabelPrint({ open: true, points: [p] })}
+      />
+      {/* 需求10/26：扫码现场无码时打印二维码标签 */}
+      <QrLabelPrint
+        open={labelPrint.open}
+        onClose={() => setLabelPrint({ open: false, points: [] })}
+        points={labelPrint.points}
+        title="隔离点二维码标签"
+      />
     </PageShell>
   )
 }
