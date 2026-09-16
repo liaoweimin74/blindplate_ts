@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { auditFlowDetail, extractActor, jsonError, logAudit, parseId, readBody, resolveActor } from '@/lib/bp-server-utils'
 import { findPointPipelineConflicts, findRequestPipelineConflicts, findSamePipelineRunningTicket, formatPipelineConflictMessage } from '@/lib/bp-pipeline-occupancy'
+import { isScanReject, verifyPointScan } from '@/lib/bp-scan-verify'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/work-tickets/[id]/start 开始作业（APPROVED → IN_PROGRESS），需求 → IN_PROGRESS
- * 一票一板：逐票开工。安全硬约束双重校验：
+ * 一票一板：逐票开工。安全硬约束三重校验：
+ * ⓪ 扫码核对强校验：票面有隔离点编码时必须提交一致的核对编码（移动端扫码/桌面端人工核对，不匹配 403 + 审计）；
  * ① 点位管线未被其他需求生效票占用；② 同需求内同管线无另一张作业中的票（严禁同一管道两处同时抽堵）。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -66,7 +68,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       )
     }
     // 提取操作人（body 可为空：无 __actor 时回落任务负责人快照）
-    const extracted = extractActor(await readBody(req))
+    const body = await readBody(req)
+    const extracted = extractActor(body)
+    // 安全硬约束⓪：扫码核对强校验（服务端比对票面隔离点编码，失败留痕并拒绝）
+    const scan = await verifyPointScan({
+      expected: ticket.pointCode,
+      scanned: body.scannedPointCode,
+      actorId: extracted.actorId,
+      actorName: extracted.actorName,
+      entity: 'WORK_TICKET',
+      entityId: tid,
+      entityCode: ticket.code,
+      scene: '开工',
+    })
+    if (isScanReject(scan)) return scan
     const now = new Date()
     const updated = await db.workTicket.update({
       where: { id: tid },

@@ -194,9 +194,10 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
   const startTicket = async (ticket: TicketLite) => {
     setStartGate(ticket)
   }
-  const startTicketConfirmed = async (ticket: TicketLite) => {
+  const startTicketConfirmed = async (ticket: TicketLite, scannedPointCode?: string) => {
     try {
-      await apiPost(`/api/work-tickets/${ticket.id}/start`, { __actorId: currentUser?.id, __actorName: currentUser?.name })
+      // 后端扫码强校验：提交扫描得到的核对编码，服务端比对票面隔离点编码（不匹配 403）
+      await apiPost(`/api/work-tickets/${ticket.id}/start`, { __actorId: currentUser?.id, __actorName: currentUser?.name, scannedPointCode: scannedPointCode ?? ticket.pointCode ?? '' })
       toast({ title: '扫码核对通过，已开工', description: `作业票 ${ticket.code} 进入作业中——请先拍摄作业位置照片并完成 AI 核对` })
       await refresh()
     } catch (e) {
@@ -362,7 +363,7 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
           onScan={(code) => {
             if (!startGate) return
             if (code === startGate.pointCode) {
-              void startTicketConfirmed(startGate)
+              void startTicketConfirmed(startGate, code)
             } else {
               toast({ variant: 'destructive', title: '二维码不符', description: `扫描到 ${code}，与本票隔离点 ${startGate.pointCode ?? '-'} 不一致，请核对现场标签` })
             }
@@ -1888,10 +1889,11 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
   const [finishGate, setFinishGate] = useState(false)
   const [finishLabel, setFinishLabel] = useState<{ open: boolean; points: QrLabelPoint[] }>({ open: false, points: [] })
 
-  const finishConfirmed = async () => {
+  const finishConfirmed = async (scannedPointCode?: string) => {
     setFinishing(true)
     try {
-      await apiPost(`/api/work-tickets/${ticketId}/finish`, { __actorId: currentUser?.id, __actorName: currentUser?.name })
+      // 后端扫码强校验：提交扫描得到的核对编码，服务端比对票面隔离点编码（不匹配 403）
+      await apiPost(`/api/work-tickets/${ticketId}/finish`, { __actorId: currentUser?.id, __actorName: currentUser?.name, scannedPointCode: scannedPointCode ?? ticket?.pointCode ?? '' })
       toast({ title: '作业已完工', description: '等待作业验收（验收将再次拍照 AI 核对）' })
       onBack()
     } catch (e) {
@@ -1960,7 +1962,7 @@ function ExecPage(props: { ticketId: number; currentUser: ModuleProps['currentUs
         onScan={(code) => {
           if (code === ticket?.pointCode) {
             setFinishGate(false)
-            void finishConfirmed()
+            void finishConfirmed(code)
           } else {
             toast({ variant: 'destructive', title: '二维码不符，不允许完工', description: `扫描到 ${code}，与本票隔离点 ${ticket?.pointCode ?? '-'} 不一致，请核对现场标签` })
           }
@@ -2048,10 +2050,11 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
     await doSubmit()
   }
 
-  const doSubmit = async () => {
+  const doSubmit = async (scannedPointCode?: string) => {
     const pass = leak && restore && ledger // 修复：pass 原误留 submit 作用域，doSubmit 引用必 ReferenceError（验收提交必败）
     setSubmitting(true)
     try {
+      // 后端扫码强校验：提交扫描得到的核对编码，服务端比对需求生效票隔离点编码（不匹配 403）
       const res = await apiPost<{ request?: { status: string } }>('/api/acceptances', {
         workRequestId: reqId,
         acceptor: currentUser?.name ?? '验收人',
@@ -2062,6 +2065,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
         problems: problems || (check?.result === 'INCONSISTENT' ? 'AI 核对提示验收位置与作业照片存在差异，已现场复核' : null),
         remarks: remarks || null,
         photoIds: photos.map((p) => p.id),
+        scannedPointCode: scannedPointCode ?? latestTicket?.pointCode ?? '',
         __actorId: currentUser?.id, __actorName: currentUser?.name,
       })
       if (res.request?.status === 'COMPLETED') {
@@ -2165,7 +2169,7 @@ function AcceptPage(props: { reqId: number; currentUser: ModuleProps['currentUse
             hint={`请扫描作业票 ${latestTicket?.code ?? ''} 对应隔离点的现场标签二维码，确认验收位置后提交`}
             onScan={(code) => {
               if (code === latestTicket?.pointCode) {
-                void doSubmit()
+                void doSubmit(code)
               } else {
                 toast({ variant: 'destructive', title: '二维码不符，不允许验收', description: `扫描到 ${code}，与本票隔离点 ${latestTicket?.pointCode ?? '-'} 不一致，请核对现场标签` })
               }

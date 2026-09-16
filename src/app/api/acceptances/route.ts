@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic'
 /**
  * GET /api/acceptances?workRequestId= → 验收记录（无则 null）
  * POST /api/acceptances 创建验收：需求必须 PENDING_ACCEPTANCE；
- * 三项检查全部通过 → PASS（需求 COMPLETED），否则 RECTIFY（需求保持）
+ * 三项检查全部通过 → PASS（需求 COMPLETED），否则 RECTIFY（需求保持）；
+ * 扫码核对强校验：需求存在带编码的生效票时，必须提交与其一一致的核对编码（不匹配 403 + 审计）。
  */
 export async function GET(req: NextRequest) {
   try {
@@ -42,6 +43,50 @@ export async function POST(req: NextRequest) {
     }
     const acceptor = str(body.acceptor)
     if (!acceptor) return jsonError('验收人不能为空')
+
+    // 扫码核对强校验：验收扫码面向需求最新票，服务端放宽为「命中需求任一生效票编码」
+    // （多点顺序施工时验收人可在现场逐点核对，任一真实点位命中即可确认位于本需求作业区）
+    const scanActor = extractActor(body)
+    const effectiveTickets = await db.workTicket.findMany({
+      where: { workRequestId: wid, status: { not: 'VOID' }, pointCode: { not: null } },
+      select: { id: true, code: true, pointCode: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    const expectedCodes = [...new Set(effectiveTickets.map((t) => String(t.pointCode ?? '').trim()).filter(Boolean))]
+    if (expectedCodes.length > 0) {
+      const scanned = String(body.scannedPointCode ?? '').trim()
+      const matched = expectedCodes.some((c) => scanned.length > 0 && c.toUpperCase() === scanned.toUpperCase())
+      if (!matched) {
+        await logAudit({
+          actorId: scanActor.actorId,
+          actorName: scanActor.actorName,
+          action: 'SCAN_REJECT',
+          entity: 'WORK_REQUEST',
+          entityId: wid,
+          entityCode: request.code,
+          detail: `【扫码核对未通过·验收】期望隔离点编码 [${expectedCodes.join(' / ')}]，${scanned ? `提交为 ${scanned}` : '未提交核对编码'}——服务端拒绝验收`,
+        })
+        return NextResponse.json(
+          {
+            error: scanned
+              ? `验收被拒绝：核对编码 ${scanned} 与本需求作业票隔离点编码（${expectedCodes.join(' / ')}）均不一致，请核对现场二维码标签`
+              : '验收被拒绝：缺少扫码核对编码——请先扫描现场隔离点二维码（或人工核对编码后提交）',
+            scanVerifyRequired: true,
+            expectedPointCodes: expectedCodes,
+          },
+          { status: 403 }
+        )
+      }
+      await logAudit({
+        actorId: scanActor.actorId,
+        actorName: scanActor.actorName,
+        action: 'SCAN_VERIFY',
+        entity: 'WORK_REQUEST',
+        entityId: wid,
+        entityCode: request.code,
+        detail: `【扫码核对通过·验收】隔离点编码 ${scanned.toUpperCase()} 与需求生效票编码一致`,
+      })
+    }
 
     const leakCheck = Boolean(body.leakCheck)
     const restoreCheck = Boolean(body.restoreCheck)
