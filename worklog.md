@@ -10,7 +10,7 @@
 - 前端形态: 单页应用(SPA)，侧边栏模块导航 + 内置移动端模拟器
 
 ## 📌 当前状态索引区（每轮 agent 先读这里 + 尾部最新 2~3 节即可，勿全文读取）
-- **最新进展**：Task 99 已完成（票务双页 PID 定位 + 验收 doSubmit 真 bug 修复），本地/远程 main 同步于 447e128
+- **最新进展**：Task 101 已完成（需求19-21四项：AI导入补建管线/主数据通盲状态/组态图装置归属/管线编号序号规则），commit a7e77ae，本地领先远程 4 提交待 push
 - **需求基线 1~17 原文**：本文件下方 Task 98 节【最高机密·永不许再丢，勿删勿移】
 - **关键纪律速查**：teal/emerald 主色、AI=violet、严禁 indigo/blue｜每完成一个功能块立即 git commit｜push 仅凭用户「push」指令（token 每次从 .env 现取+脱敏）｜E2E 注入数据必还原｜bunx tsx 脚本必须放项目根｜lint 基线=PPT 脚本 5 错误、src/ 零错误
 - **遗留决策项**：T101/T-101 双编码、PRESSURE PN/MPa 口径、私有化 Qwen 网关（待用户定夺）
@@ -174,3 +174,21 @@ Work Log:
 Stage Summary:
 - 需求级 workType 全链路（schema→API→AI→前端→打印→种子）彻底移除，装/拆唯一权威 = IsolationPoint.action（点位级）+ WorkTicket.action（票级快照）
 - 29 文件 +51/-123 净减 72 行；commit 6c2c7ec；测试数据零残留；本地领先远程 1 提交待用户「push」
+
+---
+Task ID: 101
+Agent: 主会话(Z.ai Code)
+Task: 用户新需求 19/20/21/21(二)——导入隔离点带管线、隔离点通盲状态、PID组态图装置归属、生成管线编号规则+自环提示
+
+Work Log:
+- 【需求19·选「一起导入」方案】ai/pid/import 隔离点循环：pipelineCode 非空但管线清单缺失/未导入时自动补建 Pipeline（unitId 跟随导入装置，remark 标注「随隔离点自动补建」并计入 pipelineResults）——修复管线归属静默丢失（pipelineId 下游被占用检查/PID 归属推导依赖，不删字段）；E2E 实证：空管线清单+1 隔离点 → 管线自动建档+隔离点正确归属+零残留
+- 【需求20·通盲状态】iso-point-masters GET 批量推导（不落库）：WORKING（request IN_PROGRESS 且点未完成）＞最近完工记录 doneAt 最新（ADD→BLINDED 盲断/REMOVE→OPEN 导通）＞null 常通；IsolationPoint→scheme→workRequest 三级手工 Map 关联防 N+1（IsolationScheme 无反向导航）；pipeline-master 前端列表新增「通盲状态」列（与 PID 六态同色系：盲断=rose/导通=emerald/作业中=violet/常通=stone，title 悬浮说明）；E2E 实证 39 点分布 6 盲断/2 导通/31 常通，浏览器截图确认列渲染
+- 【需求21·装置归属】pid-config：新建对话框装置必选（删「不关联装置」项+未选时创建禁用+无装置引导文案）；「重命名」升级为「编辑组态图」（名称+所属装置归属，PUT name+unitId，归属必选校验）；图列表 SelectItem 显示「· 装置名/未归属装置」；CardHeader 新增装置徽章（emerald/未归属 amber 提示）；API PUT 原生支持 unitId 实证 17→13→17 还原成功
+- 【需求21(二)·管线编号+自环】generate-master：编号改「起点位号-终点位号-序号」（序号始终存在从 1 递增；旧式无序号编码存在视为 1 号从 -2 顺延，pipeCodeUsed 内存 Set+DB 首探防同批冲突，预览/生成口径一致）；起点=终点自环连线照常生成但带「⚠ 起点与终点为同一设备」提示（items note+apply 后 remark+前端弹窗 ⚠ note amber 高亮）；E2E 实证：自环 T-101-T-101-1 带⚠、T-101-E-201-1/-2 顺延、第二轮 -3/-4 幂等顺延、库中编码全带序号
+- 【验证】tsc src/+prisma 零错误；ESLint 基线（PPT 脚本 5 错误，src/ 零）；E2E 注入数据全部还原（测试图/管线/设备/隔离点/装置零残留）；agent-browser 回归：主数据通盲状态列+编辑/新建对话框+装置徽章截图实证；dev.log 无运行时错误
+- 【commit】a7e77ae feat(bpm) 需求19-21（6 文件 +206/-37）；本地领先远程 4 提交（含 Task 100 两提交）待用户「push」
+
+Stage Summary:
+- 需求 19/20/21/21(二) 四项全部完成并验证；管线编号自本轮起统一「起点-终点-序号」格式（旧式编码兼容占位）
+- 测试注意：seed 已有 T-101/E-201 设备与 T-101-E-101/-102 管线，QA 时勿误删业务数据
+- 待办不变：验收页扫码 gate E2E 补跑、移动端 vs WEB 功能适配分析（用户搁置中）、push 待指令
