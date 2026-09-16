@@ -181,7 +181,7 @@ type Selection = { kind: 'shape' | 'conn' | 'mark'; id: string }
 /** 设备主数据选项（图元绑定设备下拉） */
 interface EquipOption { id: number; code: string; name: string; type: string; unitName?: string | null }
 /** 管线主数据选项（连线绑定管线下拉） */
-interface PipeOption { id: number; code: string; name: string }
+interface PipeOption { id: number; code: string; name: string; unitId?: number | null }
 
 interface DiagramMeta {
   id: number
@@ -2197,6 +2197,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [eqEditOpen, setEqEditOpen] = useState(false)
   const [eqForm, setEqForm] = useState({ code: '', name: '', type: '', unitId: '' })
   const [eqSaving, setEqSaving] = useState(false)
+  // 需求24：属性面板编辑管线主数据（选中连线绑定管线后可就地改编码/名称/装置，交互对齐设备编辑）
+  const [pipeEditOpen, setPipeEditOpen] = useState(false)
+  const [pipeForm, setPipeForm] = useState({ code: '', name: '', unitId: '' })
+  const [pipeSaving, setPipeSaving] = useState(false)
   const [mpEditOpen, setMpEditOpen] = useState(false)
   const [mpForm, setMpForm] = useState({ code: '', name: '', pipelineId: '', location: '', remark: '' })
   const [mpSaving, setMpSaving] = useState(false)
@@ -2636,10 +2640,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     try {
       const [eq, pl] = await Promise.all([
         apiGet<{ list: { id: number; code: string; name: string; type: string; unitName?: string | null }[] }>('/api/equipments'),
-        apiGet<{ list: { id: number; code: string; name: string }[] }>('/api/pipelines'),
+        apiGet<{ list: { id: number; code: string; name: string; unitId?: number | null }[] }>('/api/pipelines'),
       ])
       setEquipOptions((eq.list ?? []).map((e) => ({ id: e.id, code: e.code, name: e.name, type: e.type, unitName: e.unitName ?? null })))
-      setPipeOptions((pl.list ?? []).map((p) => ({ id: p.id, code: p.code, name: p.name })))
+      setPipeOptions((pl.list ?? []).map((p) => ({ id: p.id, code: p.code, name: p.name, unitId: p.unitId ?? null })))
     } catch {
       /* 绑定选项加载失败不阻塞画布主流程 */
     }
@@ -2649,6 +2653,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   useEffect(() => {
     setEqEditOpen(false)
     setMpEditOpen(false)
+    setPipeEditOpen(false)
   }, [selected?.id, selected?.kind])
 
   const openEqEdit = () => {
@@ -2691,6 +2696,43 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       toast({ title: '设备主数据保存失败', description: (err as Error).message, variant: 'destructive' })
     } finally {
       setEqSaving(false)
+    }
+  }
+
+  // ---- 需求24：属性面板编辑管线主数据（绑定管线后可就地改编码/名称/装置，交互对齐设备编辑） ----
+  const openPipeEdit = () => {
+    if (selectedConn?.pipelineId == null) return
+    const pipe = pipeOptions.find((p) => p.id === selectedConn.pipelineId)
+    if (!pipe) {
+      toast({ title: '管线主数据加载中或不存在', variant: 'destructive' })
+      return
+    }
+    setPipeForm({ code: pipe.code, name: pipe.name, unitId: pipe.unitId != null ? String(pipe.unitId) : '' })
+    setPipeEditOpen(true)
+  }
+
+  const savePipeMaster = async () => {
+    if (selectedConn?.pipelineId == null) return
+    const code = pipeForm.code.trim()
+    const name = pipeForm.name.trim()
+    if (!code || !name) {
+      toast({ title: '管线编码与名称不能为空', variant: 'destructive' })
+      return
+    }
+    setPipeSaving(true)
+    try {
+      await apiPut(`/api/pipelines/${selectedConn.pipelineId}`, {
+        code,
+        name,
+        unitId: pipeForm.unitId === '' ? null : Number(pipeForm.unitId),
+      })
+      toast({ title: '管线主数据已更新', description: `${code} ${name}` })
+      setPipeEditOpen(false)
+      await loadBindOptions()
+    } catch (err) {
+      toast({ title: '管线主数据保存失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setPipeSaving(false)
     }
   }
 
@@ -5856,9 +5898,50 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                           const endEq = equipOptions.find((e) => e.id === (reversed ? fromEq : toEq))
                           return (
                             <div className="space-y-1 rounded-md border border-teal-200 bg-teal-50 p-2 text-[11px] leading-relaxed text-teal-800">
-                              <div className="font-medium">
-                                管线 {pipe ? `${pipe.code} · ${pipe.name}` : `#${selectedConn.pipelineId}`}
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span className="min-w-0 truncate font-medium">
+                                  管线 {pipe ? `${pipe.code} · ${pipe.name}` : `#${selectedConn.pipelineId}`}
+                                </span>
+                                {pipe && (
+                                  <button
+                                    type="button"
+                                    className="shrink-0 rounded border border-teal-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-teal-700 transition-colors hover:bg-teal-100"
+                                    onClick={openPipeEdit}
+                                    title="编辑该管线的基础数据（编码/名称/所属装置）"
+                                  >
+                                    <Pencil className="mr-0.5 inline h-2.5 w-2.5" />编辑主数据
+                                  </button>
+                                )}
                               </div>
+                              {pipeEditOpen && pipe && (
+                                <div className="space-y-1.5 rounded-md border border-teal-200 bg-white p-2">
+                                  <div className="text-[10px] font-semibold uppercase tracking-wide text-teal-700">编辑管线主数据</div>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <Input value={pipeForm.code} onChange={(e) => setPipeForm((f) => ({ ...f, code: e.target.value }))} className="h-7 font-mono text-xs" placeholder="管线编码" aria-label="管线编码" />
+                                    <Input value={pipeForm.name} onChange={(e) => setPipeForm((f) => ({ ...f, name: e.target.value }))} className="h-7 text-xs" placeholder="管线名称" aria-label="管线名称" />
+                                  </div>
+                                  <select
+                                    className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-teal-500 focus:outline-none"
+                                    value={pipeForm.unitId}
+                                    onChange={(e) => setPipeForm((f) => ({ ...f, unitId: e.target.value }))}
+                                    aria-label="管线所属装置"
+                                  >
+                                    <option value="">不关联装置</option>
+                                    {units.map((u) => (
+                                      <option key={u.id} value={String(u.id)}>{u.name}</option>
+                                    ))}
+                                  </select>
+                                  <div className="flex justify-end gap-1.5">
+                                    <Button variant="outline" className="h-7 border-stone-200 px-2 text-[11px] text-stone-500 hover:bg-stone-50" disabled={pipeSaving} onClick={() => setPipeEditOpen(false)}>
+                                      取消
+                                    </Button>
+                                    <Button className="h-7 bg-teal-600 px-2.5 text-[11px] text-white hover:bg-teal-700" disabled={pipeSaving} onClick={() => { void savePipeMaster() }}>
+                                      {pipeSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}保存
+                                    </Button>
+                                  </div>
+                                  <div className="text-[10px] leading-relaxed text-stone-400">编码/名称修改后，画布连线徽章、挂标所属管线显示及各业务页面引用将在重新加载后同步；编码需全局唯一。</div>
+                                </div>
+                              )}
                               <div className="text-teal-700">
                                 保存图后将更新关联设备：{startEq ? `${startEq.code} ${startEq.name}` : '（起点图元未绑定设备）'}
                                 {' → '}
