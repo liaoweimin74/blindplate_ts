@@ -2269,6 +2269,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [genMasterPreview, setGenMasterPreview] = useState<GenMasterResp | null>(null)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameVal, setRenameVal] = useState('')
+  const [renameUnitId, setRenameUnitId] = useState('none') // 需求21：编辑组态图时同步修改所属装置归属
   const [renaming, setRenaming] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DiagramMeta | null>(null)
   const [saving, setSaving] = useState(false)
@@ -3839,6 +3840,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       toast({ title: '请输入图名称', variant: 'destructive' })
       return
     }
+    // 需求21：组态图必须归属某个装置（装置是主数据生成的 unitId 依据与盲板状态页定位上下文）
+    if (newForm.unitId === 'none') {
+      toast({ title: '请选择所属装置', description: '组态图必须归属某个装置；若无装置，请先到「基础数据 → 装置管理」新建', variant: 'destructive' })
+      return
+    }
     setCreating(true)
     try {
       const body: Record<string, unknown> = {
@@ -3869,19 +3875,25 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       toast({ title: '请输入图名称', variant: 'destructive' })
       return
     }
+    // 需求21：装置归属必选（与新建一致）；变更归属后生成主数据的 unitId 跟随新装置
+    if (renameUnitId === 'none') {
+      toast({ title: '请选择所属装置', description: '组态图必须归属某个装置', variant: 'destructive' })
+      return
+    }
     setRenaming(true)
     try {
       await apiPut(`/api/pid-diagrams/${activeId}`, {
         name,
+        unitId: Number(renameUnitId),
         __actorId: currentUser.id,
         __actorName: currentUser.name,
       })
       setRenameOpen(false)
       setDetailName(name)
       await loadDiagrams()
-      toast({ title: '成功', description: `组态图已重命名为「${name}」` })
+      toast({ title: '成功', description: `组态图「${name}」信息已更新` })
     } catch (err) {
-      toast({ title: '重命名失败', description: (err as Error).message, variant: 'destructive' })
+      toast({ title: '保存失败', description: (err as Error).message, variant: 'destructive' })
     } finally {
       setRenaming(false)
     }
@@ -4309,6 +4321,19 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           </div>
           {activeDiagram && (
             <div className="flex items-center gap-2">
+              <Badge
+                variant="outline"
+                title={activeDiagram.unitName ? `所属装置：${activeDiagram.unitName}` : '尚未归属装置，点铅笔图标可编辑归属'}
+                className={cn(
+                  'max-w-[180px] truncate',
+                  activeDiagram.unitName
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-amber-300 bg-amber-50 text-amber-700',
+                )}
+              >
+                {activeDiagram.unitName ? <Factory className="mr-1 h-3 w-3 inline" /> : null}
+                {activeDiagram.unitName ?? '未归属装置'}
+              </Badge>
               <Badge variant="outline" className="border-stone-200 bg-stone-50 font-mono text-stone-600">
                 图元 {content.shapes.length}
               </Badge>
@@ -4335,7 +4360,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
             <SelectContent>
               {diagrams.map((d) => (
                 <SelectItem key={d.id} value={String(d.id)}>
-                  {d.name}
+                  {d.name}{d.unitName ? ` · ${d.unitName}` : ' · 未归属装置'}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -4358,10 +4383,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           {!readOnly && (
           <Button
             variant="outline" className="h-10 w-10 p-0"
-            title="重命名当前组态图"
+            title="编辑组态图信息（名称/所属装置归属）"
             disabled={!activeDiagram}
             onClick={() => {
               setRenameVal(detailName)
+              setRenameUnitId(activeDiagram?.unitId != null ? String(activeDiagram.unitId) : 'none')
               setRenameOpen(true)
             }}
           >
@@ -6087,39 +6113,65 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               />
             </div>
             <div className="grid gap-1.5">
-              <Label>所属装置</Label>
+              <Label>所属装置 <span className="text-rose-500">*</span></Label>
               <Select value={newForm.unitId} onValueChange={(v) => setNewForm({ ...newForm, unitId: v })}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择装置（可选）" />
+                  <SelectValue placeholder="选择所属装置" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">不关联装置</SelectItem>
                   {units.map((u) => (
                     <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {units.length === 0 ? (
+                <p className="text-xs text-amber-600">暂无装置可选，请先到「基础数据 → 装置管理」新建装置</p>
+              ) : (
+                <p className="text-xs text-stone-400">组态图必须归属某个装置，归属可在铅笔按钮中随时修改</p>
+              )}
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewOpen(false)}>取消</Button>
-            <Button className="bg-emerald-700 text-white hover:bg-emerald-800" disabled={creating} onClick={() => void createDiagram()}>
+            <Button
+              className="bg-emerald-700 text-white hover:bg-emerald-800"
+              disabled={creating || newForm.unitId === 'none' || units.length === 0}
+              onClick={() => void createDiagram()}
+            >
               {creating ? '创建中…' : '创建'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* 重命名组态图 */}
+      {/* 编辑组态图信息（名称 + 所属装置归属，需求21） */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent className="sm:max-w-[380px]">
+        <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
-            <DialogTitle>重命名组态图</DialogTitle>
-            <DialogDescription>修改图名称，不影响已绘制的图元与标注</DialogDescription>
+            <DialogTitle>编辑组态图</DialogTitle>
+            <DialogDescription>修改图名称与所属装置归属，不影响已绘制的图元与标注</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-1.5 py-2">
-            <Label>图名称 <span className="text-rose-500">*</span></Label>
-            <Input value={renameVal} placeholder="输入新名称" onChange={(e) => setRenameVal(e.target.value)} />
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-1.5">
+              <Label>图名称 <span className="text-rose-500">*</span></Label>
+              <Input value={renameVal} placeholder="输入新名称" onChange={(e) => setRenameVal(e.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>所属装置 <span className="text-rose-500">*</span></Label>
+              <Select value={renameUnitId} onValueChange={setRenameUnitId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="选择所属装置" />
+                </SelectTrigger>
+                <SelectContent>
+                  {units.map((u) => (
+                    <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {units.length === 0 && (
+                <p className="text-xs text-amber-600">暂无装置可选，请先到「基础数据 → 装置管理」新建装置</p>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenameOpen(false)}>取消</Button>
@@ -6411,7 +6463,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       {g.items.map((it, i) => (
                         <div key={`${it.code}-${i}`} className="flex items-center justify-between gap-2 py-0.5 text-xs">
                           <span className="font-mono text-stone-700">{it.code}</span>
-                          <span className="truncate text-stone-400">{it.note ?? (it.created ? '将新建' : '将关联')}</span>
+                          <span className={cn('truncate', it.note?.includes('⚠') ? 'font-medium text-amber-600' : 'text-stone-400')}>{it.note ?? (it.created ? '将新建' : '将关联')}</span>
                         </div>
                       ))}
                     </div>
@@ -6467,7 +6519,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       {g.items.map((it, i) => (
                         <div key={`${it.code}-${i}`} className="flex items-center justify-between gap-2 py-0.5 text-xs">
                           <span className="font-mono text-stone-700">{it.code}</span>
-                          <span className="truncate text-stone-400">{it.note ?? (it.created ? '新建' : '关联')}</span>
+                          <span className={cn('truncate', it.note?.includes('⚠') ? 'font-medium text-amber-600' : 'text-stone-400')}>{it.note ?? (it.created ? '新建' : '关联')}</span>
                         </div>
                       ))}
                     </div>

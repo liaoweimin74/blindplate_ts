@@ -65,6 +65,29 @@ interface PointRow {
   location?: string | null
   remark?: string | null
   refCount: number
+  blindState?: 'BLINDED' | 'OPEN' | 'WORKING' | null
+  blindLabel?: string | null
+}
+
+/** 通盲状态徽章配色（需求 20，与 PID 六态同色系）：盲断=rose · 导通=emerald · 作业中=violet · 常通=stone */
+const BLIND_STATE_CLS: Record<string, string> = {
+  BLINDED: 'border-rose-200 bg-rose-50 text-rose-700',
+  OPEN: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  WORKING: 'border-violet-200 bg-violet-50 text-violet-700',
+  NONE: 'border-stone-200 bg-stone-50 text-stone-500',
+}
+
+function BlindStateBadge({ pt }: { pt: PointRow }) {
+  const key = pt.blindState ?? 'NONE'
+  return (
+    <Badge
+      variant="outline"
+      title={pt.blindLabel ?? '该点当前无盲板，处于常通状态'}
+      className={cn('whitespace-nowrap', BLIND_STATE_CLS[key] ?? BLIND_STATE_CLS.NONE)}
+    >
+      {pt.blindLabel ?? '常通'}
+    </Badge>
+  )
 }
 
 // ============ 通用小件 ============
@@ -718,6 +741,7 @@ function PointsTab({ points, pipelines, loading, currentUser, reload }: {
                 <TableHead>编号</TableHead>
                 <TableHead>名称</TableHead>
                 <TableHead>所属管线</TableHead>
+                <TableHead>通盲状态</TableHead>
                 <TableHead>位置</TableHead>
                 <TableHead>被引用</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -726,7 +750,7 @@ function PointsTab({ points, pipelines, loading, currentUser, reload }: {
             {filtered.length === 0 ? (
               <TableBody>
                 <TableRow>
-                  <TableCell colSpan={6}>
+                  <TableCell colSpan={7}>
                     <div className="flex flex-col items-center justify-center gap-2 py-10 text-stone-400">
                       <Inbox className="h-7 w-7" />
                       <span className="text-sm">没有匹配条件的隔离点</span>
@@ -741,7 +765,8 @@ function PointsTab({ points, pipelines, loading, currentUser, reload }: {
                     <TableCell className="font-mono text-xs font-medium">{pt.code}</TableCell>
                     <TableCell>{pt.name}</TableCell>
                     <TableCell>{pt.pipelineName || '-'}</TableCell>
-                    <TableCell className="max-w-[220px] truncate text-stone-500">{pt.location || '-'}</TableCell>
+                    <TableCell><BlindStateBadge pt={pt} /></TableCell>
+                    <TableCell className="max-w-[180px] truncate text-stone-500">{pt.location || '-'}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={cn(
                         'font-mono',

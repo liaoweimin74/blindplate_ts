@@ -11,7 +11,8 @@ export const dynamic = 'force-dynamic'
  * 规则（按图元和标识自动对应，全部幂等：编码已存在直接复用不重建）：
  * 1. 设备：工艺类图元（设备类型 / eq-* 标准符号 / 自定义图元）从 label 提取位号（如 T-101/P-201A），
  *    幂等建 Equipment 并回填 shape.equipmentId；已绑定 / 无位号 / 阀门管件仪表等内联符号跳过；
- * 2. 管线：两端图元均已绑定设备的连线 → 管线号 = 「起点位号-终点位号」（冲突自动加序号），
+ * 2. 管线：两端图元均已绑定设备的连线 → 管线号 = 「起点位号-终点位号-序号」（序号从 1 递增，
+ *    旧式无序号编码存在时视其为 1 号从 -2 起步；起点=终点自环管线照常生成但带 ⚠ 提示标记），
  *    幂等建 Pipeline（起止设备回填）并回填 connection.pipelineId；已绑定 / 端点缺设备的连线跳过；
  *    悬空自愈：图 JSON 可能残留已删除管线的旧 id（如图从旧图复制），重置为未绑定重新生成，
  *    否则隔离点归属阶段会拿悬空 id 建 IsoPointMaster → 外键约束崩溃（图 24 实证）；
@@ -166,7 +167,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       // ---- 2. 管线 ----
       const pipelines: GenGroup = { created: 0, linked: 0, skipped: 0, items: [] }
-      const pipeCodeCount = new Map<string, number>()
+      // 需求21(二)：编号 = 「起点位号-终点位号-序号」（序号始终存在，从 1 递增）；
+      // 兼容旧数据：若裸「起点-终点」编码已存在则视其为 1 号，新编码从 -2 起步。
+      // pipeCodeUsed 按设备对缓存已占用序号集合（首次从 DB 探测，后续内存递增），预览/生成两模式口径一致防同批冲突
+      const pipeCodeUsed = new Map<string, Set<string>>()
+      const nextPipeCode = async (base: string): Promise<string> => {
+        let used = pipeCodeUsed.get(base)
+        if (!used) {
+          used = new Set<string>()
+          const bare = await tx.pipeline.findUnique({ where: { code: base } })
+          if (bare) used.add('bare')
+          const rows = await tx.pipeline.findMany({
+            where: { code: { startsWith: `${base}-` } },
+            select: { code: true },
+          })
+          for (const r of rows) {
+            const tail = r.code.slice(base.length + 1)
+            if (/^\d+$/.test(tail)) used.add(tail)
+          }
+          pipeCodeUsed.set(base, used)
+        }
+        let n = used.has('bare') ? 2 : 1
+        while (used.has(String(n))) n++
+        used.add(String(n))
+        return `${base}-${n}`
+      }
       const plannedPipes: Array<[number, string]> = [] // 预览模式计划新建的管线（临时 id → 编码）
       let fakePipeSeq = 0
       // 端点设备编码解析：预览模式优先取虚拟设备位号，实存设备查库
@@ -191,16 +216,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const fromCode = await equipCodeOf(fromEq)
         const toCode = await equipCodeOf(toEq)
         if (!fromCode || !toCode) { pipelines.skipped++; continue }
-        // 管线号 = 起点位号-终点位号；重复时自动加序号（同一对设备多条连线）
+        // 需求21(二)：起点与终点同一设备 → 自环管线，仍允许生成但加提示标记供人工确认
+        const selfLoop = fromEq === toEq
+        const loopNote = selfLoop ? '⚠ 起点与终点为同一设备（自环管线），请人工确认' : undefined
+        // 管线号 = 起点位号-终点位号-序号（同对设备多条连线序号递增）
         const base = `${fromCode}-${toCode}`
-        const n = (pipeCodeCount.get(base) ?? 0) + 1
-        pipeCodeCount.set(base, n)
-        const code = n === 1 ? base : `${base}-${n}`
+        const code = await nextPipeCode(base)
         const exists = await tx.pipeline.findUnique({ where: { code } })
         if (exists) {
           c.pipelineId = exists.id
           pipelines.linked++
-          pipelines.items.push({ code, id: exists.id, created: false, note: apply ? '已存在，已关联到连线' : '编码已存在，将关联到连线' })
+          pipelines.items.push({ code, id: exists.id, created: false, note: loopNote ?? (apply ? '已存在，已关联到连线' : '编码已存在，将关联到连线') })
           continue
         }
         if (apply) {
@@ -211,20 +237,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               unitId: diagram.unitId,
               startEquipmentId: fromEq,
               endEquipmentId: toEq,
-              remark: 'PID 图生成主数据自动创建',
+              remark: selfLoop ? 'PID 图生成主数据自动创建（自环管线，请人工确认）' : 'PID 图生成主数据自动创建',
             },
           })
           c.pipelineId = created.id
           existingPipeIds.add(created.id)
           pipelines.created++
-          pipelines.items.push({ code, id: created.id, created: true })
+          pipelines.items.push({ code, id: created.id, created: true, note: loopNote })
         } else {
           fakePipeSeq -= 1
           c.pipelineId = fakePipeSeq
           existingPipeIds.add(fakePipeSeq) // 让后续折线过滤/归属按计划口径工作
           plannedPipes.push([fakePipeSeq, code])
           pipelines.created++
-          pipelines.items.push({ code, id: fakePipeSeq, created: true, note: '将新建' })
+          pipelines.items.push({ code, id: fakePipeSeq, created: true, note: loopNote ?? '将新建' })
         }
       }
 

@@ -184,11 +184,30 @@ export async function POST(req: NextRequest) {
           pointResults.push({ code: pt.code, id: exists.id, created: false, note: '已存在，直接复用' })
           continue
         }
+        // 需求19：隔离点关联的管线一并导入——AI 结果给出 pipelineCode 但管线清单缺失/未导入时，自动补建该管线，
+        // 避免隔离点管线归属静默丢失（pipelineId 下游被占用检查/PID 归属推导依赖）
+        let pipeId: number | null = null
+        if (pt.pipelineCode) {
+          pipeId = pipelineIdByCode.get(pt.pipelineCode) ?? null
+          if (pipeId == null) {
+            const autoPipe = await tx.pipeline.create({
+              data: {
+                code: pt.pipelineCode,
+                name: pt.pipelineCode,
+                unitId: theUnitId,
+                remark: 'AI 识别 PID 导入·隔离点关联管线自动补建',
+              },
+            })
+            pipelineIdByCode.set(pt.pipelineCode, autoPipe.id)
+            pipelineResults.push({ code: pt.pipelineCode, id: autoPipe.id, created: true, note: '随隔离点自动补建' })
+            pipeId = autoPipe.id
+          }
+        }
         const created = await tx.isoPointMaster.create({
           data: {
             code: pt.code,
             name: pt.name || pt.code,
-            pipelineId: pt.pipelineCode ? pipelineIdByCode.get(pt.pipelineCode) ?? null : null,
+            pipelineId: pipeId,
             location: pt.location || null,
             remark: 'AI 识别 PID 导入',
           },
