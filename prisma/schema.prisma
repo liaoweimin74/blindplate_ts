@@ -431,7 +431,7 @@ model PidDiagram {
 /// 通用附件（移动端现场照片/录音；文件落盘 uploads/ 目录，元数据入库）
 model Attachment {
   id           String   @id @default(cuid())
-  bizType      String // SITE_SURVEY现场勘察 | DISPOSAL_CONFIRM工艺处置确认 | BRIEFING现场交底 | EXECUTION作业执行 | ACCEPTANCE作业验收
+  bizType      String // SITE_SURVEY现场勘察 | DISPOSAL_CONFIRM工艺处置确认 | BRIEFING现场交底 | EXECUTION作业执行 | ACCEPTANCE作业验收 | TICKET_CREW作业人员验资（身份证/资质证书）
   bizId        Int? // 业务记录 id（survey/confirmation/briefing/ticket/acceptance 主键）
   bizCode      String? // 业务编号快照（WR-/BP- 等）
   pointCode    String? // 关联隔离点编码（勘察按点位拍照分组用）

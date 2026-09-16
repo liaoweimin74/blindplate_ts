@@ -4,8 +4,8 @@ import { jsonError } from '@/lib/bp-server-utils'
 
 export const dynamic = 'force-dynamic'
 
-/** 允许的业务附件类型（防乱挂） */
-const BIZ_TYPES = ['SITE_SURVEY', 'DISPOSAL_CONFIRM', 'BRIEFING', 'EXECUTION', 'ACCEPTANCE'] as const
+/** 允许的业务附件类型（防乱挂）：作业人员验资材料（身份证/资质证书）为 TICKET_CREW */
+const BIZ_TYPES = ['SITE_SURVEY', 'DISPOSAL_CONFIRM', 'BRIEFING', 'EXECUTION', 'ACCEPTANCE', 'TICKET_CREW'] as const
 /** 允许的附件种类 */
 const KINDS = ['PHOTO', 'AUDIO'] as const
 /** 单文件上限：照片 10MB / 录音 25MB */

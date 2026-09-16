@@ -6,6 +6,7 @@ import { BadgePlus, IdCard, Loader2, Trash2, UserRound, Award } from 'lucide-rea
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
 import { uploadFile, compressImage, attUrl, type AttachmentDto, type UploadMeta } from '@/components/bp/bp-media'
 
@@ -66,6 +67,8 @@ function CertPhotoSlot(props: {
 }) {
   const { photos, onChange, meta, multiple, disabled, label } = props
   const inputRef = useRef<HTMLInputElement>(null)
+  // 已成功上传的照片（单张模式：photos 始终占 1 位，url 为空代表尚未上传——上传按钮是否显示看这个）
+  const shown = photos.filter((p) => p.url)
   const [uploading, setUploading] = useState(false)
   const { toast } = useToast()
 
@@ -90,7 +93,7 @@ function CertPhotoSlot(props: {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {photos.filter((p) => p.url).map((p, i) => (
+      {shown.map((p, i) => (
         <div key={`${p.id}-${i}`} className="group relative h-14 w-20 overflow-hidden rounded-md border border-stone-200 bg-stone-100">
           { }
           <img src={p.url!} alt={`${label} ${i + 1}`} className="h-full w-full object-cover" />
@@ -106,7 +109,8 @@ function CertPhotoSlot(props: {
           )}
         </div>
       ))}
-      {(multiple || photos.length === 0) && !disabled && (
+      {/* 修复：单张模式上传按钮按「已上传数」判断——此前用 photos.length（始终≥1）导致身份证照片上传入口永不渲染 */}
+      {(multiple || shown.length === 0) && !disabled && (
         <button
           type="button"
           disabled={uploading}
@@ -114,7 +118,7 @@ function CertPhotoSlot(props: {
           className="flex h-14 w-20 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-stone-300 text-stone-400 transition-colors hover:border-teal-400 hover:bg-teal-50/50 hover:text-teal-600 disabled:opacity-60"
         >
           {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgePlus className="h-4 w-4" />}
-          <span className="text-[9px] leading-none">{uploading ? '上传中…' : photos.length ? '继续上传' : label}</span>
+          <span className="text-[9px] leading-none">{uploading ? '上传中…' : shown.length ? '继续上传' : label}</span>
         </button>
       )}
       <input ref={inputRef} type="file" accept="image/*" multiple={multiple} className="hidden" onChange={(e) => void handleFiles(e.target.files)} />
@@ -153,26 +157,14 @@ export function CrewEditor(props: {
         const ok = certComplete(c)
         return (
           <div key={idx} className={cn('rounded-lg border p-2.5 space-y-2', ok ? 'border-teal-200 bg-teal-50/40' : 'border-amber-300 bg-amber-50/40')}>
+            {/* 头部行：序号 + 完善状态 + 删除（姓名/身份证号各自独立一整行，移动端窄屏不再挤压） */}
             <div className="flex items-center gap-1.5">
               <span className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white', ok ? 'bg-teal-600' : 'bg-amber-500')}>
                 {idx + 1}
               </span>
               <UserRound className="h-3.5 w-3.5 shrink-0 text-stone-400" />
-              <Input
-                className="h-7 w-24 text-xs"
-                placeholder="姓名 *"
-                value={c.name}
-                disabled={disabled}
-                onChange={(e) => patch(idx, { name: e.target.value })}
-              />
-              <Input
-                className="h-7 flex-1 font-mono text-xs"
-                placeholder="身份证号（15/18 位）*"
-                value={c.idCard}
-                disabled={disabled}
-                onChange={(e) => patch(idx, { idCard: e.target.value })}
-              />
-              <span className={cn('shrink-0 text-[10px]', ok ? 'text-teal-600' : 'text-amber-600')}>{ok ? '✓ 材料齐' : '待完善'}</span>
+              <span className="text-[11px] font-semibold text-stone-600">人员 {idx + 1}</span>
+              <span className={cn('ml-auto shrink-0 text-[10px]', ok ? 'text-teal-600' : 'text-amber-600')}>{ok ? '✓ 材料齐' : '待完善'}</span>
               <Button
                 type="button" variant="ghost" size="sm"
                 className="h-7 w-7 shrink-0 p-0 text-rose-500 hover:bg-rose-50 hover:text-rose-600"
@@ -182,6 +174,28 @@ export function CrewEditor(props: {
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
+            </div>
+            {/* 姓名 · 独立一整行 */}
+            <div className="space-y-1 pl-6">
+              <Label className="text-[10px] text-stone-500">姓名 *</Label>
+              <Input
+                className="h-8 w-full text-xs"
+                placeholder="请输入作业人员姓名"
+                value={c.name}
+                disabled={disabled}
+                onChange={(e) => patch(idx, { name: e.target.value })}
+              />
+            </div>
+            {/* 身份证号 · 独立一整行 */}
+            <div className="space-y-1 pl-6">
+              <Label className="text-[10px] text-stone-500">身份证号（15/18 位）*</Label>
+              <Input
+                className="h-8 w-full font-mono text-xs"
+                placeholder="请输入 15 或 18 位身份证号码"
+                value={c.idCard}
+                disabled={disabled}
+                onChange={(e) => patch(idx, { idCard: e.target.value })}
+              />
             </div>
             <div className="grid grid-cols-1 gap-2 pl-6 sm:grid-cols-2">
               <div className="space-y-1">
