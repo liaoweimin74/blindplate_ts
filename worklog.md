@@ -433,3 +433,22 @@ Stage Summary:
 - 远程同步至 52e0499：Task 108（需求26 移动端扫码加入隔离点）、Task 109（开票逐人验资三修复：身份证照片入口/姓名身份证整行/TICKET_CREW bizType）、Task 110 前置排查（uploads 目录恢复+67 占位图）全部上云
 - 运维事实更新：GITHUB_TOKEN 已 5 次被平台抹除——push 遇缺失直接要 PAT 的纪律持续有效；新 token 已入库 .env（check-ignore 确认不追踪）
 - git 纪律保持：后续 push 仍仅凭用户明示指令
+
+---
+Task ID: 111
+Agent: 主会话(Z.ai Code)
+Task: 用户需求——「web端作业任务/开作业表中也应该可以查看作业票明细内容（包括照片）」
+
+Work Log:
+- 【侦察】用户所指「作业任务/开作业表」= 侧边栏 task-center 分组「作业任务→开作业票」（moduleKey ticket-mgmt → task-mgmt.tsx），非我最初以为的 work-requests；主战场 task-mgmt.tsx 的票证页签（需求卡片→票列表）与审批 Dialog 均只有文本（监护人/作业人/安全措施 line-clamp-2），无任何照片查看能力；顺带发现 work-requests.tsx 需求详情弹窗的作业票区块同样无明细入口
+- 【数据链路确认】后端 GET /api/work-tickets 与 GET /api/work-requests/[id] 均 findMany 全字段返回（含 workerCerts 验资 JSON），零后端改动；仅前端类型（task-mgmt TicketRow / work-requests tickets 元素）缺 workerCerts 声明
+- 【实现 task-mgmt.tsx】①TicketRow 补 workerCerts?: string|null ②票卡片「打印」旁加 teal「明细」toggle（ChevronDown 旋转，aria-expanded），展开区=安全措施全文（whitespace-pre-line）+「作业人员验资材料」照片墙（CrewWall compact，与审批中心同款）③审批 Dialog：安全措施 line-clamp-2→whitespace-pre-line line-clamp-4 + 验资照片墙 ④state ticketDetailOpen: Record<number,boolean>（key=票 id，跨页保留）
+- 【实现 work-requests.tsx】需求详情弹窗作业票卡片同款「票面明细」toggle+展开区（安全措施+CrewWall）；CrewWall/ChevronDown import；tickets 类型补 workerCerts
+- 【MultiEdit 非原子性四遇】首轮 6 编辑第 3 条因 tickets/ticket 两处同款类型定义不唯一整体中断（前 2 条 import 已落位）——按固化纪律先 rg 盘点（Edit1/2 落位、3~6 未执行），补发时用 tickets 行特有前缀（pointId?...）保唯一，剩余 4 条一次通过
+- 【QA·agent-browser】作业任务→开作业票：016 的 8 张票全部渲染「明细」按钮 → 点开 BP-202609-019：安全措施 5 条+廖为民「材料齐全」teal 卡+身份证/资质双缩略图（naturalWidth=640 两张全加载）✓ → 收起/再展开 toggle 闭环（收起后照片 DOM 归零、再展开恢复）✓ → 照片 <a> href=/api/attachments/<id>/raw 且 curl 200 ✓ → 审批弹窗（019 待批准）：验资照片墙+安全措施 4 行+审批按钮齐全截图 ✓；作业需求详情弹窗：8 个「票面明细」→ 展开验证同款照片墙（Task 110 重建占位图清晰渲染）✓；QA 零落库（纯浏览操作）
+- 【commit】1c2fbf1（2 文件 +60/-7）
+
+Stage Summary:
+- 需求闭环：WEB 端「作业任务→开作业票」与「作业需求」详情弹窗的每张作业票现在都可展开「票面明细」查看安全措施全文+逐人验资材料照片（身份证/资质，点击看原图）；task-mgmt 审批弹窗同步加照片墙——至此 WEB 端三处作业票场景（开票页签/审批弹窗/需求详情）+ 审批中心 + 移动端全部具备验资照片查看能力，体验统一
+- 复用 CrewWall 零新组件；后端零改动；教育固化：MultiEdit 失败先盘点再补剩余
+- 本地领先远程 1 提交（1c2fbf1）待用户「push」
