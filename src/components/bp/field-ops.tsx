@@ -216,12 +216,13 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
   // 各环节待办（按角色可见性聚合）
   const surveyTodos = useMemo(() => hasRole(role, ROLES.survey) ? reqs.filter((r) => r.status === 'PENDING_SURVEY') : [], [reqs, role])
   const confirmTodos = useMemo(() => hasRole(role, ROLES.confirm) ? reqs.filter((r) => r.status === 'PENDING_CONFIRM') : [], [reqs, role])
-  // 交底：已批准的票（需求处于 TICKET_APPROVED）；区分 未交底 / 已交底待确认
+  // 交底：已批准的票（Task 112：一票一板部分票批准时工单仍为 TICKET_ISSUED，已批的票也应可交底——放宽到签发后即入列）；
+  // 区分 未交底 / 已交底待确认
   // 修复（Task 97-R）：排除已有生效交底（CONFIRMED）的票——避免重复交底入口（该类票已属 execStartTodos 待开工区）
   const briefNewTodos = useMemo(() => {
     if (!hasRole(role, ROLES.briefNew)) return []
     return tickets.filter((t) => t.status === 'APPROVED'
-      && reqs.find((r) => r.id === t.workRequestId)?.status === 'TICKET_APPROVED'
+      && ['TICKET_ISSUED', 'TICKET_APPROVED'].includes(reqs.find((r) => r.id === t.workRequestId)?.status ?? '')
       && !briefings.some((b) => b.ticketId === t.id && b.status === 'CONFIRMED'))
   }, [tickets, reqs, briefings, role])
   const briefConfirmTodos = useMemo(() => hasRole(role, ROLES.briefConfirm) ? briefings.filter((b) => b.status === 'PENDING') : [], [briefings, role])

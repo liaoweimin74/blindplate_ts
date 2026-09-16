@@ -45,8 +45,9 @@ export async function POST(req: NextRequest) {
     if (wid === null) return jsonError('无效的 workRequestId')
     const request = await db.workRequest.findUnique({ where: { id: wid } })
     if (!request) return jsonError('作业需求不存在', 404)
-    if (request.status !== 'TICKET_APPROVED' && request.status !== 'IN_PROGRESS') {
-      return jsonError(`当前需求状态为 ${request.status}，仅作业票批准后（未验收前）可做现场交底`)
+    // Task 112：一票一板部分票批准（TICKET_ISSUED）时，已批准的票也应可交底——交底门禁放宽到票级由开工 API 兜底
+    if (!['TICKET_ISSUED', 'TICKET_APPROVED', 'IN_PROGRESS'].includes(request.status)) {
+      return jsonError(`当前需求状态为 ${request.status}，仅作业票签发后（未验收前）可做现场交底`)
     }
     const briefingUser = str(body.briefingUser)
     if (!briefingUser) return jsonError('交底人不能为空')
