@@ -328,3 +328,22 @@ Stage Summary:
 - 需求24 完成：PID 组态连线属性面板现支持就地编辑管线主数据（编码/名称/所属装置），交互与设备编辑完全对齐（按钮位置/表单结构/保存刷新链路一致），管线名称修改即时落库并同步全站引用
 - MultiEdit 非原子性踩坑：部分成功后重复编辑报「did not appear verbatim」——后续大文件多编辑应先验证每处 old_str 唯一性与相邻性
 - QA 数据零残留：管线名称已还原、图编辑未保存、验证码会话一次性
+
+---
+Task ID: 107
+Agent: 主会话(Z.ai Code)
+Task: 用户需求25——移动端预览中现场勘察时选择隔离点应可选择隔离点的通盲状态
+
+Work Log:
+- 【侦察】需求20 已建立通盲状态动态推导（BLINDED盲断/OPEN导通/WORKING作业中/null常通，不落库，GET /api/iso-point-masters 返回 blindState/blindLabel）；移动端 SurveyPage（field-ops.tsx）勘察选点为纯多选 chips，提交 pointRefs 仅 4 字段；后端 survey POST 对 pointRefs JSON 透传（L31），快照字段零后端改动
+- 【口径】人工核实三态 THROUGH常通/BLINDED盲断/OPEN导通（默认常通），与需求20推导口径对齐；WORKING 为动态作业态不开放人工选、不参与一致性判断
+- 【实现 field-ops.tsx】MasterPoint 接口补 blindState/blindLabel；新增 SurveyBlindState 类型 + SURVEY_BLIND_STATES 常量（选中态配色：常通 stone/盲断 rose/导通 emerald）+ isSurveyBlindState 守卫；SurveyPage 加 blindByPoint state（选点初始化默认常通、回显从 pointRefs JSON 恢复、提交写 blindState+blindLabel 快照）；按点位拍照卡内新增「现场通盲核实」三态 radiogroup + 右侧「台账推导：xxx」参考 + 人工与推导不一致时 amber「⚠ 与台账推导不一致，请现场复核确认」；提交 toast 带核实计数
+- 【实现 work-requests.tsx】PointRef 接口 + blindState、parsePointRefs 解析（关键防丢点：WEB 端编辑勘察保存重写 refs，不解析会抹掉移动端填的状态）；PointRefChips 渲染四态徽章（POINT_BLIND_LABEL/CLS 与 BLIND_BADGE_CLS 同口径，含 WORKING violet）；PointRefPicker addRef 新点位默认 THROUGH 口径统一
+- 【QA·agent-browser】登录（验证码 A6TF）→ 移动端预览 → 现场 Tab → WR-202609-016 去勘察 → 选 IP-E101-01：三态出现、默认常通、台账推导「盲断（盲板在装）」、不一致 amber 警示自动触发；切盲断警示消失（一致）、切导通警示重现（已全量复核）→ 照片上传踩坑：agent-browser upload 命令对 React 受控 input 不触发 onChange，改 eval 构造 DataTransfer+dispatchEvent 成功（提交按钮照片 0→1 张）→ 定稿盲断+填现场条件提交 → 落库验证 pointRefs 带 blindState:"BLINDED"/blindLabel:"盲断"、需求状态推至 SURVEYED → WEB 端需求详情勘察记录 chips 显示「盲断」徽章 ✅
+- 【还原】SiteSurvey 24 删除、wr33 状态回 PENDING_SURVEY、qa-e2e.png 附件记录+uploads 物理文件删除（审计 STATUS_CHANGE 流水按惯例保留）；tsc/eslint 双零错误、dev.log 无运行时错误
+- 【commit】d9fe2ca（2 文件 +79/-10 + db 留痕）；本地领先远程 9 提交待用户「push」
+
+Stage Summary:
+- 需求25 完成：移动端勘察选隔离点时现场核实通盲状态（三态 radiogroup + 台账推导参考 + 不一致复核警示），快照随 pointRefs 落库、WEB 端勘察记录/JSA 引用处徽章回读，桌面编辑不丢移动端数据
+- 架构决策：通盲核实走「勘察快照」而非改 IsoPointMaster 落库——台账真实通盲仍由需求20 动态推导唯一可信源，人工核实是时点快照供方案编制参考，二者不一致时 UI 主动提示复核形成闭环
+- E2E 新经验：React 受控 file input 需 eval+DataTransfer 注入（agent-browser upload 无效）；移动端预览侧边导航用 eval 点全部同名按钮最稳（closest('aside') 会失配）
