@@ -264,3 +264,18 @@ Stage Summary:
 - 需求 22a/22b/23 三项全部完成并 E2E 实证；扫码核对语义更新：移动端（X-Client: mobile）现场环节强制，桌面端免扫码——后续直调 start/finish/acceptances 无 header 即可跳过校验（QA 注入数据时无需再带核对码，带 mobile 头才设卡）
 - 数据坑：需求 33 所属装置「脱苯装置」下管线均无主数据点位/管线无装置归属（AUTO-P21 unitId=null）→ AI 推举报「无法自动推举请手动选择」（防幻觉正确行为）；待用户定夺是否给历史 AUTO- 管线批量补装置归属
 - 待办不变：QrSignSheet 人证核验 E2E、盲板库存周转图表、已完结工单照片墙回查、SSE 进度推送；本地领先远程 1 提交（d58c6d6）待用户「push」
+
+---
+Task ID: 104
+Agent: 主会话(Z.ai Code)
+Task: 用户反馈「WEB端现场勘察里加入隔离点里还是扫码加入的按钮」——需求23 补漏
+
+Work Log:
+- 【定位】rg 全项目「扫码」+ iso-scan-sheet import 盘点：IsoScanSheet 仅两处引用——field-ops.tsx（移动端预览，保留）与 work-requests.tsx PointRefPicker（WEB 端勘察/方案引用点位选择器，Task 103 漏改处）；用户所指即后者「扫码加入」按钮（ScanLine + teal 配色，Task 96/96-b 引入）
+- 【修改】work-requests.tsx PointRefPicker：删「扫码加入」按钮、scanOpen state、addRefByScan 函数、IsoScanSheet 渲染及 import、ScanLine import、局部 toast（删 addRefByScan 后无引用）；jsdoc 注明需求23边界——桌面端以「选管线→选隔离点→添加」加入，扫码属移动端专属环节；「打印标签」（需求10，批量打印供移动端扫码核对）与「AI 推荐点位」均保留
+- 【验证】tsc src/ 零错误；ESLint src/ 零错误（基线 5 错误全在 scripts/ PPT 脚本）；dev server 曾挂→孤儿化重启 200；agent-browser 实证 WR-202609-016 勘察表单：「扫码加入」零命中，「添加该管线隔离点/打印标签/AI 推荐点位/AI 勘察要点」全部在位
+- 【commit】7f1463c fix(bpm) 1 文件 +5/-34；本地领先远程 3 提交（d58c6d6+6524cab+7f1463c）待用户「push」
+
+Stage Summary:
+- 需求23 完整闭环：WEB 端全站已无「加入隔离点」扫码入口（task-mgmt 弹窗核对区 + work-requests 勘察扫码按钮两处均清）；扫码 UI 仅存移动端预览（field-ops 开工/完工/验收 gate + 扫码签到）；服务端 X-Client: mobile 判定不回退
+- 移动端扫码 gate 本次未触碰，逻辑与 Task 102/103 保持一致
