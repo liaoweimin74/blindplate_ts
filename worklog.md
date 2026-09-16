@@ -139,3 +139,19 @@ Work Log:
 Stage Summary:
 - 主 worklog 瘦身 96%（3121→126 行），历史全文安全移入 worklog-archive.md（同仓库同保护级别）
 - 「需求 1~17 基线」仍留主文件 Task 98 节原位；cron payload 中相关指针描述继续有效
+
+---
+Task ID: 99-PUSH2
+Agent: 主会话(Z.ai Code)
+Task: 用户「push」——归档瘦身提交上云 + 敏感扫描命中研判事件
+
+Work Log:
+- 【推送】84b20c2（worklog 归档瘦身）上云成功 447e128..84b20c2
+- 【扫描命中研判】归档使历史 worklog 全文进入 diff → 扫描器命中 3 行：①Task 91 时代旧 token 指纹（前12+省略+后6，非完整 93 位，不可复用且该 token 已失效）②③github_pat_xxx/… 纯占位符；实证完整 token（新旧均）从未入库（rg 零命中）；且这些指纹行在 Task 91/97 时代早已存在于远程历史 blob，本次搬运未引入新泄露
+- 【清洗】worklog-archive.md 中旧指纹行已 sed 脱敏为「github_pat_[旧token指纹已清洗]」（历史 blob 中的指纹仍在；如需彻底清除须 rewrite history+撤销旧 PAT，因 token 已失效风险极低，默认不执行）
+- 【流程缺陷修正】本轮扫描与 push 误串同一命令（echo 后无条件继续 push）——今后敏感扫描必须独立调用，命中时停下人工研判，严禁与 push 同条命令串联
+- 【三方验证】ls-remote refs/heads/main = 本地 HEAD（本节提交后以最终推送为准）
+
+Stage Summary:
+- 归档瘦身版本上云完成；敏感命中为历史指纹文字而非完整 token，无实质泄露；文件层已清洗
+- 流程加固：扫描/push 分离执行写入手册（cron payload 后续轮次同步）
