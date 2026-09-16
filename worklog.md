@@ -192,3 +192,22 @@ Stage Summary:
 - 需求 19/20/21/21(二) 四项全部完成并验证；管线编号自本轮起统一「起点-终点-序号」格式（旧式编码兼容占位）
 - 测试注意：seed 已有 T-101/E-201 设备与 T-101-E-101/-102 管线，QA 时勿误删业务数据
 - 待办不变：验收页扫码 gate E2E 补跑、移动端 vs WEB 功能适配分析（用户搁置中）、push 待指令
+
+---
+Task ID: 102
+Agent: 主会话(Z.ai Code)
+Task: cron 巡检（Job 388892）——全页 QA 回归 + 后端扫码核对强校验（需求 12/16 服务端安全加固）
+
+Work Log:
+- 【QA 回归】dev server 存活 200 无运行时错误；agent-browser 巡检：需求列表无作业类型列（Task 100 保持）✅隔离点主数据「通盲状态」列在位（需求20，列在 iso-point-masters 表非管线表，设计如此）✅PID 组态装置徽章 title=所属装置（需求21）✅统计分析 KPI/图表正常无类型残留✅台账/盲板状态正常
+- 【安全加固·新 lib】bp-scan-verify.ts：verifyPointScan 服务端比对 submitted scannedPointCode vs 票面编码（trim+大小写宽容）；票面无编码跳过不设卡（历史票兼容）；失败 SCAN_REJECT 审计+403（error 含 expected/scanned 说明+scanVerifyRequired 标记），成功 SCAN_VERIFY 审计
+- 【API 三路由】start/finish：readBody 提前+extractActor 复用，扫码校验置于交底/管线占用校验后、状态变更前；acceptances：查需求全部生效票（non-VOID+pointCode 非空）聚合 expectedCodes，任一命中即过（多点顺序施工验收场景），拒绝路径同样留痕；scanActor 命名避开既有 actor 冲突
+- 【前端接线】field-ops 移动端三 gate（startTicketConfirmed/finishConfirmed/doSubmit 均增 scannedPointCode 可选参，IsoScanSheet onScan 传实扫码）；task-mgmt 桌面端 start/finish confirm 状态扩展 verifyExpected+confirmCode，弹窗渲染 amber 核对区（ScanLine 图标+mono 输入框+实时三态提示 amber/rose/emerald+确认钮禁用联动），close 不设卡
+- 【E2E 实证】临时翻转 ticket15(CLOSED→APPROVED)+request8(COMPLETED→APPROVED)+注入临时 CONFIRMED 交底：curl 三态 start（无码403/错码403/对码200含小写宽容）/finish 三态/acceptances 拒绝双态（expectedPointCodes 正确聚合3票编码）；审计 8 条（6 REJECT+2 VERIFY）内容与操作人齐全；agent-browser 移动端模拟扫码开工→「扫码核对通过，已开工」toast；桌面完工弹窗错码禁用+rose→对码可用+emerald→确认成功「作业已完工」；restore 精确还原（票 CLOSED 原时间戳/需求 COMPLETED/临时交底删除，审计保留为真实操作记录）
+- 【验证】tsc src/ 零错误；ESLint src/ exit 0；dev.log 无运行时错误；临时 qa-scan-*.ts 脚本与截图全部清理
+- 【commit】ce6ea57 feat(security) 7 文件 +227/-19；本地领先远程 5 提交待用户「push」
+
+Stage Summary:
+- 扫码核对从「纯前端比对」升级为「服务端强校验+全链路审计」：绕过前端直调 API 无法再跳过位置核对（403+SCAN_REJECT 留痕）；扫码成功也留痕（SCAN_VERIFY），核对链完整可回查
+- 测试注意：start/finish/acceptances 带编码票现已强制要求 scannedPointCode，后续 QA 注入数据如需直调这三 API 必须携带核对码
+- 巡检候选不变：QrSignSheet 人证核验 E2E、需求8 六态判定 E2E、盲板库存周转图表、已完结工单照片墙；移动端 vs WEB 适配分析仍搁置待用户明示
