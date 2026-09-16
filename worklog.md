@@ -399,3 +399,21 @@ Stage Summary:
 - 用户 4 问题全闭环：①②③共享组件修复同时解决移动端+WEB 端（同一 CrewEditor），④无需单独改动即自动满足；后端白名单补 TICKET_CREW 是验资上传链路的硬依赖
 - 坑：MultiEdit 非原子性三遇——首次 6 编辑缺 key={idx} 部分生效，盲目全量重发导致 import 不匹配；教训固化为「失败后先 rg 盘点落位再补剩余」
 - 意外发现：巡检 cron 在 QA 窗口期并发测试同一功能并成功上传（白名单修复即时生效），两个 agent 可并行验证同一修复
+
+---
+Task ID: 110
+Agent: 主会话(Z.ai Code)
+Task: 用户报「作业票审批界面没办法打开看到详情，比如照片、资质」——排查与恢复
+
+Work Log:
+- 【排查】移动端审批列表/详情结构正常（点击卡片 → 详情页 setDetail 正常、CrewWall 渲染正常、URL 格式正确 /api/attachments/<id>/raw）；WEB 审批中心「批准」弹窗同样正常（票面+验资照片墙+审批按钮齐全）；期间踩观察坑：eval 里 img.src.slice(-30) 把完整 URL 截断成 /<id>/raw 造成「缺前缀」误判——实际 DB 中 workerCerts 的 idPhotoUrl 完整正确
+- 【根因 1·环境】uploads/ 目录整个丢失（DB 中 67 条附件记录的物理文件全部 404/500「文件已丢失」）——上一轮巡检 cron（389668）QA 清理时误删整目录所致；所有照片场景（勘察/交底/执行/验收/验资）破图
+- 【根因 2·环境】dev server 曾被 cron 用错误命令启动（bash -c "... | Tee-Object" PowerShell 语法混用），next-server 卡死（114% CPU 持续 5 分钟+，端口占用但探活 000）——用户报障时间点页面无响应与此吻合；已 kill 进程树并用标准孤儿化命令重启恢复
+- 【恢复】①重建 uploads/ ②按 DB 记录批量生成 67 张带标注演示占位图（PIL，按 bizType 六色区分：勘察 teal/处置 emerald/交底 violet/执行 amber/验收 sky/验资 amber-700，标注「演示占位图（原文件因 uploads 目录丢失已不可恢复）」+附件ID+storageKey，png/jpeg 按 mimeType 对应格式）③raw 路由抽查 3 条全 200 ④移动端审批详情 BP-202609-019 复核：票面信息+廖为民验资「材料齐全」+身份证/资质照片缩略图全部加载（naturalWidth=640）✅ ⑤WEB 审批弹窗同验 ✅
+- 【顺手还原】cron 误改的 src/lib/bp-scan-verify.ts 文件 mode（755→644，无内容变更）
+- 【commit】uploads/ 在 .gitignore 不入库；db/custom.db 变更随 commit 留痕
+
+Stage Summary:
+- 用户问题闭环：审批详情「打不开/看不到照片」= dev server 卡死（无响应）+ uploads 目录丢失（照片 500）双重环境故障，代码本身无缺陷；两端审批界面的详情与照片墙功能验证完好
+- 【给巡检 cron 的规范】QA 清理附件时严禁删除 uploads/ 整目录——只准按记录的 storageKey 精确 unlink；dev server 启动必须用标准孤儿化命令 ( nohup bunx next dev -p 3000 > dev.log 2>&1 < /dev/null & )，禁用 Tee-Object 等 PowerShell 语法
+- 教训：排查 img 问题时 img.src 是浏览器解析后的绝对 URL，截断查看会误导判断，应打印完整 src 或直接 curl 验证状态码
