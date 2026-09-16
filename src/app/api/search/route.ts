@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { withUnit } from '@/lib/bp-server-utils'
-import { WORK_TYPE_MAP } from '@/lib/bp-types'
 
 export const dynamic = 'force-dynamic'
 
@@ -158,7 +157,7 @@ export async function GET(req: NextRequest) {
         title: p.spec,
         status: p.status,
         createdAt: p.createdAt.toISOString(),
-        extra: [WORK_TYPE_MAP[p.type] ?? p.type, p.material, p.location].filter(Boolean).join(' · ') || null,
+        extra: [p.type, p.material, p.location].filter(Boolean).join(' · ') || null,
         module: 'ledger',
         tab: 'plates',
       })),

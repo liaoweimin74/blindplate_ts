@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiGet, apiPost, fmtDate, fmtDateTime, toLocalInput } from '@/lib/bp-api'
 import {
-  ModuleProps, POINT_ACTION_MAP, STATUS_MAP, TASK_STATUS_MAP, TICKET_STATUS_MAP, URGENCY_MAP, WORK_TYPE_MAP,
+  ModuleProps, POINT_ACTION_MAP, STATUS_MAP, TASK_STATUS_MAP, TICKET_STATUS_MAP, URGENCY_MAP,
 } from '@/lib/bp-types'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
@@ -44,7 +44,7 @@ import { exportCsv } from '@/lib/bp-export'
 interface BpUser { id: string; username: string; name: string; role: string; department?: string | null }
 interface UnitRow { id: number; name: string; code: string }
 interface WorkRequestRow {
-  id: number; code: string; title: string; workType: string; unitId: number; location: string
+  id: number; code: string; title: string; unitId: number; location: string
   medium?: string | null; urgency: string; status: string; plannedStart?: string | null; plannedEnd?: string | null
   unit?: UnitRow | null
 }
@@ -524,7 +524,7 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
                     </div>
                     <div className="text-sm font-medium text-stone-800 line-clamp-1">{req.title}</div>
                     <div className="text-xs text-stone-500">
-                      {req.unit?.name ?? '-'} · {WORK_TYPE_MAP[req.workType] ?? req.workType} · {req.location}
+                      {req.unit?.name ?? '-'} · {req.location}
                     </div>
                     <div className="rounded-lg bg-stone-50 border border-stone-100 px-3 py-2 space-y-2 text-xs text-stone-600">
                       {reqTickets.length > 0 ? (
@@ -1081,7 +1081,6 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
             id: printData.req.id,
             code: printData.req.code,
             title: printData.req.title,
-            workType: printData.req.workType,
             location: printData.req.location,
             pipelineName: null,
             medium: printData.req.medium ?? null,

@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react'
 import { apiGet, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import {
-  STATUS_MAP, URGENCY_MAP, WORK_TYPE_MAP, SCHEME_STATUS_MAP, DISPOSAL_METHOD_MAP,
+  STATUS_MAP, URGENCY_MAP, SCHEME_STATUS_MAP, DISPOSAL_METHOD_MAP,
   POINT_ACTION_MAP, TICKET_STATUS_MAP, TASK_STATUS_MAP, APPROVE_ACTION_MAP, CONCLUSION_MAP,
 } from '@/lib/bp-types'
 import { exportCsv } from '@/lib/bp-export'
@@ -34,7 +34,6 @@ export interface WrPrintApproval {
 export interface WrPrintData {
   code: string
   title: string
-  workType: string
   location: string
   pipelineName?: string | null
   medium?: string | null
@@ -176,10 +175,8 @@ export function WrPrintSheet({ data, approvals, printerName }: {
             <tr>
               <td className="bg-stone-100 font-medium">所属装置</td>
               <td className="w-[20%]">{data.unit?.name ?? '-'}</td>
-              <td className="bg-stone-100 font-medium w-[13%]">作业类型</td>
-              <td className="w-[20%]">{WORK_TYPE_MAP[data.workType] ?? data.workType}</td>
               <td className="bg-stone-100 font-medium w-[13%]">紧急程度</td>
-              <td>{URGENCY_MAP[data.urgency]?.label ?? data.urgency}</td>
+              <td colSpan={3}>{URGENCY_MAP[data.urgency]?.label ?? data.urgency}</td>
             </tr>
             <tr>
               <td className="bg-stone-100 font-medium">作业位置</td>
@@ -738,7 +735,6 @@ export function exportWrArchiveCsv(detail: WrPrintData, printerName: string) {
   kv('需求编号', detail.code)
   kv('需求标题', detail.title)
   kv('所属装置', detail.unit?.name ?? '-')
-  kv('作业类型', WORK_TYPE_MAP[detail.workType] ?? detail.workType)
   kv('紧急程度', URGENCY_MAP[detail.urgency]?.label ?? detail.urgency)
   kv('作业位置', detail.location)
   kv('管线名称', detail.pipelineName ?? '-')

@@ -142,7 +142,6 @@ export async function GET(req: NextRequest) {
         requestId: r.id,
         requestCode: r.code,
         title: r.title,
-        workType: r.workType,
         urgency: r.urgency,
         status: r.status,
         createdAt: r.createdAt,

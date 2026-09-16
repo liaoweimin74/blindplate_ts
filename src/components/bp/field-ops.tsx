@@ -74,7 +74,7 @@ function SurveyLocateBtn({ code, location }: { code?: string | null; location?: 
 
 // ============ 类型 ============
 interface ReqLite {
-  id: number; code: string; title: string; workType: string; location: string
+  id: number; code: string; title: string; location: string
   status: string; medium: string | null; pressure: string | null; temperature: string | null
   urgency: string; plannedStart: string | null; plannedEnd: string | null
   updatedAt?: string | null
@@ -385,7 +385,6 @@ export default function FieldOpsModule({ currentUser, embedded }: ModuleProps & 
 }
 
 // ============ 已完结记录（验收通过后的查询入口：完成即从待办消失，这里可回查全流程结果） ============
-const WORK_TYPE_ZH: Record<string, string> = { ADD: '装盲板', REMOVE: '抽盲板', BOTH: '抽装盲板' }
 
 function HistoryPage(props: {
   reqs: ReqLite[]
@@ -472,7 +471,7 @@ function HistoryCard({ req, tickets, briefings }: { req: ReqLite; tickets: Ticke
         <p className="text-sm font-semibold text-stone-800 line-clamp-1">{req.title}</p>
         <p className="text-[11px] text-stone-400 flex items-center gap-1">
           <MapPin className="w-3 h-3 shrink-0" />
-          <span className="truncate">{req.unit?.name ?? '-'} · {req.location} · {WORK_TYPE_ZH[req.workType] ?? req.workType}</span>
+          <span className="truncate">{req.unit?.name ?? '-'} · {req.location}</span>
         </p>
         <p className="text-[10px] text-stone-400">
           作业票 {linkedTickets.length} 张 · 交底 {reqBriefings.length} 次

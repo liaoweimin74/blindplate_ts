@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiGet, apiPost, fmtDate, fmtDateTime, toLocalInput } from '@/lib/bp-api'
 import {
-  BpUser, ModuleProps, STATUS_MAP, FLOW_STEPS, flowStepIndex, URGENCY_MAP, WORK_TYPE_MAP,
+  BpUser, ModuleProps, STATUS_MAP, FLOW_STEPS, flowStepIndex, URGENCY_MAP,
   SCHEME_STATUS_MAP, DISPOSAL_METHOD_MAP, POINT_ACTION_MAP, TICKET_STATUS_MAP, CONCLUSION_MAP,
   APPROVE_ACTION_MAP, entryActionEventName,
 } from '@/lib/bp-types'
@@ -96,7 +96,7 @@ function parsePointRefs(raw?: string | null): PointRef[] {
 }
 
 interface WRow {
-  id: number; code: string; title: string; workType: string; unitId: number; location: string
+  id: number; code: string; title: string; unitId: number; location: string
   pipelineName?: string | null
   pipelineId?: number | null
   medium?: string | null; pressure?: string | null; temperature?: string | null; reason: string
@@ -280,7 +280,7 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
     return () => window.removeEventListener(entryActionEventName('work-requests'), handler)
   }, [])
   const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ title: '', workType: 'ADD', unitId: '', location: '', pipelineId: '', pipelineName: '', medium: '', pressure: '', temperature: '', reason: '', urgency: 'MEDIUM', plannedStart: '', plannedEnd: '' })
+  const [form, setForm] = useState({ title: '', unitId: '', location: '', pipelineId: '', pipelineName: '', medium: '', pressure: '', temperature: '', reason: '', urgency: 'MEDIUM', plannedStart: '', plannedEnd: '' })
 
   // 取消
   const [cancelId, setCancelId] = useState<number | null>(null)
@@ -463,7 +463,7 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
       })
       toast({ title: '成功', description: '作业需求已创建（草稿）' })
       setCreateOpen(false)
-      setForm({ title: '', workType: 'ADD', unitId: '', location: '', pipelineId: '', pipelineName: '', medium: '', pressure: '', temperature: '', reason: '', urgency: 'MEDIUM', plannedStart: '', plannedEnd: '' })
+      setForm({ title: '', unitId: '', location: '', pipelineId: '', pipelineName: '', medium: '', pressure: '', temperature: '', reason: '', urgency: 'MEDIUM', plannedStart: '', plannedEnd: '' })
       loadList()
     } catch (e) {
       toast({ title: '创建失败', description: e instanceof Error ? e.message : '', variant: 'destructive' })
@@ -888,8 +888,8 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
             <Button size="sm" variant="outline" className="h-9" disabled={displayRows.length === 0}
               title="导出当前筛选结果"
               onClick={() => exportCsv('作业需求',
-                ['需求编号', '标题', '装置', '作业类型', '作业位置', '介质', '紧急度', '状态', '申请人', '创建时间'],
-                displayRows.map((r) => [r.code, r.title, r.unit?.name ?? '', WORK_TYPE_MAP[r.workType] ?? r.workType,
+                ['需求编号', '标题', '装置', '作业位置', '介质', '紧急度', '状态', '申请人', '创建时间'],
+                displayRows.map((r) => [r.code, r.title, r.unit?.name ?? '',
                   r.location, r.medium ?? '', URGENCY_MAP[r.urgency]?.label ?? r.urgency,
                   STATUS_MAP[r.status]?.label ?? r.status, r.applicantName, fmtDate(r.createdAt)]))}>
               <Download className="w-4 h-4 mr-1" />导出
@@ -915,7 +915,6 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                   <tr className="text-stone-500">
                     <th className="text-left font-medium px-3 py-2.5">编号/标题</th>
                     <th className="text-left font-medium px-3 py-2.5">装置</th>
-                    <th className="text-left font-medium px-3 py-2.5">类型</th>
                     <th className="text-left font-medium px-3 py-2.5">紧急度</th>
                     <th className="text-left font-medium px-3 py-2.5">申请人</th>
                     <th className="text-left font-medium px-3 py-2.5">状态</th>
@@ -932,7 +931,6 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                         <div className="text-stone-800 font-medium max-w-[220px] truncate">{r.title}</div>
                       </td>
                       <td className="px-3 py-2.5 text-stone-600">{r.unit?.name ?? r.unitId}</td>
-                      <td className="px-3 py-2.5 text-stone-600">{WORK_TYPE_MAP[r.workType] ?? r.workType}</td>
                       <td className="px-3 py-2.5"><Badge variant="outline" className={cn('text-[10px]', URGENCY_MAP[r.urgency]?.className)}>{URGENCY_MAP[r.urgency]?.label ?? r.urgency}</Badge></td>
                       <td className="px-3 py-2.5 text-stone-600">{r.applicantName}</td>
                       <td className="px-3 py-2.5"><StatusBadge status={r.status} /></td>
@@ -980,12 +978,6 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
           <DialogHeader><DialogTitle>新建作业需求</DialogTitle><DialogDescription>盲板抽堵作业申请（保存为草稿，提交后进入现场勘察环节）</DialogDescription></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2"><Field label="需求标题 *"><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="如：E101原油管线检修隔离" /></Field></div>
-            <Field label="作业类型 *">
-              <Select value={form.workType} onValueChange={(v) => setForm({ ...form, workType: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(WORK_TYPE_MAP).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
             <Field label="所属装置 *">
               <Select value={form.unitId} onValueChange={(v) => setForm({ ...form, unitId: v })}>
                 <SelectTrigger><SelectValue placeholder="选择装置" /></SelectTrigger>
@@ -1092,7 +1084,6 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <Info label="所属装置" value={detail.unit?.name} />
-                <Info label="作业类型" value={WORK_TYPE_MAP[detail.workType]} />
                 <Info label="作业位置" value={detail.location} />
                 <Info label="管线名称" value={detail.pipelineName} />
                 <Info label="介质" value={detail.medium} />

@@ -84,12 +84,6 @@ export const PLATE_STATUS_MAP: Record<string, { label: string; className: string
   SCRAPPED: { label: '已报废', className: 'bg-stone-200 text-stone-500 border-stone-300' },
 }
 
-export const WORK_TYPE_MAP: Record<string, string> = {
-  ADD: '装盲板',
-  REMOVE: '抽盲板',
-  BOTH: '抽装盲板',
-}
-
 export const URGENCY_MAP: Record<string, { label: string; className: string }> = {
   LOW: { label: '低', className: 'bg-stone-100 text-stone-600 border-stone-200' },
   MEDIUM: { label: '中', className: 'bg-amber-100 text-amber-700 border-amber-200' },

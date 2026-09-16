@@ -181,7 +181,6 @@ async function main() {
   async function createRequest(data: {
     seq: number
     title: string
-    workType: string
     unitIdx: number
     location: string
     medium: string
@@ -192,7 +191,6 @@ async function main() {
       data: {
         code: `WR-202506-${String(data.seq).padStart(3, '0')}`,
         title: data.title,
-        workType: data.workType,
         unitId: units[data.unitIdx].id,
         location: data.location,
         pipelineName: `${data.medium}管线`,
@@ -211,16 +209,16 @@ async function main() {
     })
   }
 
-  const r1 = await createRequest({ seq: 1, title: 'E101原油管线检修隔离', workType: 'ADD', unitIdx: 0, location: '常压塔进料线 E101入口法兰', medium: '原油', status: 'COMPLETED', days: 25 })
-  const r2 = await createRequest({ seq: 2, title: '再生器旋风分离器检修隔离', workType: 'BOTH', unitIdx: 1, location: '再生器R201待生线', medium: '干气', status: 'IN_PROGRESS', days: 18 })
-  const r3 = await createRequest({ seq: 3, title: '加氢反应器R301入口隔离', workType: 'ADD', unitIdx: 2, location: '反应器R301入口法兰', medium: '氢气', status: 'PENDING_CONFIRM', days: 12 })
-  const r4 = await createRequest({ seq: 4, title: '重整进料换热器检修', workType: 'BOTH', unitIdx: 3, location: 'E401管程入口', medium: '汽油', status: 'ISOLATION_PENDING_REVIEW', days: 8 })
-  const r5 = await createRequest({ seq: 5, title: '酸性水汽提塔顶回流线抽盲板', workType: 'REMOVE', unitIdx: 2, location: 'T302塔顶回流线', medium: '酸性水', status: 'DISPOSAL_PENDING_REVIEW', days: 6 })
-  const r6 = await createRequest({ seq: 6, title: '柴油汽提塔底泵出口隔离', workType: 'ADD', unitIdx: 0, location: 'P102出口法兰', medium: '柴油', status: 'JSA_DONE', days: 4 })
-  const r7 = await createRequest({ seq: 7, title: '液化气脱硫抽提塔检修隔离', workType: 'BOTH', unitIdx: 1, location: 'T501底部出料线', medium: '液化气', status: 'SURVEYED', days: 3 })
-  const r8 = await createRequest({ seq: 8, title: '蒸汽伴热管线临时盲板加装', workType: 'ADD', unitIdx: 3, location: 'MS-204伴热站', medium: '蒸汽', status: 'PENDING_SURVEY', days: 2 })
-  const r9 = await createRequest({ seq: 9, title: '循环水泵出口检修隔离', workType: 'ADD', unitIdx: 0, location: 'P501出口阀后法兰', medium: '循环水', status: 'DRAFT', days: 1 })
-  const r10 = await createRequest({ seq: 10, title: '渣油换热网络抽堵盲板', workType: 'BOTH', unitIdx: 0, location: 'E105/E106管束', medium: '渣油', status: 'PENDING_ACCEPTANCE', days: 9 })
+  const r1 = await createRequest({ seq: 1, title: 'E101原油管线检修隔离', unitIdx: 0, location: '常压塔进料线 E101入口法兰', medium: '原油', status: 'COMPLETED', days: 25 })
+  const r2 = await createRequest({ seq: 2, title: '再生器旋风分离器检修隔离', unitIdx: 1, location: '再生器R201待生线', medium: '干气', status: 'IN_PROGRESS', days: 18 })
+  const r3 = await createRequest({ seq: 3, title: '加氢反应器R301入口隔离', unitIdx: 2, location: '反应器R301入口法兰', medium: '氢气', status: 'PENDING_CONFIRM', days: 12 })
+  const r4 = await createRequest({ seq: 4, title: '重整进料换热器检修', unitIdx: 3, location: 'E401管程入口', medium: '汽油', status: 'ISOLATION_PENDING_REVIEW', days: 8 })
+  const r5 = await createRequest({ seq: 5, title: '酸性水汽提塔顶回流线抽盲板', unitIdx: 2, location: 'T302塔顶回流线', medium: '酸性水', status: 'DISPOSAL_PENDING_REVIEW', days: 6 })
+  const r6 = await createRequest({ seq: 6, title: '柴油汽提塔底泵出口隔离', unitIdx: 0, location: 'P102出口法兰', medium: '柴油', status: 'JSA_DONE', days: 4 })
+  const r7 = await createRequest({ seq: 7, title: '液化气脱硫抽提塔检修隔离', unitIdx: 1, location: 'T501底部出料线', medium: '液化气', status: 'SURVEYED', days: 3 })
+  const r8 = await createRequest({ seq: 8, title: '蒸汽伴热管线临时盲板加装', unitIdx: 3, location: 'MS-204伴热站', medium: '蒸汽', status: 'PENDING_SURVEY', days: 2 })
+  const r9 = await createRequest({ seq: 9, title: '循环水泵出口检修隔离', unitIdx: 0, location: 'P501出口阀后法兰', medium: '循环水', status: 'DRAFT', days: 1 })
+  const r10 = await createRequest({ seq: 10, title: '渣油换热网络抽堵盲板', unitIdx: 0, location: 'E105/E106管束', medium: '渣油', status: 'PENDING_ACCEPTANCE', days: 9 })
 
   // ============ 勘察 / JSA / 方案等关联数据 ============
   console.log('📝 创建勘察/JSA/方案数据...')

@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { apiGet, fmtDateTime } from '@/lib/bp-api'
-import { WORK_TYPE_MAP, PLATE_STATUS_MAP } from '@/lib/bp-types'
+import { PLATE_STATUS_MAP } from '@/lib/bp-types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Printer, X, Loader2 } from 'lucide-react'
@@ -36,7 +36,6 @@ export interface PrintRequest {
   id: number
   code: string
   title: string
-  workType: string
   location: string
   pipelineName?: string | null
   medium?: string | null
@@ -160,9 +159,7 @@ export default function TicketPrint({ ticket, workRequest, onClose }: {
               <td className="bg-stone-100 px-2 py-1.5 font-medium w-[13%]">关联需求</td>
               <td className="px-2 py-1.5 font-mono w-[20%]">{workRequest.code}</td>
               <td className="bg-stone-100 px-2 py-1.5 font-medium w-[13%]">所属装置</td>
-              <td className="px-2 py-1.5 w-[20%]">{workRequest.unitName ?? '-'}</td>
-              <td className="bg-stone-100 px-2 py-1.5 font-medium w-[13%]">作业类型</td>
-              <td className="px-2 py-1.5 w-[21%]">{WORK_TYPE_MAP[workRequest.workType] ?? workRequest.workType}</td>
+              <td className="px-2 py-1.5 w-[20%]" colSpan={3}>{workRequest.unitName ?? '-'}</td>
             </tr>
             <tr>
               <td className="bg-stone-100 px-2 py-1.5 font-medium">作业位置</td>

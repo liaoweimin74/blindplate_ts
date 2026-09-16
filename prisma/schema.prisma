@@ -104,7 +104,6 @@ model WorkRequest {
   id           Int       @id @default(autoincrement())
   code         String    @unique // 需求编号 WR-20250101-001
   title        String
-  workType     String // ADD装盲板 | REMOVE抽盲板 | BOTH抽装盲板
   unitId       Int // 装置
   location     String // 具体位置(管线/设备位号)
   pipelineId   Int? // 引用管线主数据 Pipeline（业务精确引用）

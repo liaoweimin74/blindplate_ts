@@ -31,7 +31,6 @@ export async function POST(req: NextRequest) {
 
     const context = `【作业需求信息】
 编号：${wr.code}；标题：${wr.title}
-作业类型：${wr.workType === 'ADD' ? '加装盲板' : wr.workType === 'REMOVE' ? '拆除盲板' : '抽装盲板（先拆后装或先装后拆）'}
 装置：${unit?.name ?? wr.unitId}；位置：${wr.location}
 管线：${wr.pipelineName ?? pipeline?.name ?? '未关联'}；介质：${wr.medium ?? pipeline?.medium ?? '未知'}；压力：${wr.pressure ?? pipeline?.pressure ?? '未知'}；温度：${wr.temperature ?? '未知'}
 作业原因：${wr.reason}

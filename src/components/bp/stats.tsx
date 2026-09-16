@@ -2,7 +2,7 @@
 // 统计分析：KPI + 筛选栏(装置/月份) + 需求状态分布(点击状态下钻) + 盲板状态分布 + 月度趋势 + 装置排名(点击下钻) + 库存预警 + 状态明细 + 状态下钻明细 + 下钻明细 + 报表导出 + 大屏模式(轮播多页/图表下钻浮层)
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { apiGet, fmtDateTime } from '@/lib/bp-api'
-import { CHANGE_ACTION_MAP, ModuleProps, PLATE_STATUS_MAP, STATUS_MAP, URGENCY_MAP, WORK_TYPE_MAP } from '@/lib/bp-types'
+import { CHANGE_ACTION_MAP, ModuleProps, PLATE_STATUS_MAP, STATUS_MAP, URGENCY_MAP } from '@/lib/bp-types'
 import { useToast } from '@/hooks/use-toast'
 import type { LucideIcon } from 'lucide-react'
 import { PencilRuler, ExternalLink } from 'lucide-react'
@@ -45,7 +45,6 @@ interface WorkRequestRow {
   id: number
   code: string
   title: string
-  workType: string
   unitId: number
   urgency: string
   applicantName?: string | null
@@ -148,12 +147,11 @@ function buildStatsCsv(opts: {
     ...opts.byStatus.map((s) => [s.label, s.count]),
     [],
     ['【需求明细】'],
-    ['需求编号', '标题', '装置', '作业类型', '状态', '紧急程度', '申请人', '创建时间'],
+    ['需求编号', '标题', '装置', '状态', '紧急程度', '申请人', '创建时间'],
     ...opts.rows.map((r) => [
       r.code,
       r.title,
       r.unit?.name ?? '-',
-      WORK_TYPE_MAP[r.workType] ?? r.workType,
       STATUS_MAP[r.status]?.label ?? r.status,
       URGENCY_MAP[r.urgency]?.label ?? r.urgency,
       r.applicantName ?? '-',
@@ -331,12 +329,11 @@ export default function StatsModule(props: ModuleProps) {
 
   const handleExport = () => {
     exportCsv('统计分析下钻',
-      ['需求编号', '标题', '装置', '作业类型', '状态', '紧急程度', '申请人', '创建时间'],
+      ['需求编号', '标题', '装置', '状态', '紧急程度', '申请人', '创建时间'],
       filteredRequests.map((r) => [
         r.code,
         r.title,
         r.unit?.name ?? '-',
-        WORK_TYPE_MAP[r.workType] ?? r.workType,
         STATUS_MAP[r.status]?.label ?? r.status,
         URGENCY_MAP[r.urgency]?.label ?? r.urgency,
         r.applicantName ?? '-',
@@ -669,8 +666,7 @@ export default function StatsModule(props: ModuleProps) {
                       <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">需求编号</th>
                       <th className="text-left font-medium px-3 py-2.5">标题</th>
                       <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">装置</th>
-                      <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">作业类型</th>
-                      <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap w-32">进度</th>
+                                            <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap w-32">进度</th>
                       <th className="text-center font-medium px-3 py-2.5 whitespace-nowrap">紧急程度</th>
                       <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">申请人</th>
                       <th className="text-right font-medium px-3 py-2.5 whitespace-nowrap">创建时间</th>
@@ -688,7 +684,6 @@ export default function StatsModule(props: ModuleProps) {
                         <td className="px-3 py-2.5 font-mono font-semibold text-stone-700 whitespace-nowrap transition-colors group-hover:text-emerald-800">{r.code}</td>
                         <td className="px-3 py-2.5 text-stone-700 max-w-[220px] truncate" title={r.title}>{r.title}</td>
                         <td className="px-3 py-2.5 text-stone-600 whitespace-nowrap">{r.unit?.name ?? '-'}</td>
-                        <td className="px-3 py-2.5 text-stone-600 whitespace-nowrap">{WORK_TYPE_MAP[r.workType] ?? r.workType}</td>
                         <td className="px-3 py-2.5 min-w-[132px]">
                           <MiniFlowProgress status={r.status} />
                         </td>
@@ -736,7 +731,6 @@ export default function StatsModule(props: ModuleProps) {
                   <thead className="sticky top-0 bg-stone-50 text-stone-500">
                     <tr>
                       <th className="text-left font-medium px-3 py-2.5">规格</th>
-                      <th className="text-left font-medium px-3 py-2.5">类型</th>
                       <th className="text-left font-medium px-3 py-2.5">材质</th>
                       <th className="text-right font-medium px-3 py-2.5">数量</th>
                       <th className="text-right font-medium px-3 py-2.5">最低库存</th>
@@ -858,8 +852,7 @@ export default function StatsModule(props: ModuleProps) {
                     <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">需求编号</th>
                     <th className="text-left font-medium px-3 py-2.5">标题</th>
                     <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">装置</th>
-                    <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">作业类型</th>
-                    <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap w-32">进度</th>
+                                        <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap w-32">进度</th>
                     <th className="text-center font-medium px-3 py-2.5 whitespace-nowrap">状态</th>
                     <th className="text-center font-medium px-3 py-2.5 whitespace-nowrap">紧急程度</th>
                     <th className="text-left font-medium px-3 py-2.5 whitespace-nowrap">申请人</th>
@@ -872,7 +865,6 @@ export default function StatsModule(props: ModuleProps) {
                       <td className="px-3 py-2.5 font-mono font-semibold text-stone-700 whitespace-nowrap">{r.code}</td>
                       <td className="px-3 py-2.5 text-stone-700 max-w-[220px] truncate" title={r.title}>{r.title}</td>
                       <td className="px-3 py-2.5 text-stone-600 whitespace-nowrap">{r.unit?.name ?? '-'}</td>
-                      <td className="px-3 py-2.5 text-stone-600 whitespace-nowrap">{WORK_TYPE_MAP[r.workType] ?? r.workType}</td>
                       <td className="px-3 py-2.5 min-w-[132px]">
                         <MiniFlowProgress status={r.status} />
                       </td>
@@ -1519,7 +1511,7 @@ function StatsBigScreen({ onExit }: { onExit: () => void }) {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-stone-100" title={r.title}>{r.title}</span>
                         <span className="text-[11px] text-stone-500">
-                          {r.unit?.name ?? '-'} · {WORK_TYPE_MAP[r.workType] ?? r.workType} · {fmtDateTime(r.createdAt)}
+                          {r.unit?.name ?? '-'} · {fmtDateTime(r.createdAt)}
                         </span>
                       </span>
                       <MiniFlowProgress status={r.status} className="hidden shrink-0 sm:flex" />

@@ -5,7 +5,6 @@ import { generateCode, jsonError, num, readBody, str, toDate, withUnit } from '@
 
 export const dynamic = 'force-dynamic'
 
-const WORK_TYPES = ['ADD', 'REMOVE', 'BOTH']
 const URGENCIES = ['LOW', 'MEDIUM', 'HIGH']
 
 /** GET /api/work-requests?status=&keyword=&unitId= → 列表（含 unit，时间倒序） */
@@ -61,16 +60,14 @@ export async function POST(req: NextRequest) {
   try {
     const body = await readBody(req)
     const title = str(body.title)
-    const workType = str(body.workType)
     const location = str(body.location)
     const reason = str(body.reason)
     const applicantId = str(body.applicantId)
     const applicantName = str(body.applicantName)
     const unitId = num(body.unitId)
-    if (!title || !workType || !location || !reason || !applicantId || !applicantName) {
-      return jsonError('标题、作业类型、位置、作业原因和申请人不能为空')
+    if (!title || !location || !reason || !applicantId || !applicantName) {
+      return jsonError('标题、位置、作业原因和申请人不能为空')
     }
-    if (!WORK_TYPES.includes(workType)) return jsonError('作业类型必须为 ADD/REMOVE/BOTH')
     if (unitId === null) return jsonError('所属装置不能为空')
     const unit = await db.unit.findUnique({ where: { id: unitId } })
     if (!unit) return jsonError('所属装置不存在', 404)
@@ -87,7 +84,6 @@ export async function POST(req: NextRequest) {
       data: {
         code,
         title,
-        workType,
         unitId,
         location,
         pipelineId: num(body.pipelineId),

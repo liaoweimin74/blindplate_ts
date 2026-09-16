@@ -28,7 +28,6 @@ export interface RetrievalIntent {
 export interface RetrievalInput {
   code: string
   title: string
-  workTypeText: string
   unitName: string
   location: string
   pipelineName: string | null
@@ -56,7 +55,6 @@ const s = (v: string[]) => v.map((x) => String(x ?? '').trim()).filter((x) => x.
 export async function analyzeRetrievalIntent(input: RetrievalInput): Promise<RetrievalIntent> {
   const context = `【作业需求（全字段）】
 编号：${input.code}；标题：${input.title}
-作业类型：${input.workTypeText}
 所属装置：${input.unitName}
 作业位置：${input.location || '（未填）'}
 关联管线：${input.pipelineName ?? '未关联'}；介质：${input.medium ?? '未知'}；压力：${input.pressure ?? '未知'}；温度：${input.temperature ?? '未知'}

@@ -274,7 +274,6 @@ interface DossierChain {
   requestId: number
   requestCode: string
   title: string
-  workType: string
   urgency: string
   status: string
   createdAt: string
@@ -334,7 +333,6 @@ const ANCHOR_LABEL: Record<Anchor, string> = { top: '顶部', right: '右侧', b
 const DISPOSAL_METHOD_LABEL: Record<string, string> = {
   VENT: '泄压降压', DRAIN: '排净', REPLACE: '置换', PURGE: '吹扫', STEAM: '蒸煮', GAS_TEST: '气体检测', ISOLATE: '切断加盲板', OTHER: '其他',
 }
-const WORK_TYPE_LABEL: Record<string, string> = { ADD: '装盲板', REMOVE: '抽盲板', BOTH: '抽装盲板' }
 
 interface ShapeLibItem {
   type: PidShapeType
@@ -1444,7 +1442,6 @@ function DossierChainCard({ chain }: { chain: DossierChain }) {
         </div>
         <div className="mt-1 text-xs font-medium text-stone-700">{chain.title}</div>
         <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-stone-500">
-          <span>{WORK_TYPE_LABEL[chain.workType] ?? chain.workType}</span>
           {chain.location && <span>位置：{chain.location}</span>}
           <span>申请人：{chain.applicantName}</span>
         </div>

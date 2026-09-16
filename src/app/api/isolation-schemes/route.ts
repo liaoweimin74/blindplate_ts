@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const requests = reqIds.length
       ? await db.workRequest.findMany({
           where: { id: { in: reqIds } },
-          select: { id: true, code: true, title: true, status: true, unitId: true, workType: true },
+          select: { id: true, code: true, title: true, status: true, unitId: true },
         })
       : []
     const reqMap = new Map(requests.map((r) => [r.id, r]))

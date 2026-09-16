@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { apiGet, fmtDateTime } from '@/lib/bp-api'
 import {
-  WORK_TYPE_MAP, POINT_ACTION_MAP, DISPOSAL_METHOD_MAP, SCHEME_STATUS_MAP,
+  POINT_ACTION_MAP, DISPOSAL_METHOD_MAP, SCHEME_STATUS_MAP,
 } from '@/lib/bp-types'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,7 +22,6 @@ export type SchemePrintType = 'ISOLATION' | 'DISPOSAL'
 export interface SchemePrintRequest {
   code: string
   title: string
-  workType: string
   unitName?: string | null
   location?: string | null
   pipelineName?: string | null
@@ -172,9 +171,7 @@ export function SchemePrintSheet({ type, data }: { type: SchemePrintType; data: 
               <td className="bg-stone-100 px-2 py-1.5 font-medium">管线名称</td>
               <td className="px-2 py-1.5">{request.pipelineName ?? '-'}</td>
               <td className="bg-stone-100 px-2 py-1.5 font-medium">介质</td>
-              <td className="px-2 py-1.5 w-[20%]">{request.medium ?? '-'}</td>
-              <td className="bg-stone-100 px-2 py-1.5 font-medium w-[13%]">作业类型</td>
-              <td className="px-2 py-1.5">{WORK_TYPE_MAP[request.workType] ?? request.workType}</td>
+              <td className="px-2 py-1.5" colSpan={3}>{request.medium ?? '-'}</td>
             </tr>
             <tr>
               <td className="bg-stone-100 px-2 py-1.5 font-medium">管线压力</td>

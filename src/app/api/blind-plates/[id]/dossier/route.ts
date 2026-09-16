@@ -69,7 +69,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           workStatus: wr.status,
           pointAction: matched[0]?.action ?? '',
           pointLocation: [...new Set(matched.map((m) => m.location))].join('；'),
-          workType: wr.workType,
           applicantName: wr.applicantName,
           unitName: unitNameById.get(wr.unitId) ?? null,
           plannedStart: wr.plannedStart,

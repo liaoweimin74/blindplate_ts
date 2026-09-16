@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import {
   BpUser, PLATE_STATUS_MAP, STATUS_MAP, SCHEME_STATUS_MAP, TICKET_STATUS_MAP,
-  TASK_STATUS_MAP, CONCLUSION_MAP, CHANGE_ACTION_MAP, WORK_TYPE_MAP, POINT_ACTION_MAP,
+  TASK_STATUS_MAP, CONCLUSION_MAP, CHANGE_ACTION_MAP, POINT_ACTION_MAP,
 } from '@/lib/bp-types'
 import { timeAgo } from './notification-bell'
 import { MiniFlowProgress } from './mini-flow-progress'
@@ -61,7 +61,6 @@ export interface DossierBusiness {
   workStatus: string
   pointAction: string
   pointLocation: string
-  workType: string
   applicantName: string
   unitName?: string | null
   plannedStart?: string | null
@@ -389,9 +388,6 @@ function BusinessCard({ biz, onNavigate }: {
           <span className="font-mono text-[13px] font-semibold text-stone-800">{biz.workCode}</span>
           <Badge variant="outline" className={cn('text-[10px]', statusMeta?.className ?? 'bg-stone-100 text-stone-600 border-stone-200')}>
             {statusMeta?.label ?? biz.workStatus}
-          </Badge>
-          <Badge variant="outline" className="text-[10px] bg-stone-50 text-stone-600 border-stone-200">
-            {WORK_TYPE_MAP[biz.workType] ?? biz.workType}
           </Badge>
           {biz.pointAction && (
             <Badge variant="outline" className={cn('text-[10px] border-stone-200',

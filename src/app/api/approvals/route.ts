@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
         ...s,
         pointsCount: s.points.length,
         workRequest: wr
-          ? { id: wr.id, code: wr.code, title: wr.title, status: wr.status, workType: wr.workType, unitName: wr.unit?.name ?? null, applicantName: wr.applicantName }
+          ? { id: wr.id, code: wr.code, title: wr.title, status: wr.status, unitName: wr.unit?.name ?? null, applicantName: wr.applicantName }
           : null,
         submittedBy: sub?.operator ?? s.preparedBy,
         submittedAt: sub?.at ?? s.preparedAt,
@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
         ...s,
         stepsCount: s.steps.length,
         workRequest: wr
-          ? { id: wr.id, code: wr.code, title: wr.title, status: wr.status, workType: wr.workType, unitName: wr.unit?.name ?? null, applicantName: wr.applicantName }
+          ? { id: wr.id, code: wr.code, title: wr.title, status: wr.status, unitName: wr.unit?.name ?? null, applicantName: wr.applicantName }
           : null,
         submittedBy: sub?.operator ?? s.preparedBy,
         submittedAt: sub?.at ?? s.preparedAt,
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
       return {
         ...t,
         workRequest: wr
-          ? { id: wr.id, code: wr.code, title: wr.title, status: wr.status, workType: wr.workType, unitName: wr.unit?.name ?? null, applicantName: wr.applicantName }
+          ? { id: wr.id, code: wr.code, title: wr.title, status: wr.status, unitName: wr.unit?.name ?? null, applicantName: wr.applicantName }
           : null,
         submittedBy: sub?.operator ?? t.issuer,
         submittedAt: sub?.at ?? t.createdAt,

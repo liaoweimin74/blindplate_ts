@@ -92,7 +92,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const data: {
       title?: string
-      workType?: string
       unitId?: number
       location?: string
       pipelineId?: number | null
@@ -109,13 +108,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const title = str(body.title)
       if (!title) return jsonError('标题不能为空')
       data.title = title
-    }
-    if (body.workType !== undefined) {
-      const workType = str(body.workType)
-      if (!['ADD', 'REMOVE', 'BOTH'].includes(workType)) {
-        return jsonError('作业类型必须为 ADD/REMOVE/BOTH')
-      }
-      data.workType = workType
     }
     if (body.unitId !== undefined) {
       const unitId = num(body.unitId)

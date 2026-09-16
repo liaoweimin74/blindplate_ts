@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiGet, apiPost, apiPut, fmtDate, fmtDateTime } from '@/lib/bp-api'
 import {
-  BpUser, ModuleProps, SCHEME_STATUS_MAP, DISPOSAL_METHOD_MAP, POINT_ACTION_MAP, WORK_TYPE_MAP,
+  BpUser, ModuleProps, SCHEME_STATUS_MAP, DISPOSAL_METHOD_MAP, POINT_ACTION_MAP,
 } from '@/lib/bp-types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,7 @@ interface SchemeRow {
   status: string; comment?: string | null; reviewedBy?: string | null
   points?: IsoPoint[]
   steps?: DispStep[]
-  workRequest?: { id: number; code: string; title: string; status: string; workType: string; unitId: number } | null
+  workRequest?: { id: number; code: string; title: string; status: string; unitId: number } | null
 }
 interface IsoPoint {
   id: number; seq: number; location: string; medium?: string | null; pressure?: string | null
@@ -62,7 +62,7 @@ interface WReqDetailLite {
   survey?: { pointRefs?: string | null } | null
   isolationScheme?: { code: string; points?: WReqIsoPointLite[] | null } | null
 }
-interface WRow { id: number; code: string; title: string; workType: string; status: string; unitId: number; isolationScheme?: { code: string; status: string } | null; disposalScheme?: { code: string; status: string } | null }
+interface WRow { id: number; code: string; title: string; status: string; unitId: number; isolationScheme?: { code: string; status: string } | null; disposalScheme?: { code: string; status: string } | null }
 interface Plate { id: number; code: string; spec: string; type: string; status: string }
 interface Dict { id: number; category: string; value: string; label: string }
 interface Unit extends UnitLite { code: string }
@@ -96,7 +96,7 @@ interface PrintSchemeMeta {
   comment?: string | null; reviewedBy?: string | null; reviewedAt?: string | null
 }
 interface PrintDetail {
-  code: string; title: string; workType: string
+  code: string; title: string
   location?: string | null; pipelineName?: string | null; medium?: string | null
   pressure?: string | null; temperature?: string | null
   unit?: { name?: string | null } | null
@@ -497,7 +497,7 @@ export default function SchemesModule({ currentUser, initialTab, singleTab }: Mo
       setPrintType(type === 'isolation' ? 'ISOLATION' : 'DISPOSAL')
       setPrintData({
         request: {
-          code: d.code, title: d.title, workType: d.workType,
+          code: d.code, title: d.title,
           unitName: d.unit?.name ?? null, location: d.location ?? null,
           pipelineName: d.pipelineName ?? null, medium: d.medium ?? null,
           pressure: d.pressure ?? null, temperature: d.temperature ?? null,
@@ -565,7 +565,7 @@ export default function SchemesModule({ currentUser, initialTab, singleTab }: Mo
                   <td className="px-3 py-2.5 font-mono text-[11px] text-stone-500">{s.code}</td>
                   <td className="px-3 py-2.5 max-w-[200px]">
                     <div className="text-stone-800 font-medium truncate">{wr?.title ?? `#${s.workRequestId}`}</div>
-                    <div className="text-[11px] text-stone-400 font-mono">{wr?.code ?? '-'} · {wr ? WORK_TYPE_MAP[wr.workType] ?? '' : ''}</div>
+                    <div className="text-[11px] text-stone-400 font-mono">{wr?.code ?? '-'}</div>
                   </td>
                   <td className="px-3 py-2.5 text-stone-600">{wr ? unitMap.get(wr.unitId)?.name ?? '-' : '-'}</td>
                   <td className="px-3 py-2.5 text-stone-600">{s.preparedBy}</td>

@@ -35,7 +35,6 @@ export async function POST(req: NextRequest) {
 
     const context = `【作业信息】
 编号：${wr.code}；标题：${wr.title}
-作业类型：${wr.workType === 'ADD' ? '加装盲板' : wr.workType === 'REMOVE' ? '拆除盲板' : '抽装盲板（先拆后装或先装后拆）'}
 装置：${unit?.name ?? wr.unitId}；作业位置：${wr.location}
 管线：${wr.pipelineName ?? pipeline?.name ?? '未关联'}；介质：${wr.medium ?? pipeline?.medium ?? '未知'}；压力：${wr.pressure ?? pipeline?.pressure ?? '未知'}；温度：${wr.temperature ?? '未知'}
 作业原因：${wr.reason}
@@ -54,7 +53,7 @@ ${BP_BUSINESS_KNOWLEDGE}
 【各字段口径】
 - siteCondition：现场条件描述，2-3 句（作业点周边环境、平台/空间/照明等，以要点或占位呈现）；
 - pipelineVerify：管线参数核实说明，1 句（需现场核对的介质/压力/温度与台账一致性要求）；
-- hazardPoints：现场风险点，1-2 句，基于介质特性与作业类型具体化；
+- hazardPoints：现场风险点，1-2 句，基于介质特性与现场条件具体化；
 - suggestion：勘察建议，1 句（是否具备条件倾向+作业注意事项）。
 只输出 JSON，格式：{"siteCondition":"...","pipelineVerify":"...","hazardPoints":"...","suggestion":"..."}，不要输出 JSON 以外的任何文字。`,
       [{ role: 'user', content: context }],

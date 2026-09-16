@@ -51,7 +51,6 @@ export async function POST(req: NextRequest) {
       input: {
         code: wr.code,
         title: wr.title,
-        workTypeText: wr.workType === 'ADD' ? '加装盲板' : wr.workType === 'REMOVE' ? '拆除盲板' : '抽装盲板（先拆后装或先装后拆）',
         unitName: unit?.name ?? `#${wr.unitId}`,
         location: wr.location,
         pipelineName: wr.pipelineName,
@@ -74,7 +73,6 @@ export async function POST(req: NextRequest) {
 
     const context = `【作业需求信息】
 编号：${wr.code}；标题：${wr.title}
-作业类型：${wr.workType === 'ADD' ? '加装盲板' : wr.workType === 'REMOVE' ? '拆除盲板' : '抽装盲板（通常先拆除旧盲板再加装新盲板，注意区分动作）'}
 装置：${unit?.name ?? wr.unitId}；位置：${wr.location}
 管线：${wr.pipelineName ?? pipeline?.name ?? '未关联'}；介质：${wr.medium ?? pipeline?.medium ?? '未知'}；压力：${wr.pressure ?? pipeline?.pressure ?? '未知'}；温度：${wr.temperature ?? '未知'}
 作业原因：${wr.reason}
@@ -90,7 +88,7 @@ ${masterLines}
 ${BP_BUSINESS_KNOWLEDGE}
 【要求】
 1. 每个隔离点一行：优先引用上方"隔离点主数据"的编码(masterCode 原样填写)；无主数据可引用时 masterCode 省略并按现场写位置；
-2. 动作 action 只能是 ADD(加装盲板) 或 REMOVE(拆除盲板)，与作业类型一致（REMOVE/ BOTH 型作业需包含拆除点）；
+2. 动作 action 只能是 ADD(加装盲板) 或 REMOVE(拆除盲板)，按作业目的逐点位判断（新增隔离/换装新盲板为 ADD，拆除旧盲板/恢复投用为 REMOVE）；
 3. 盲板规格 blindSpec 必须从规格字典可选值中选择、类型 blindType 必须从类型字典可选值中选择；介质/压力/温度沿用管线参数；
 4. 只引用与本次作业真正相关的点位（依据作业位置/设备/管线/介质/原因/勘察引用点位判断），无关点位一律不引用；
 5. 作业位置若为全集型表述（如「分馏塔连接管线的所有隔离点位」），应覆盖识别设备相连的全部相关候选点位；非全集型按最少隔离范围取点（单点能隔离的不多点）；点位总数不超过 8 个；

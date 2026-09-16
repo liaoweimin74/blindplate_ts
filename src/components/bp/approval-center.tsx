@@ -3,7 +3,7 @@
 // 审批中心：隔离方案/工艺处置方案/作业票 三类审批的集中待办工作台 + 审批留痕查询
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiGet, apiPost, fmtDateTime } from '@/lib/bp-api'
-import { ModuleProps, WORK_TYPE_MAP } from '@/lib/bp-types'
+import { ModuleProps } from '@/lib/bp-types'
 import { exportCsv } from '@/lib/bp-export'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -23,7 +23,7 @@ import {
 import { CrewWall, parseWorkerCerts } from '@/components/bp/crew'
 
 // ============ 类型 ============
-interface PendingReqBrief { id: number; code: string; title: string; status: string; workType: string; unitName: string | null; applicantName: string }
+interface PendingReqBrief { id: number; code: string; title: string; status: string; unitName: string | null; applicantName: string }
 interface IsoPointItem { id: number; seq: number; location: string; medium: string | null; pressure: string | null; temperature: string | null; blindSpec: string; blindType: string; action: string }
 interface IsoPending { id: number; code: string; preparedBy: string; preparedAt: string; pointsCount: number; points: IsoPointItem[]; workRequest: PendingReqBrief | null; submittedBy: string; submittedAt: string }
 interface DispStepItem { id: number; seq: number; method: string; detail: string | null; standard: string | null }
@@ -286,7 +286,6 @@ export default function ApprovalCenterModule({ currentUser, initialTab }: Module
                             <span className="font-mono text-sm font-semibold text-stone-800">{s.code}</span>
                             <Badge className="bg-violet-100 text-violet-700 border-violet-200" variant="outline">待审核</Badge>
                             <OverdueBadge hours={overdueHours('ISOLATION_SCHEME', s.id)} />
-                            {s.workRequest && <Badge variant="outline" className={cn('text-[10px]', 'bg-stone-50 text-stone-500 border-stone-200')}>{WORK_TYPE_MAP[s.workRequest.workType] ?? s.workRequest.workType}</Badge>}
                           </div>
                           {s.workRequest && (
                             <div className="mt-1 text-xs text-stone-500 truncate">
