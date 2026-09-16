@@ -417,3 +417,19 @@ Stage Summary:
 - 用户问题闭环：审批详情「打不开/看不到照片」= dev server 卡死（无响应）+ uploads 目录丢失（照片 500）双重环境故障，代码本身无缺陷；两端审批界面的详情与照片墙功能验证完好
 - 【给巡检 cron 的规范】QA 清理附件时严禁删除 uploads/ 整目录——只准按记录的 storageKey 精确 unlink；dev server 启动必须用标准孤儿化命令 ( nohup bunx next dev -p 3000 > dev.log 2>&1 < /dev/null & )，禁用 Tee-Object 等 PowerShell 语法
 - 教训：排查 img 问题时 img.src 是浏览器解析后的绝对 URL，截断查看会误导判断，应打印完整 src 或直接 curl 验证状态码
+
+---
+Task ID: PUSH-52e0499
+Agent: Z.ai Code (主会话)
+Task: 用户明示「push」——本地 22 提交上云（token 第 5 次被平台抹除→用户重供 PAT）
+
+Work Log:
+- 【token 缺失→重供】push 遇 https 凭据缺失（could not read Username），全盘排查 .env/credential helper/环境变量零命中（平台第 5 次抹除）；按纪律向用户索取，新 github_pat_（fine-grained）入库 .env 恰 1 处，GET /user 鉴权 = liaoweimin74 (id 73637681) 本人
+- 【推送前核验】待推 origin/main..HEAD = 22 提交（Task 102 之后的 108/109 全部 + worklog 交接 + 52e0499 uploads 占位图重建）；工作树 clean
+- 【推送】URL 方式 push 成功 3120570..52e0499 main -> main（输出 sed 脱敏）
+- 【收尾】本节 push 记录追加 worklog 即时 commit + 二次推送上云
+
+Stage Summary:
+- 远程同步至 52e0499：Task 108（需求26 移动端扫码加入隔离点）、Task 109（开票逐人验资三修复：身份证照片入口/姓名身份证整行/TICKET_CREW bizType）、Task 110 前置排查（uploads 目录恢复+67 占位图）全部上云
+- 运维事实更新：GITHUB_TOKEN 已 5 次被平台抹除——push 遇缺失直接要 PAT 的纪律持续有效；新 token 已入库 .env（check-ignore 确认不追踪）
+- git 纪律保持：后续 push 仍仅凭用户明示指令
