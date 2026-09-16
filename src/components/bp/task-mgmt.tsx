@@ -34,9 +34,10 @@ import {
 import {
   TicketCheck, Route, ClipboardPlus, Gavel, PlayCircle, FlagTriangleRight, LockKeyholeOpen,
   FileCheck2, RefreshCw, Inbox, ClipboardList, User2, CalendarClock, ShieldCheck,
-  ChevronRight, CircleCheck, CircleDashed, Layers, Loader2, Printer, Download, MapPin,
+  ChevronRight, ChevronDown, CircleCheck, CircleDashed, Layers, Loader2, Printer, Download, MapPin,
 } from 'lucide-react'
 import TicketPrint from '@/components/bp/ticket-print'
+import { CrewWall } from '@/components/bp/crew'
 import { PidLocateDialog, toLocatePoints, type LocatePoint } from '@/components/bp/pid-locate'
 import { exportCsv } from '@/lib/bp-export'
 
@@ -50,7 +51,7 @@ interface WorkRequestRow {
 }
 interface TicketRow {
   id: number; code: string; workRequestId: number; plannedStart: string; plannedEnd: string
-  guardian: string; workers: string; issuer: string; safetyMeasures: string; status: string
+  guardian: string; workers: string; issuer: string; safetyMeasures: string; workerCerts?: string | null; status: string
   pointId?: number | null; pointCode?: string | null; pointLocation?: string | null
   blindSpec?: string | null; blindType?: string | null; action?: string | null
   comment?: string | null; approvedBy?: string | null
@@ -135,6 +136,8 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
   // 审批 Dialog
   const [reviewFor, setReviewFor] = useState<{ req: WorkRequestRow; ticket: TicketRow } | null>(null)
   const [reviewComment, setReviewComment] = useState('')
+  // 作业票票面明细展开（Task 111：每张票可展开查看安全措施+逐人验资照片墙，key=票 id）
+  const [ticketDetailOpen, setTicketDetailOpen] = useState<Record<number, boolean>>({})
 
   // 通用确认框（开始作业/完工/关闭）
   // 需求23：扫码核对为移动端专属环节（现场扫隔离点二维码），桌面端免扫码直接确认；
@@ -554,6 +557,12 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
                                       className="ml-auto inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-stone-400 hover:text-emerald-700 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 transition-colors">
                                       <Printer className="w-3 h-3" />打印
                                     </button>
+                                    <button onClick={() => setTicketDetailOpen((m) => ({ ...m, [ticket.id]: !m[ticket.id] }))}
+                                      aria-expanded={!!ticketDetailOpen[ticket.id]}
+                                      title="查看票面明细（安全措施+验资材料照片）"
+                                      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-teal-700 hover:bg-teal-50 border border-transparent hover:border-teal-200 transition-colors">
+                                      <ChevronDown className={cn('w-3 h-3 transition-transform', ticketDetailOpen[ticket.id] && 'rotate-180')} />明细
+                                    </button>
                                   </div>
                                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-stone-500">
                                     {ticket.pointLocation && <span className="min-w-0 truncate max-w-full" title={ticket.pointLocation}>{ticket.pointLocation}</span>}
@@ -562,6 +571,19 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
                                     {ticket.startedAt && <span>开工 {fmtDate(ticket.startedAt)}</span>}
                                     {ticket.finishedAt && <span>完工 {fmtDate(ticket.finishedAt)}</span>}
                                   </div>
+                                  {/* 票面明细（Task 111）：安全措施 + 逐人验资材料照片墙（与审批中心同款 CrewWall，缩略图点击新窗看原图） */}
+                                  {ticketDetailOpen[ticket.id] && (
+                                    <div className="space-y-2 rounded-md border border-stone-100 bg-stone-50/60 px-2 py-1.5">
+                                      <div className="space-y-0.5">
+                                        <p className="text-[10px] font-medium text-stone-500">安全措施</p>
+                                        <p className="whitespace-pre-line text-[10px] leading-relaxed text-stone-600">{ticket.safetyMeasures || '未填写'}</p>
+                                      </div>
+                                      <div className="space-y-0.5">
+                                        <p className="flex items-center gap-1 text-[10px] font-medium text-stone-500"><ShieldCheck className="h-3 w-3 text-teal-600" />作业人员验资材料（照片点击查看原图）</p>
+                                        <CrewWall workerCerts={ticket.workerCerts} workers={ticket.workers} compact />
+                                      </div>
+                                    </div>
+                                  )}
                                   <div className="flex items-center justify-end gap-1.5">
                                     {ticket.comment && <span className="mr-auto min-w-0 truncate text-[10px] text-stone-400" title={ticket.comment}>意见：{ticket.comment}</span>}
                                     {renderTicketAction(req, ticket)}
@@ -790,9 +812,16 @@ export default function TaskMgmtModule({ currentUser, initialTab, singleTab }: M
               {reviewFor?.req.code} {reviewFor?.req.title}
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-lg bg-stone-50 border border-stone-100 px-3 py-2 text-xs text-stone-600 space-y-1">
+          <div className="rounded-lg bg-stone-50 border border-stone-100 px-3 py-2 text-xs text-stone-600 space-y-1.5">
             <div>监护人 {reviewFor?.ticket.guardian} · 作业人 {reviewFor?.ticket.workers}</div>
-            <div className="text-stone-400 line-clamp-2">安全措施：{reviewFor?.ticket.safetyMeasures}</div>
+            <div className="text-stone-400 whitespace-pre-line line-clamp-4">安全措施：{reviewFor?.ticket.safetyMeasures}</div>
+            {/* Task 111：审批弹窗同步展示逐人验资材料照片墙（与审批中心同款） */}
+            {reviewFor && (
+              <div className="space-y-1">
+                <p className="flex items-center gap-1 text-[10px] font-medium text-stone-500"><ShieldCheck className="h-3 w-3 text-teal-600" />作业人员验资材料（照片点击查看原图）</p>
+                <CrewWall workerCerts={reviewFor.ticket.workerCerts} workers={reviewFor.ticket.workers} compact />
+              </div>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">审批意见（驳回必填）</Label>

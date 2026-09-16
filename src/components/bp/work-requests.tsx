@@ -31,11 +31,11 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import {
   ClipboardList, Plus, Search, Send, Ban, Eye, MapPin, FileText, ShieldCheck,
-  Stamp, Ticket as TicketIcon, CheckCircle2, Loader2, Trash2, XCircle, ChevronRight, Download, History, Printer, Factory,
+  Stamp, Ticket as TicketIcon, CheckCircle2, Loader2, Trash2, XCircle, ChevronRight, ChevronDown, Download, History, Printer, Factory,
   X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert, Megaphone,
 } from 'lucide-react'
 import QrLabelPrint, { type QrLabelPoint } from '@/components/bp/qr-label-print'
-import { CrewEditor, crewGaps, type WorkerCert } from '@/components/bp/crew'
+import { CrewEditor, CrewWall, crewGaps, type WorkerCert } from '@/components/bp/crew'
 import { ISO_STATE_STYLE, IsoState } from '@/components/bp/pid-config'
 import { PidLocateDialog, toLocatePoints, type LocatePoint } from '@/components/bp/pid-locate'
 import { exportCsv } from '@/lib/bp-export'
@@ -142,7 +142,7 @@ interface Detail extends WRow {
   disposalScheme: { id: number; code: string; preparedBy: string; status: string; comment?: string | null; reviewedBy?: string | null; preparedAt?: string | null; reviewedAt?: string | null; steps: DispStep[] } | null
   disposalConfirmation: { confirmer: string; confirmedAt: string; flammableResult?: string | null; oxygenResult?: string | null; toxicResult?: string | null; analysisQualified: boolean; remarks?: string | null; result: string } | null
   ticket: { id: number; code: string; plannedStart: string; plannedEnd: string; guardian: string; workers: string; issuer: string; safetyMeasures: string; status: string; comment?: string | null; createdAt?: string | null; approvedAt?: string | null; approvedBy?: string | null; startedAt?: string | null; finishedAt?: string | null; closedAt?: string | null } | null
-  tickets: { id: number; code: string; pointId?: number | null; pointCode?: string | null; pointLocation?: string | null; blindSpec?: string | null; blindType?: string | null; action?: string | null; plannedStart: string; plannedEnd: string; guardian: string; workers: string; issuer: string; safetyMeasures: string; status: string; comment?: string | null; approvedBy?: string | null; approvedAt?: string | null; startedAt?: string | null; finishedAt?: string | null; closedAt?: string | null }[]
+  tickets: { id: number; code: string; pointId?: number | null; pointCode?: string | null; pointLocation?: string | null; blindSpec?: string | null; blindType?: string | null; action?: string | null; plannedStart: string; plannedEnd: string; guardian: string; workers: string; issuer: string; safetyMeasures: string; workerCerts?: string | null; status: string; comment?: string | null; approvedBy?: string | null; approvedAt?: string | null; startedAt?: string | null; finishedAt?: string | null; closedAt?: string | null }[]
   task: { code: string; status: string } | null
   acceptance: { id: number; acceptor: string; acceptedAt: string; leakCheck: boolean; restoreCheck: boolean; ledgerCheck: boolean; conclusion: string; problems?: string | null; remarks?: string | null } | null
   approvals: Approval[]
@@ -302,6 +302,8 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
   const [pointStatus, setPointStatus] = useState<PointStatusResp | null>(null)
   // 详情档案打印（复用详情已加载的 Detail，含 approvals）
   const [printOpen, setPrintOpen] = useState(false)
+  // 作业票票面明细展开（Task 111：每张票可展开查看安全措施+逐人验资照片墙，key=票 id）
+  const [ticketDetailOpen, setTicketDetailOpen] = useState<Record<number, boolean>>({})
 
   // 隔离方案编辑
   const [isoOpen, setIsoOpen] = useState(false)
@@ -1363,6 +1365,15 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                             {t.action && <Badge variant="outline" className={cn('text-[10px] h-5', t.action === 'ADD' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700')}>{t.action === 'ADD' ? '装盲板' : '拆盲板'}</Badge>}
                             {(t.blindSpec || t.blindType) && <span className="text-[10px] text-stone-400">{[t.blindSpec, t.blindType].filter(Boolean).join(' · ')}</span>}
                             <span className="ml-auto text-[10px] text-stone-400">监护人 {t.guardian} · 签发 {t.issuer}{t.approvedBy ? ` · 批准 ${t.approvedBy}` : ''}</span>
+                            <button
+                              type="button"
+                              className="flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-teal-700 transition-colors hover:bg-teal-50"
+                              onClick={() => setTicketDetailOpen((m) => ({ ...m, [t.id]: !m[t.id] }))}
+                              aria-expanded={!!ticketDetailOpen[t.id]}
+                            >
+                              {ticketDetailOpen[t.id] ? '收起明细' : '票面明细'}
+                              <ChevronDown className={cn('h-3 w-3 transition-transform', ticketDetailOpen[t.id] && 'rotate-180')} />
+                            </button>
                           </div>
                           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-stone-500">
                             {t.pointLocation && <span className="min-w-0 truncate">位置：{t.pointLocation}</span>}
@@ -1371,6 +1382,19 @@ export default function WorkRequestsModule({ currentUser, initialTab, focusId, o
                             {t.finishedAt && <span>完工 {fmtDateTime(t.finishedAt)}</span>}
                           </div>
                           {t.comment && <div className="text-[11px] text-stone-500">审批意见：{t.comment}</div>}
+                          {/* 票面明细（Task 111）：安全措施 + 逐人验资材料照片墙（与审批中心同款 CrewWall，缩略图点击新窗看原图） */}
+                          {ticketDetailOpen[t.id] && (
+                            <div className="space-y-2 rounded-md border border-stone-100 bg-stone-50/60 p-2">
+                              <div className="space-y-1">
+                                <p className="flex items-center gap-1 text-[10px] font-medium text-stone-500"><ShieldAlert className="h-3 w-3 text-teal-600" />安全措施</p>
+                                <p className="text-[11px] leading-relaxed text-stone-600">{t.safetyMeasures || '未填写'}</p>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="flex items-center gap-1 text-[10px] font-medium text-stone-500"><ShieldCheck className="h-3 w-3 text-teal-600" />作业人员验资材料（照片点击可查看原图）</p>
+                                <CrewWall workerCerts={t.workerCerts} workers={t.workers} compact />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                       {detail.isolationScheme && detail.isolationScheme.points.length > 0 && (
