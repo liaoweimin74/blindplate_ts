@@ -32,9 +32,8 @@ import { useToast } from '@/hooks/use-toast'
 import {
   ClipboardList, Plus, Search, Send, Ban, Eye, MapPin, FileText, ShieldCheck,
   Stamp, Ticket as TicketIcon, CheckCircle2, Loader2, Trash2, XCircle, ChevronRight, Download, History, Printer, Factory,
-  X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert, Megaphone, ScanLine,
+  X, Pencil, Sparkles, ListChecks, AlertTriangle, ShieldAlert, Megaphone,
 } from 'lucide-react'
-import IsoScanSheet from '@/components/bp/iso-scan-sheet'
 import QrLabelPrint, { type QrLabelPoint } from '@/components/bp/qr-label-print'
 import { CrewEditor, crewGaps, type WorkerCert } from '@/components/bp/crew'
 import { ISO_STATE_STYLE, IsoState } from '@/components/bp/pid-config'
@@ -2162,7 +2161,8 @@ function PointRefChips({ refs, onRemove }: { refs: PointRef[]; onRemove?: (id: n
   )
 }
 
-/** 隔离点主数据引用选择器：先选管线 → 再选该管线的隔离点 → teal chips（可跨管线多选、可删除）；aiAction 提供时附 AI 推举按钮 */
+/** 隔离点主数据引用选择器：先选管线 → 再选该管线的隔离点 → teal chips（可跨管线多选、可删除）；aiAction 提供时附 AI 推举按钮。
+ * 需求23：不提供「扫码加入」——扫码属于移动端预览专属环节，桌面端以「选管线→选隔离点→添加」组合加入 */
 function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiAction }: {
   pipelines: Pipeline[]
   pointMasters: PointMaster[]
@@ -2173,11 +2173,8 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
 }) {
   const [pipe, setPipe] = useState('none')
   const [point, setPoint] = useState('none')
-  // 扫码加入（Task 96/96-b）：模拟扫隔离点标签二维码加入引用清单（复用共享 IsoScanSheet）
-  const [scanOpen, setScanOpen] = useState(false)
-  // 需求10：现场无码时打印二维码标签（引用点位批量 / 扫码名单单点）
+  // 需求10：现场无码时打印二维码标签（引用点位批量打印，供移动端扫码核对）
   const [labelPrint, setLabelPrint] = useState<{ open: boolean; points: QrLabelPoint[] }>({ open: false, points: [] })
-  const { toast } = useToast()
   const pipePoints = pipe === 'none' ? [] : pointMasters.filter((m) => String(m.pipelineId ?? '') === pipe)
   const addRef = () => {
     const m = pointMasters.find((x) => String(x.id) === point)
@@ -2185,17 +2182,6 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
     if (refs.some((r) => r.masterPointId === m.id)) { setPoint('none'); return }
     onChange([...refs, { masterPointId: m.id, code: m.code, name: m.name, pipelineName: m.pipelineName ?? m.pipeline?.name ?? null }])
     setPoint('none')
-  }
-  // 扫码命中：按编码找主数据点位并加入（与 addRef 同款去重/组装逻辑）
-  const addRefByScan = (code: string) => {
-    const m = pointMasters.find((x) => x.code === code)
-    if (!m) return
-    if (refs.some((r) => r.masterPointId === m.id)) {
-      toast({ title: '该点位已在引用清单', description: `${m.code} ${m.name} 无需重复添加` })
-      return
-    }
-    onChange([...refs, { masterPointId: m.id, code: m.code, name: m.name, pipelineName: m.pipelineName ?? m.pipeline?.name ?? null }])
-    toast({ title: `${m.code} 扫码加入成功`, description: `${m.name} 已加入引用点位列表` })
   }
   return (
     <div className="rounded-md border border-teal-200 bg-teal-50/50 p-2.5 space-y-2">
@@ -2222,11 +2208,6 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
         <Button size="sm" variant="outline" className="h-8 text-xs border-teal-300 text-teal-700 hover:bg-teal-100 hover:text-teal-800" disabled={point === 'none'} onClick={addRef}>
           <Plus className="w-3 h-3 mr-1" />添加该管线隔离点
         </Button>
-        <Button size="sm" variant="outline" className="h-8 text-xs border-teal-300 bg-white text-teal-700 hover:bg-teal-100 hover:text-teal-800"
-          onClick={() => setScanOpen(true)}
-          title="现场扫描隔离点标签二维码加入引用清单（演示环境为模拟扫码）">
-          <ScanLine className="w-3 h-3 mr-1 text-teal-600" />扫码加入
-        </Button>
         <Button size="sm" variant="outline" className="h-8 text-xs border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
           disabled={refs.length === 0}
           onClick={() => setLabelPrint({ open: true, points: refs.map((r) => ({ code: r.code, name: r.name })) })}
@@ -2246,17 +2227,7 @@ function PointRefPicker({ pipelines, pointMasters, refs, onChange, hint, aiActio
       ) : (
         <p className="text-[11px] text-stone-400">未引用隔离点主数据</p>
       )}
-      {/* 扫码加入（模拟扫隔离点标签二维码；Task 96-b 布局：取景框恒悬浮+名单滚动）；需求10：现场无码可从名单行直接打印标签 */}
-      <IsoScanSheet
-        open={scanOpen}
-        onClose={() => setScanOpen(false)}
-        title="扫码加入勘察点位"
-        points={pointMasters.map((m) => ({ code: m.code, name: m.name, location: m.location ?? null }))}
-        doneCodes={refs.map((r) => r.code)}
-        onScan={(code) => addRefByScan(code)}
-        onPrintLabel={(p) => setLabelPrint({ open: true, points: [p] })}
-      />
-      {/* 需求10：二维码标签打印预览（A4 3×8 网格，BPISO 协议与扫码一致） */}
+      {/* 需求10：二维码标签打印预览（A4 3×8 网格，BPISO 协议与移动端扫码一致，打印后供移动端现场扫码核对） */}
       <QrLabelPrint
         open={labelPrint.open}
         onClose={() => setLabelPrint({ open: false, points: [] })}
