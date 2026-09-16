@@ -364,3 +364,19 @@ Work Log:
 Stage Summary:
 - 需求25 按用户意图重做完成：候选隔离点列表每个 chip 直接展示台账推导通盲状态（需求20 数据，只读）+ 已选隔离点置顶；无落库变更、无后端改动，纯前端展示/排序增强
 - Task 107 的人工核实三态已完整回退（UI/state/提交链路），保留 WEB 端通用徽章管道
+
+---
+Task ID: 108
+Agent: 主会话(Z.ai Code)
+Task: 用户需求26——移动端预览界面现场勘察需要支持扫码加入隔离点
+
+Work Log:
+- 【侦察】IsoScanSheet 共享扫码组件（Task 96/96-b 范式）头注释本就规划「勘察扫码加入」场景：接口含 points 候选名单/doneCodes 已完成打勾（含防重扫）/onScan/onPrintLabel/BPISO| 协议手动输入；field-ops 内开工/完工/验收三 gate 已用，SurveyPage 零扫码能力；QrLabelPrint/ScanLine import 均已在位
+- 【实现】①标题行「已选 N」旁加 teal「扫码加入」按钮 ②addByScan：命中主数据（大小写不敏感）加入已选+toast「扫码加入成功（自动置顶）」联动需求25 排序；已选重复提示「已在已选列表」；名单外「二维码无法识别」③IsoScanSheet 挂 SurveyPage 尾部：points=masters 全量（点击模拟扫码）、doneCodes=已选编码（已选从待处理名单隐藏+进度统计）、onPrintLabel→QrLabelPrint（需求10 打印标签闭环）
+- 【MultiEdit 非原子性二踩】首轮 4 处编辑因 submitting 锚不唯一报错，但实际部分生效（state/addByScan/标题行三处落位、尾部 Sheet 未落）；补齐时再次全量 MultiEdit 造成 state+addByScan 各重复两份——本轮教训固化为：MultiEdit 失败后必须先 rg 盘点实际落位再决定补哪些，绝不盲目重发同款编辑
+- 【QA·agent-browser】（巡检 cron 已自建测试需求 WR-202609-017 且 016 被其推进至 JSA_DONE，故本轮 QA 在 017 上）扫码按钮在位 → Sheet 结构完整（进度/待处理名单/取景框/手动输入）→ 模拟扫码 IP-E101-01：1.1s 动画→toast「扫码加入成功」+chip 置顶 ✓+进度 1/45+该项从名单消失 → 手动输入已选码→「已在已选列表」✅ BPISO|IP-E105-01 协议前缀→加入成功 ✅ 名单外 IP-XXX-99→「二维码无法识别」✅ → 打印标签按钮→QrLabelPrint 预览正常（BPISO|IP-E103-01 QR+打印/关闭，z-[100] 在扫码 Sheet z-50 之上；snapshot rg 关键词漏匹配误判过未打开，getBoundingClientRect 实证视口内）；tsc/eslint 零错误
+- 【commit】2c21a76（+46/-1）；本地领先远程 13 提交待用户「push」
+
+Stage Summary:
+- 需求26 完成：移动端勘察现支持扫码加入隔离点——现场扫标签二维码（或手动输入 BPISO|code）直接加入已选列表，与需求25 已选置顶/通盲徽章展示自然衔接；至此移动端扫码矩阵补齐最后一块：勘察扫码加入 + 开工/完工/验收扫码 gate + 扫码签到，需求23「扫码属移动端专属」边界完整闭环
+- 无后端改动、无 schema 变更；QA 零落库（未提交勘察，前端 state 操作）
