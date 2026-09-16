@@ -245,3 +245,22 @@ Stage Summary:
 - 推送闭环确认：远程 main = 3120570，05cc64d..3120570 共 8 提交上云（Task 100×2 + Task 101×2 + Task 102×2 + 平台快照 + 2 条 worklog）
 - 巡检 cron 现役 = 388950（15 分钟 webDevReview）；旧 388832 已删除，388893 消失不再需要处理
 - 无代码变更；git 纪律保持：后续 push 仍仅凭用户明示指令
+
+---
+Task ID: 103
+Agent: 主会话(Z.ai Code)
+Task: 用户需求 22/22a/22b/23——移动端勘察 AI 辅助、移动端隔离点通盲状态、扫码核对改移动端专属环节
+
+Work Log:
+- 【需求22a·移动端勘察 AI 辅助】field-ops SurveyPage 新增 violet AI 辅助区（三按钮）：勘察要点（/api/ai/survey/checklist 要点清单展示，可收起）/起草记录（/api/ai/draft/survey 预填 condition/hazards/suggestion，不代填「具备作业条件」）/推举点位（/api/ai/survey/points 受限选点合并勾选去重）；UI 紧凑 grid-cols-3 手机壳风格，violet=AI 铁律
+- 【需求22b·通盲状态徽章】PointLocateRow（交底/交底管理/交底确认/作业核对 4 页共用）加通盲徽章：GET /api/iso-point-masters?keyword= 精确匹配 code 取 blindState/blindLabel；配色对齐桌面 pipeline-master（BLINDED=rose/OPEN=emerald/WORKING=violet/无=stone「常通」）；模块级 blindStateCache 防重复请求，useMemo 派生+异步 setFetched 规避 react-hooks/set-state-in-effect（lint 过）；失败静默不阻塞主流程
+- 【需求23·扫码改移动端专属】桌面 task-mgmt 删手输核对区（confirm state 简化回无参 run，AlertDialog 恢复一键确认，ScanLine import 移除）；bp-api api() headers 合并改造+apiPost/apiPut/apiPatch/apiGet 第三参；field-ops start/finish/acceptances 三处带 MOBILE_HEADERS（X-Client: mobile）；服务端 bp-scan-verify 新增 isMobileClient(req)，start/finish/acceptances 强校验包进 if(isMobileClient)——移动端链路保留 SCAN_VERIFY/SCAN_REJECT 全链路审计，桌面端/直调不设卡
+- 【QA·agent-browser+curl】桌面：BP-202609-013 开工弹窗 hasScanVerifyArea=false + 确认成功票 IN_PROGRESS；curl：mobile+错码 finish=403（SCAN_REJECT 语义保留）/无 header finish=200 放行；移动端：作业拍照核对页「盲断（盲板在装）」徽章渲染 ✅ 截图 /tmp/qa-22b-blind-badge.png；勘察页 AI 三按钮真实调用：要点 8 条生成/推举 6 点自动勾选/起草 3 字段预填 ✅ 截图 /tmp/qa-22a-survey-ai.png
+- 【数据还原】ticket19→CLOSED+原时间戳、request22→COMPLETED、task14 DONE 原值未动、AUTO-P21 unitId 还原 null（验证推举时临时挂脱苯装置）；审计/通知保留为真实记录
+- 【验证】tsc src/ 零错误；ESLint src/ 零错误（基线 PPT 脚本 5 个不变）；dev.log 无运行时错误
+- 【commit】d58c6d6 feat(bpm) 8 文件 +212/-88
+
+Stage Summary:
+- 需求 22a/22b/23 三项全部完成并 E2E 实证；扫码核对语义更新：移动端（X-Client: mobile）现场环节强制，桌面端免扫码——后续直调 start/finish/acceptances 无 header 即可跳过校验（QA 注入数据时无需再带核对码，带 mobile 头才设卡）
+- 数据坑：需求 33 所属装置「脱苯装置」下管线均无主数据点位/管线无装置归属（AUTO-P21 unitId=null）→ AI 推举报「无法自动推举请手动选择」（防幻觉正确行为）；待用户定夺是否给历史 AUTO- 管线批量补装置归属
+- 待办不变：QrSignSheet 人证核验 E2E、盲板库存周转图表、已完结工单照片墙回查、SSE 进度推送；本地领先远程 1 提交（d58c6d6）待用户「push」
