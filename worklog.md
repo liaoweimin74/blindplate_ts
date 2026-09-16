@@ -380,3 +380,22 @@ Work Log:
 Stage Summary:
 - 需求26 完成：移动端勘察现支持扫码加入隔离点——现场扫标签二维码（或手动输入 BPISO|code）直接加入已选列表，与需求25 已选置顶/通盲徽章展示自然衔接；至此移动端扫码矩阵补齐最后一块：勘察扫码加入 + 开工/完工/验收扫码 gate + 扫码签到，需求23「扫码属移动端专属」边界完整闭环
 - 无后端改动、无 schema 变更；QA 零落库（未提交勘察，前端 state 操作）
+
+---
+Task ID: 109
+Agent: 主会话(Z.ai Code)
+Task: 用户报移动端开票界面 4 问题——①姓名/身份证应独立整行 ②身份证照片无上传入口 ③资质照片上传报 bizType 无效 ④WEB 端开票也要有身份证/资质上传入口
+
+Work Log:
+- 【根因】三 bug 同源于共享组件 crew.tsx（web/移动端开票共用 CrewEditor）：①CertPhotoSlot 上传按钮条件用 photos.length===0，而单张模式 photos 始终占 1 位（url 为 null），导致身份证照片按钮永不渲染 ②人员卡片把姓名(w-24)与身份证(flex-1)挤同一 flex 行 ③uploadMeta 写死 bizType:'TICKET_CREW' 不在后端 BIZ_TYPES 白名单（只允许 SITE_SURVEY/DISPOSAL_CONFIRM/BRIEFING/EXECUTION/ACCEPTANCE）
+- 【修复 crew.tsx】①CertPhotoSlot 提取 shown=photos.filter(url) 重写渲染/按钮条件/文案判断 ②卡片布局重构：头部行（序号+「人员 N」+材料状态+删除）→ 姓名 Label+Input 独立整行 → 身份证号 Label+Input 独立整行（mono）→ 照片区 grid-cols-1 sm:grid-cols-2（WEB 宽弹窗两列）
+- 【修复 route.ts+schema】BIZ_TYPES 补 'TICKET_CREW'（作业人员验资：身份证/资质证书），Attachment.bizType 注释同步
+- 【QA·移动端】开票页（WR-202609-016）：添加 2 人 → snapshot 证实姓名/身份证独立行 ✅ →「身份证照片」「资质证书」双按钮渲染（修复前永不出现）✅ → eval DataTransfer 注入身份证照片 → 人员1 变「✓ 材料齐」+缩略图 ✅ → 注入资质照片成功 ✅ → 落库 bizType=TICKET_CREW/label 正确 ✅
+- 【QA·WEB 端】016 已被巡检 cron 并发开满 8 张票（unTicketed=0 补开按钮不显示）→ 临时加 QA-TASK109 点位(id=60) →「补开作业票（1 点未办票）」出现 → 弹窗 CrewEditor 同款整行布局+双入口+两列照片区截图确认 ✅ → 验证后删除临时点位零残留
+- 【数据清理】自产 2 条附件记录+物理文件删除；cron 产生的 2 条 TICKET_CREW 附件与 8 张票不动（cron 自管）；QA 图片 /tmp/qa-*.png 不入库
+- 【commit】736dd4a（4 文件 +34/-20）；本地领先远程 14 提交待用户「push」
+
+Stage Summary:
+- 用户 4 问题全闭环：①②③共享组件修复同时解决移动端+WEB 端（同一 CrewEditor），④无需单独改动即自动满足；后端白名单补 TICKET_CREW 是验资上传链路的硬依赖
+- 坑：MultiEdit 非原子性三遇——首次 6 编辑缺 key={idx} 部分生效，盲目全量重发导致 import 不匹配；教训固化为「失败后先 rg 盘点落位再补剩余」
+- 意外发现：巡检 cron 在 QA 窗口期并发测试同一功能并成功上传（白名单修复即时生效），两个 agent 可并行验证同一修复
