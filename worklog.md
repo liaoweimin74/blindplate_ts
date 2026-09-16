@@ -211,3 +211,19 @@ Stage Summary:
 - 扫码核对从「纯前端比对」升级为「服务端强校验+全链路审计」：绕过前端直调 API 无法再跳过位置核对（403+SCAN_REJECT 留痕）；扫码成功也留痕（SCAN_VERIFY），核对链完整可回查
 - 测试注意：start/finish/acceptances 带编码票现已强制要求 scannedPointCode，后续 QA 注入数据如需直调这三 API 必须携带核对码
 - 巡检候选不变：QrSignSheet 人证核验 E2E、需求8 六态判定 E2E、盲板库存周转图表、已完结工单照片墙；移动端 vs WEB 适配分析仍搁置待用户明示
+
+---
+Task ID: 102-PUSH
+Agent: 主会话(Z.ai Code)
+Task: 用户「push」——Task 100/101/102 提交上云（token 第 4 次被平台抹除→用户重供 PAT）
+
+Work Log:
+- 【token 缺失→重供】push 前现取 .env GITHUB_TOKEN 为空（平台第 4 次抹除，.env 仅剩 DATABASE_URL）；按纪律直接向用户索取，未重复全盘排查；新 93 位 PAT 入库（rg 确认 1 处），GET /user 鉴权 = liaoweimin74 (id 73637681) 本人
+- 【推送前核验】待推 origin/main..HEAD = 7 提交（fa8ba8e 平台快照 / 6c2c7ec+4126efd Task100 workType 移除 / a7e77ae+5f403ec Task101 需求19-21 / ce6ea57 Task102 扫码强校验 / 9e70e9d worklog）；独立命令敏感扫描（github_pat/ghp_/x-access-token）零命中；.env 未被 git 追踪（check-ignore 命中）新 token 无入库风险
+- 【推送】URL 方式 push 成功 05cc64d..9e70e9d main -> main（输出 sed 脱敏）
+- 【三方验证】fetch+update-ref 后 local = origin/main = ls-remote = 9e70e9d，git status -sb 零偏差
+- 【收尾】本节 push 记录追加 worklog 即时 commit + 二次推送上云
+
+Stage Summary:
+- 远程 main = 本地 main = 9e70e9d：Task 100（workType 全链路移除）+ Task 101（需求 19/20/21/21(二)）+ Task 102（后端扫码核对强校验）全部进入远程安全区
+- 运维事实更新：GITHUB_TOKEN 已 4 次被平台抹除——push 遇缺失直接要 PAT 的纪律持续有效
