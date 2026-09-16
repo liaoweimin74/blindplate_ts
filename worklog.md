@@ -469,3 +469,22 @@ Stage Summary:
 - 用户问题闭环：不是开工功能坏了，而是一票一板「部分票批准」的中间态被两端门禁卡死——已批准的票现在可以立即走 交底→确认→扫码开工，无需等其他 6 张票批准
 - 设计要点：票级流程（交底/开工）用票级状态门禁，工单聚合状态（TICKET_APPROVED=全批）只做展示/统计——两套状态解耦，各管各的
 - 巡检 cron 390107 在位（15 分钟 webDevReview）；tsc/eslint 零新增错误
+
+---
+Task ID: 113
+Agent: 主会话(Z.ai Code)
+Task: 用户报——「移动端预览界面开工扫码核对隔离点窗口显示不全，下部被遮挡」；期间用户指令「push后再继续」
+
+Work Log:
+- 【根因】壳内四类浮层全部用 fixed inset-0（IsoScanSheet 开工/完工/验收/勘察扫码、QrSignSheet 扫码签到、验收不一致警告、QrLabelPrint 标签打印），而手机壳是 h-[780px] overflow-hidden relative——fixed 会逃逸壳直达浏览器视口，弹窗铺满桌面整页且底缘被视口裁切（用户所见「显示不全、下部被遮挡」）；手机壳自有弹窗（修改密码/身份码/退出）早已是 absolute inset-0 z-30 正确范式，Scan 系是历史孤例
+- 【祖先链核查】逐一确认全部 Sheet 调用点（field-ops 根 / SurveyPage / ExecPage / AcceptPage / BriefNew / BriefManage 六处）到壳之间零 positioned 祖先（PageShell 根无定位、sticky 仅头部兄弟节点）→ absolute inset-0 必然相对壳定位，无「被困小容器」风险
+- 【修复】①iso-scan-sheet.tsx：overlay fixed→absolute + sheet max-h-[85vh]→max-h-[85%]（vh 在壳内语义错误，% 相对壳高）②field-ops QrSignSheet 同款两改 ③验收不一致警告 fixed→absolute ④QrLabelPrint 跨端共享（work-requests WEB 端也用）→加 contained?: boolean prop，缺省保持 fixed（默认类串逐字节不变零回归），field-ops 四处调用传 contained；三处头注释固化「定位铁律（Task 113）」
+- 【push（用户指令）】推前核待推 6 提交（Task 111×2 + Task 112×2 + cron UUID×2，其中 63a57f6 是 cron 把本轮 Task 113 修复代码连 DB 一起扫进去的）；56fb022..63a57f6 推送成功，ls-remote+fetch 三方验证 HEAD==origin/main==63a57f6（push 后本地 tracking 引用未即时刷新，ls-remote 直查远端为准）
+- 【E2E·agent-browser】019 恰处待开工（cron 已建 CONFIRMED 交底）＝用户同款场景零造假：确认开工→Sheet 几何 overlay(374×764)==壳 padding box、overlayInShell=true、sheet 底==壳屏幕底（504==504）✓ 截图：标题/取景框/IP-E103-01 点位行/手动输入+核对按钮全部可见底部贴壳 ✓ → 打印标签：QrLabelPrint confined=true、QR img 3354 字符、白卡+打印/关闭收敛壳内截图 ✓ → 勘察 45 点长名单压测：scrollHeight 2468/clientH 313 内滚生效、滚到底 inputVisible=true、取景框恒顶 ✓ → 全部关闭后 role=dialog 残留 0
+- 【零残留】纯浏览 QA 未完成任何扫码提交；019 复核 APPROVED/startedAt=null/交底 CONFIRMED/工单 TICKET_ISSUED 与报障时一致；dev.log 近 40 行零 error；tsc/eslint src 内零新增（存量报错均在 examples/skills/scripts）
+- 【commit】代码已随 63a57f6 上云（cron 代扫）；本节 worklog 独立提交
+
+Stage Summary:
+- 壳内浮层定位范式统一完成：Scan 系四类弹窗全部收敛手机壳（与壳内自有弹窗 absolute 范式对齐），弹窗底部恒贴壳屏幕底、随页面滚动完整可见——「下部被遮挡」根除；开工/完工/验收/勘察扫码 + 扫码签到 + 标签打印六场景一并受益
+- 跨端组件分叉守则：壳内/WEB 共用浮层用 contained prop 区分定位模式，缺省必须保持 WEB 原行为
+- 布局口径更新：壳内弹层高度上限用 %（相对壳）不用 vh（相对浏览器视口，壳内语义错误）
