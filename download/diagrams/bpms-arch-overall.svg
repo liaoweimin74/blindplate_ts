@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="732" viewBox="0 0 1200 732" font-family="-apple-system,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei','Noto Sans CJK SC',sans-serif">
+  <defs>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="mGray" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="732" fill="#ffffff"/>
+
+  <!-- ===== 标题与图例 ===== -->
+  <rect x="24" y="25" width="6" height="24" rx="3" fill="#0d9488"/>
+  <text x="42" y="44" font-size="18" font-weight="700" fill="#0f172a">系统整体架构 · BPMS × 作业票系统</text>
+  <rect x="798" y="31" width="14" height="14" rx="4" fill="#0d9488"/>
+  <text x="818" y="43" font-size="12" fill="#475569">我司建设</text>
+  <rect x="898" y="31" width="14" height="14" rx="4" fill="#9ca3af"/>
+  <text x="918" y="43" font-size="12" fill="#475569">客户既有</text>
+  <rect x="998" y="31" width="14" height="14" rx="4" fill="#d97706"/>
+  <text x="1018" y="43" font-size="12" fill="#475569">集成服务</text>
+
+  <!-- ===== 第一层 展现层 ===== -->
+  <rect x="24" y="64" width="1152" height="96" rx="14" fill="#fafbfc" stroke="#e6e9ee"/>
+  <rect x="36" y="74" width="54" height="76" rx="10" fill="#0f766e"/>
+  <text x="63" y="99" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">展</text>
+  <text x="63" y="117" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">现</text>
+  <text x="63" y="135" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">层</text>
+
+  <!-- 卡1 PC Web -->
+  <rect x="106" y="80" width="340" height="64" rx="10" fill="#ffffff" stroke="#cbe5e0" stroke-width="1.2" filter="url(#sh)"/>
+  <g stroke="#0f766e" stroke-width="1.6" fill="none">
+    <rect x="122" y="101" width="20" height="13" rx="2"/>
+    <path d="M132 114 v5 M127 119 h10"/>
+  </g>
+  <text x="158" y="107" font-size="14" font-weight="600" fill="#1f2937">PC Web 管理端</text>
+  <text x="158" y="127" font-size="11.5" fill="#64748b">台账 · 组态 · 审批 · 统计报表</text>
+
+  <!-- 卡2 移动作业端 -->
+  <rect x="462" y="80" width="340" height="64" rx="10" fill="#ffffff" stroke="#cbe5e0" stroke-width="1.2" filter="url(#sh)"/>
+  <g stroke="#0f766e" stroke-width="1.6" fill="none">
+    <rect x="478" y="100" width="12" height="20" rx="3"/>
+    <circle cx="484" cy="115.5" r="1.2" fill="#0f766e" stroke="none"/>
+  </g>
+  <text x="514" y="107" font-size="14" font-weight="600" fill="#1f2937">移动作业端 · 防爆手持终端</text>
+  <text x="514" y="127" font-size="11.5" fill="#64748b">扫码核对 · 拍照留痕 · 电子签名</text>
+
+  <!-- 卡3 大屏（可选） -->
+  <rect x="818" y="80" width="340" height="64" rx="10" fill="#ffffff" stroke="#cbe5e0" stroke-width="1.2" stroke-dasharray="6 4" filter="url(#sh)"/>
+  <g stroke="#0f766e" stroke-width="1.6" fill="none">
+    <rect x="834" y="103" width="24" height="15" rx="2"/>
+    <path d="M841 118 v3 M851 118 v3"/>
+  </g>
+  <text x="870" y="107" font-size="14" font-weight="600" fill="#1f2937">数字孪生可视化大屏</text>
+  <text x="870" y="127" font-size="11.5" fill="#64748b">生产指挥中心 · 全厂盲板态势</text>
+  <rect x="1106" y="92" width="40" height="18" rx="9" fill="#fffbeb" stroke="#f0d48a"/>
+  <text x="1126" y="104.5" font-size="10.5" fill="#b45309" text-anchor="middle">可选</text>
+
+  <!-- 层间箭头 1 -->
+  <line x1="600" y1="164" x2="600" y2="192" stroke="#94a3b8" stroke-width="1.8" marker-start="url(#mGray)" marker-end="url(#mGray)"/>
+  <rect x="622" y="169" width="168" height="18" rx="9" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <text x="706" y="181.5" font-size="11" fill="#475569" text-anchor="middle">HTTPS · 扫码交互</text>
+
+  <!-- ===== 第二层 应用层 ===== -->
+  <rect x="24" y="192" width="1152" height="150" rx="14" fill="#fafbfc" stroke="#e6e9ee"/>
+  <rect x="36" y="202" width="54" height="130" rx="10" fill="#0f766e"/>
+  <text x="63" y="249" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">应</text>
+  <text x="63" y="267" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">用</text>
+  <text x="63" y="285" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">层</text>
+
+  <!-- BPMS 大容器 -->
+  <rect x="106" y="206" width="560" height="122" rx="12" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="126" y="234" font-size="15.5" font-weight="700" fill="#0f766e">盲板全流程管理系统 BPMS</text>
+  <rect x="576" y="218" width="72" height="22" rx="11" fill="#0d9488"/>
+  <text x="612" y="233" font-size="11.5" font-weight="600" fill="#ffffff" text-anchor="middle">我司建设</text>
+  <text x="126" y="260" font-size="11.5" fill="#4a6b64">需求 → 勘察 → JSA → 隔离方案 → 工艺处置 → 处置确认 → 施工 → 验收 → 库存</text>
+  <rect x="126" y="274" width="118" height="26" rx="13" fill="#ffffff" stroke="#7cc7bc"/>
+  <text x="185" y="291" font-size="11.5" fill="#0f766e" text-anchor="middle">盲板业务全流程</text>
+  <rect x="252" y="274" width="104" height="26" rx="13" fill="#ffffff" stroke="#7cc7bc"/>
+  <text x="304" y="291" font-size="11.5" fill="#0f766e" text-anchor="middle">PID 数字孪生</text>
+  <rect x="364" y="274" width="104" height="26" rx="13" fill="#f5f3ff" stroke="#c4b5fd"/>
+  <text x="416" y="291" font-size="11.5" fill="#6d28d9" text-anchor="middle">AI 智能能力</text>
+
+  <!-- 不直连 连接符 -->
+  <line x1="670" y1="267" x2="702" y2="267" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <circle cx="686" cy="267" r="9" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="686" y="271" font-size="10" fill="#94a3b8" text-anchor="middle">✕</text>
+  <text x="686" y="294" font-size="10" fill="#94a3b8" text-anchor="middle">不直连</text>
+
+  <!-- 作业票系统 大容器 -->
+  <rect x="706" y="206" width="454" height="122" rx="12" fill="#f9fafb" stroke="#9aa8b5" stroke-width="1.5" stroke-dasharray="7 4"/>
+  <text x="726" y="234" font-size="15.5" font-weight="700" fill="#3f4a52">作业票管理系统</text>
+  <rect x="1026" y="218" width="116" height="22" rx="11" fill="#eef1f4" stroke="#d3dae0"/>
+  <text x="1084" y="233" font-size="11" fill="#4b5563" text-anchor="middle">石化盈科 · 客户既有</text>
+  <text x="726" y="260" font-size="11.5" fill="#6b7280">作业票开具 · 审批流转 · 批准/驳回 · 关闭归档</text>
+  <rect x="726" y="274" width="110" height="26" rx="13" fill="#ffffff" stroke="#c3ccd4"/>
+  <text x="781" y="291" font-size="11.5" fill="#57606a" text-anchor="middle">盲板抽堵作业票</text>
+  <rect x="844" y="274" width="122" height="26" rx="13" fill="#ffffff" stroke="#c3ccd4"/>
+  <text x="905" y="291" font-size="11.5" fill="#57606a" text-anchor="middle">八类特殊作业票证</text>
+  <rect x="974" y="274" width="112" height="26" rx="13" fill="#ffffff" stroke="#c3ccd4"/>
+  <text x="1030" y="291" font-size="11.5" fill="#57606a" text-anchor="middle">资质与许可管理</text>
+
+  <!-- 层间箭头 2 -->
+  <line x1="600" y1="345" x2="600" y2="371" stroke="#94a3b8" stroke-width="1.8" marker-start="url(#mGray)" marker-end="url(#mGray)"/>
+  <rect x="622" y="349" width="200" height="18" rx="9" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <text x="722" y="361.5" font-size="11" fill="#475569" text-anchor="middle">REST API · 事件回调（双向）</text>
+
+  <!-- ===== 第三层 集成服务层 ===== -->
+  <rect x="24" y="374" width="1152" height="96" rx="14" fill="#fafbfc" stroke="#e6e9ee"/>
+  <rect x="36" y="384" width="54" height="76" rx="10" fill="#0f766e"/>
+  <text x="63" y="396" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">集</text>
+  <text x="63" y="411" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">成</text>
+  <text x="63" y="426" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">服</text>
+  <text x="63" y="441" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">务</text>
+  <text x="63" y="456" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">层</text>
+
+  <rect x="123" y="390" width="246" height="64" rx="10" fill="#fffdf6" stroke="#e8c98a" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="139" y="417" font-size="13.5" font-weight="600" fill="#92400e">集成网关</text>
+  <text x="139" y="437" font-size="11" fill="#a16207">鉴权 · 限流 · 调用审计</text>
+
+  <rect x="383" y="390" width="246" height="64" rx="10" fill="#fffdf6" stroke="#e8c98a" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="399" y="417" font-size="13.5" font-weight="600" fill="#92400e">消息与事件回调</text>
+  <text x="399" y="437" font-size="11" fill="#a16207">票据状态事件承接</text>
+
+  <rect x="643" y="390" width="246" height="64" rx="10" fill="#fffdf6" stroke="#e8c98a" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="659" y="417" font-size="13.5" font-weight="600" fill="#92400e">数据对账与补偿</text>
+  <text x="659" y="437" font-size="11" fill="#a16207">每日核对 · 差异补偿</text>
+
+  <rect x="903" y="390" width="246" height="64" rx="10" fill="#fffdf6" stroke="#e8c98a" stroke-width="1.2" stroke-dasharray="6 4" filter="url(#sh)"/>
+  <text x="919" y="417" font-size="13.5" font-weight="600" fill="#92400e">统一身份认证 SSO</text>
+  <text x="919" y="437" font-size="11" fill="#a16207">一次登录 · 两端通行</text>
+
+  <!-- 层间箭头 3 -->
+  <line x1="600" y1="473" x2="600" y2="499" stroke="#94a3b8" stroke-width="1.8" marker-start="url(#mGray)" marker-end="url(#mGray)"/>
+  <rect x="622" y="477" width="150" height="18" rx="9" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <text x="697" y="489.5" font-size="11" fill="#475569" text-anchor="middle">受控数据交换 · 不落地</text>
+
+  <!-- ===== 第四层 数据层 ===== -->
+  <rect x="24" y="502" width="1152" height="96" rx="14" fill="#fafbfc" stroke="#e6e9ee"/>
+  <rect x="36" y="512" width="54" height="76" rx="10" fill="#0f766e"/>
+  <text x="63" y="536" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">数</text>
+  <text x="63" y="554" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">据</text>
+  <text x="63" y="572" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">层</text>
+
+  <rect x="106" y="518" width="340" height="64" rx="10" fill="#f0fdfa" stroke="#7cc7bc" stroke-width="1.2" filter="url(#sh)"/>
+  <g stroke="#0f766e" stroke-width="1.5" fill="none">
+    <ellipse cx="133" cy="538" rx="10" ry="3.5"/>
+    <path d="M123 538 v18 a10 3.5 0 0 0 20 0 v-18"/>
+  </g>
+  <text x="158" y="545" font-size="14" font-weight="600" fill="#0f766e">BPMS 业务数据库</text>
+  <text x="158" y="565" font-size="11.5" fill="#64748b">盲板台账 · 工单 · 隔离点 · 主数据</text>
+
+  <rect x="462" y="518" width="340" height="64" rx="10" fill="#f9fafb" stroke="#c3ccd4" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <g stroke="#8a959e" stroke-width="1.5" fill="none">
+    <ellipse cx="489" cy="538" rx="10" ry="3.5"/>
+    <path d="M479 538 v18 a10 3.5 0 0 0 20 0 v-18"/>
+  </g>
+  <text x="514" y="545" font-size="14" font-weight="600" fill="#57606a">作业票系统数据库</text>
+  <text x="514" y="565" font-size="11.5" fill="#8a959e">仅经集成接口访问 · 不直连</text>
+
+  <rect x="818" y="518" width="340" height="64" rx="10" fill="#ffffff" stroke="#cbe5e0" stroke-width="1.2" filter="url(#sh)"/>
+  <g stroke="#0f766e" stroke-width="1.5" fill="none">
+    <ellipse cx="845" cy="538" rx="10" ry="3.5"/>
+    <path d="M835 538 v18 a10 3.5 0 0 0 20 0 v-18"/>
+  </g>
+  <text x="870" y="545" font-size="14" font-weight="600" fill="#1f2937">文件与附件存储</text>
+  <text x="870" y="565" font-size="11.5" fill="#64748b">PID 图纸 · 现场照片 · 电子签名</text>
+
+  <!-- 层间箭头 4 -->
+  <line x1="600" y1="600" x2="600" y2="622" stroke="#94a3b8" stroke-width="1.8" marker-start="url(#mGray)" marker-end="url(#mGray)"/>
+  <rect x="622" y="603" width="96" height="18" rx="9" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <text x="670" y="615.5" font-size="11" fill="#475569" text-anchor="middle">运行环境支撑</text>
+
+  <!-- ===== 第五层 基础设施层 ===== -->
+  <rect x="24" y="624" width="1152" height="88" rx="14" fill="#fafbfc" stroke="#e6e9ee"/>
+  <rect x="36" y="634" width="54" height="68" rx="10" fill="#0f766e"/>
+  <text x="63" y="642" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">基</text>
+  <text x="63" y="657" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">础</text>
+  <text x="63" y="672" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">设</text>
+  <text x="63" y="687" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">施</text>
+  <text x="63" y="702" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">层</text>
+
+  <rect x="122" y="640" width="196" height="56" rx="10" fill="#f7f5ff" stroke="#d8ccf7" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="136" y="663" font-size="12.5" font-weight="600" fill="#5b21b6">AI 算力服务器</text>
+  <text x="136" y="681" font-size="10.5" fill="#8b7bb8">大模型推理 · 识别/审查</text>
+
+  <rect x="330" y="640" width="196" height="56" rx="10" fill="#ffffff" stroke="#d7dee5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="344" y="663" font-size="12.5" font-weight="600" fill="#1f2937">应用 / 数据库服务器</text>
+  <text x="344" y="681" font-size="10.5" fill="#64748b">高可用部署 · 可利旧虚拟化</text>
+
+  <rect x="538" y="640" width="196" height="56" rx="10" fill="#ffffff" stroke="#d7dee5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="552" y="663" font-size="12.5" font-weight="600" fill="#1f2937">工业无线网络</text>
+  <text x="552" y="681" font-size="10.5" fill="#64748b">防爆区本安 AP 覆盖</text>
+
+  <rect x="746" y="640" width="196" height="56" rx="10" fill="#ffffff" stroke="#d7dee5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="760" y="663" font-size="12.5" font-weight="600" fill="#1f2937">防爆终端与打印机</text>
+  <text x="760" y="681" font-size="10.5" fill="#64748b">手持终端 · 蓝牙标签打印</text>
+
+  <rect x="954" y="640" width="196" height="56" rx="10" fill="#ffffff" stroke="#d7dee5" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="968" y="663" font-size="12.5" font-weight="600" fill="#1f2937">网络安全设备</text>
+  <text x="968" y="681" font-size="10.5" fill="#64748b">防火墙 · 交换机 · AC</text>
+</svg>

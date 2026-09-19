@@ -1,0 +1,215 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="712" viewBox="0 0 1240 712" font-family="-apple-system,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei','Noto Sans CJK SC',sans-serif">
+  <defs>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="mA" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1240" height="712" fill="#ffffff"/>
+
+  <!-- ===== 标题与图例 ===== -->
+  <rect x="24" y="25" width="6" height="24" rx="3" fill="#0d9488"/>
+  <text x="42" y="44" font-size="18" font-weight="700" fill="#0f172a">系统功能架构 · 我司功能 × 既有作业票系统功能</text>
+  <rect x="892" y="31" width="14" height="14" rx="4" fill="#0d9488"/>
+  <text x="912" y="43" font-size="12" fill="#475569">我司软件功能</text>
+  <rect x="1002" y="31" width="14" height="14" rx="4" fill="#d97706"/>
+  <text x="1022" y="43" font-size="12" fill="#475569">集成服务·新增</text>
+  <rect x="1124" y="31" width="14" height="14" rx="4" fill="#9ca3af"/>
+  <text x="1144" y="43" font-size="12" fill="#475569">客户既有功能</text>
+
+  <!-- ===== 左区：我司 BPMS ===== -->
+  <rect x="24" y="64" width="572" height="568" rx="14" fill="#fbfefc" stroke="#0d9488" stroke-width="1.5"/>
+  <rect x="24" y="64" width="572" height="42" rx="14" fill="#0d9488"/>
+  <rect x="24" y="86" width="572" height="20" fill="#0d9488"/>
+  <text x="44" y="91" font-size="14" font-weight="700" fill="#ffffff">我司软件功能 · 盲板全流程管理系统 BPMS</text>
+  <rect x="498" y="73" width="78" height="24" rx="12" fill="#ffffff"/>
+  <text x="537" y="89" font-size="11.5" font-weight="600" fill="#0f766e" text-anchor="middle">我司建设</text>
+
+  <!-- c1 盲板业务全流程 -->
+  <rect x="40" y="122" width="540" height="124" rx="10" fill="#ffffff" stroke="#9ed1c8" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="56" y="141" width="8" height="8" rx="2" fill="#0d9488"/>
+  <text x="72" y="149" font-size="13.5" font-weight="700" fill="#0f766e">盲板业务全流程</text>
+  <text x="564" y="149" font-size="10.5" fill="#b45309" text-anchor="end">九环节状态机 · 不可跳步</text>
+  <g>
+    <rect x="56" y="164" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="88" y="178" font-size="10.5" fill="#0f766e" text-anchor="middle">需求受理</text>
+    <rect x="128" y="164" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="160" y="178" font-size="10.5" fill="#0f766e" text-anchor="middle">现场勘察</text>
+    <rect x="200" y="164" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="232" y="178" font-size="10.5" fill="#0f766e" text-anchor="middle">JSA分析</text>
+    <rect x="56" y="188" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="88" y="202" font-size="10.5" fill="#0f766e" text-anchor="middle">隔离方案</text>
+    <rect x="128" y="188" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="160" y="202" font-size="10.5" fill="#0f766e" text-anchor="middle">工艺处置</text>
+    <rect x="200" y="188" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="232" y="202" font-size="10.5" fill="#0f766e" text-anchor="middle">处置确认</text>
+    <rect x="56" y="212" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="88" y="226" font-size="10.5" fill="#0f766e" text-anchor="middle">现场施工</text>
+    <rect x="128" y="212" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="160" y="226" font-size="10.5" fill="#0f766e" text-anchor="middle">作业验收</text>
+    <rect x="200" y="212" width="64" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+    <text x="232" y="226" font-size="10.5" fill="#0f766e" text-anchor="middle">库存周转</text>
+  </g>
+
+  <!-- c2 PID 数字孪生 -->
+  <rect x="40" y="258" width="540" height="76" rx="10" fill="#ffffff" stroke="#9ed1c8" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="56" y="277" width="8" height="8" rx="2" fill="#0d9488"/>
+  <text x="72" y="285" font-size="13.5" font-weight="700" fill="#0f766e">PID 数字孪生</text>
+  <text x="564" y="285" font-size="10.5" fill="#0d9488" text-anchor="end">图纸 = 台账 = 现场</text>
+  <rect x="56" y="302" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="86" y="316" font-size="10.5" fill="#0f766e" text-anchor="middle">图纸导入</text>
+  <rect x="124" y="302" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="154" y="316" font-size="10.5" fill="#0f766e" text-anchor="middle">图元组态</text>
+  <rect x="192" y="302" width="72" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="228" y="316" font-size="10.5" fill="#0f766e" text-anchor="middle">盲板状态图</text>
+  <rect x="272" y="302" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="302" y="316" font-size="10.5" fill="#0f766e" text-anchor="middle">图账一致</text>
+
+  <!-- c3 AI 智能能力 -->
+  <rect x="40" y="346" width="540" height="76" rx="10" fill="#fcfbff" stroke="#c9b8f5" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="56" y="365" width="8" height="8" rx="2" fill="#8b5cf6"/>
+  <text x="72" y="373" font-size="13.5" font-weight="700" fill="#6d28d9">AI 智能能力</text>
+  <rect x="56" y="390" width="78" height="20" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text x="95" y="404" font-size="10.5" fill="#6d28d9" text-anchor="middle">图纸识别建点</text>
+  <rect x="142" y="390" width="78" height="20" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text x="181" y="404" font-size="10.5" fill="#6d28d9" text-anchor="middle">方案智能起草</text>
+  <rect x="228" y="390" width="78" height="20" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text x="267" y="404" font-size="10.5" fill="#6d28d9" text-anchor="middle">合规智能审查</text>
+  <rect x="314" y="390" width="78" height="20" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text x="353" y="404" font-size="10.5" fill="#6d28d9" text-anchor="middle">照片智能核验</text>
+
+  <!-- c4 现场移动作业 -->
+  <rect x="40" y="434" width="540" height="76" rx="10" fill="#ffffff" stroke="#9ed1c8" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="56" y="453" width="8" height="8" rx="2" fill="#0d9488"/>
+  <text x="72" y="461" font-size="13.5" font-weight="700" fill="#0f766e">现场移动作业</text>
+  <rect x="56" y="478" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="86" y="492" font-size="10.5" fill="#0f766e" text-anchor="middle">扫码定位</text>
+  <rect x="124" y="478" width="82" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="165" y="492" font-size="10.5" fill="#0f766e" text-anchor="middle">扫码核对放行</text>
+  <rect x="214" y="478" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="244" y="492" font-size="10.5" fill="#0f766e" text-anchor="middle">交底签到</text>
+  <rect x="282" y="478" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="312" y="492" font-size="10.5" fill="#0f766e" text-anchor="middle">拍照留痕</text>
+  <rect x="350" y="478" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="380" y="492" font-size="10.5" fill="#0f766e" text-anchor="middle">标签打印</text>
+
+  <!-- c5 台账库存与统计 -->
+  <rect x="40" y="522" width="540" height="76" rx="10" fill="#ffffff" stroke="#9ed1c8" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="56" y="541" width="8" height="8" rx="2" fill="#0d9488"/>
+  <text x="72" y="549" font-size="13.5" font-weight="700" fill="#0f766e">台账库存与统计</text>
+  <rect x="56" y="566" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="86" y="580" font-size="10.5" fill="#0f766e" text-anchor="middle">盲板台账</text>
+  <rect x="124" y="566" width="72" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="160" y="580" font-size="10.5" fill="#0f766e" text-anchor="middle">主数据管理</text>
+  <rect x="204" y="566" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="234" y="580" font-size="10.5" fill="#0f766e" text-anchor="middle">库存周转</text>
+  <rect x="272" y="566" width="60" height="20" rx="10" fill="#f0fdfa" stroke="#b9dfda"/>
+  <text x="302" y="580" font-size="10.5" fill="#0f766e" text-anchor="middle">统计报表</text>
+
+  <!-- ===== 中区：集成服务 ===== -->
+  <rect x="628" y="64" width="196" height="568" rx="14" fill="#fffdf8" stroke="#d97706" stroke-width="1.5"/>
+  <rect x="628" y="64" width="196" height="42" rx="14" fill="#d97706"/>
+  <rect x="628" y="86" width="196" height="20" fill="#d97706"/>
+  <text x="646" y="91" font-size="14" font-weight="700" fill="#ffffff">集成服务</text>
+  <rect x="756" y="73" width="52" height="24" rx="12" fill="#ffffff"/>
+  <text x="782" y="89" font-size="11.5" font-weight="600" fill="#b45309" text-anchor="middle">新增</text>
+
+  <rect x="644" y="179" width="164" height="116" rx="10" fill="#fffbeb" stroke="#e8c98a" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="660" y="207" font-size="13" font-weight="700" fill="#92400e">集成网关</text>
+  <text x="660" y="231" font-size="10.5" fill="#a16207">鉴权 · 限流 · 审计</text>
+  <text x="660" y="249" font-size="10.5" fill="#a16207">REST 适配 · 重试</text>
+  <text x="660" y="267" font-size="10.5" fill="#a16207">全调用留痕可查</text>
+
+  <rect x="644" y="311" width="164" height="116" rx="10" fill="#fffbeb" stroke="#e8c98a" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="660" y="339" font-size="13" font-weight="700" fill="#92400e">主数据同步映射</text>
+  <text x="660" y="363" font-size="10.5" fill="#a16207">组织 · 人员 · 装置</text>
+  <text x="660" y="381" font-size="10.5" fill="#a16207">管线编码映射表</text>
+  <text x="660" y="399" font-size="10.5" fill="#a16207">实施期联合定稿</text>
+
+  <rect x="644" y="443" width="164" height="116" rx="10" fill="#fffbeb" stroke="#e8c98a" stroke-width="1.2" filter="url(#sh)"/>
+  <text x="660" y="471" font-size="13" font-weight="700" fill="#92400e">状态回传与通知</text>
+  <text x="660" y="495" font-size="10.5" fill="#a16207">票据状态事件承接</text>
+  <text x="660" y="513" font-size="10.5" fill="#a16207">待办 · 超期预警</text>
+  <text x="660" y="531" font-size="10.5" fill="#a16207">事件驱动+轮询兜底</text>
+
+  <!-- 区间连接箭头 -->
+  <line x1="598" y1="300" x2="626" y2="300" stroke="#d97706" stroke-width="1.6" marker-start="url(#mA)" marker-end="url(#mA)"/>
+  <line x1="598" y1="440" x2="626" y2="440" stroke="#d97706" stroke-width="1.6" marker-start="url(#mA)" marker-end="url(#mA)"/>
+  <line x1="826" y1="300" x2="854" y2="300" stroke="#d97706" stroke-width="1.6" marker-start="url(#mA)" marker-end="url(#mA)"/>
+  <line x1="826" y1="440" x2="854" y2="440" stroke="#d97706" stroke-width="1.6" marker-start="url(#mA)" marker-end="url(#mA)"/>
+
+  <!-- ===== 右区：石化盈科作业票系统 ===== -->
+  <rect x="856" y="64" width="360" height="568" rx="14" fill="#fbfbfc" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="8 5"/>
+  <rect x="856" y="64" width="360" height="42" rx="14" fill="#6b7280"/>
+  <rect x="856" y="86" width="360" height="20" fill="#6b7280"/>
+  <text x="876" y="91" font-size="14" font-weight="700" fill="#ffffff">石化盈科作业票系统</text>
+  <rect x="1108" y="73" width="88" height="24" rx="12" fill="#ffffff"/>
+  <text x="1152" y="89" font-size="11.5" font-weight="600" fill="#4b5563" text-anchor="middle">客户既有</text>
+
+  <!-- r1 盲板抽堵作业票审批流 -->
+  <rect x="872" y="122" width="328" height="110" rx="10" fill="#ffffff" stroke="#d7dce1" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="888" y="138" width="8" height="8" rx="2" fill="#9ca3af"/>
+  <text x="904" y="146" font-size="13.5" font-weight="700" fill="#4b5563">盲板抽堵作业票审批流</text>
+  <rect x="888" y="158" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="922" y="172" font-size="10.5" fill="#57606a" text-anchor="middle">票面开具</text>
+  <rect x="964" y="158" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="998" y="172" font-size="10.5" fill="#57606a" text-anchor="middle">逐级审批</text>
+  <rect x="1040" y="158" width="48" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="1064" y="172" font-size="10.5" fill="#57606a" text-anchor="middle">批准</text>
+  <rect x="888" y="186" width="48" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="912" y="200" font-size="10.5" fill="#57606a" text-anchor="middle">驳回</text>
+  <rect x="944" y="186" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="978" y="200" font-size="10.5" fill="#57606a" text-anchor="middle">关闭归档</text>
+
+  <!-- r2 特殊作业票证管理 -->
+  <rect x="872" y="244" width="328" height="110" rx="10" fill="#ffffff" stroke="#d7dce1" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="888" y="260" width="8" height="8" rx="2" fill="#9ca3af"/>
+  <text x="904" y="268" font-size="13.5" font-weight="700" fill="#4b5563">特殊作业票证管理</text>
+  <text x="1184" y="268" font-size="10.5" fill="#9ca3af" text-anchor="end">等八类</text>
+  <rect x="888" y="280" width="52" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="914" y="294" font-size="10.5" fill="#57606a" text-anchor="middle">动火</text>
+  <rect x="948" y="280" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="982" y="294" font-size="10.5" fill="#57606a" text-anchor="middle">受限空间</text>
+  <rect x="1024" y="280" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="1058" y="294" font-size="10.5" fill="#57606a" text-anchor="middle">高处作业</text>
+  <rect x="888" y="308" width="52" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="914" y="322" font-size="10.5" fill="#57606a" text-anchor="middle">吊装</text>
+  <rect x="948" y="308" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="982" y="322" font-size="10.5" fill="#57606a" text-anchor="middle">临时用电</text>
+
+  <!-- r3 作业许可与资质 -->
+  <rect x="872" y="366" width="328" height="84" rx="10" fill="#ffffff" stroke="#d7dce1" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="888" y="382" width="8" height="8" rx="2" fill="#9ca3af"/>
+  <text x="904" y="390" font-size="13.5" font-weight="700" fill="#4b5563">作业许可与资质</text>
+  <rect x="888" y="402" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="922" y="416" font-size="10.5" fill="#57606a" text-anchor="middle">许可签发</text>
+  <rect x="964" y="402" width="80" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="1004" y="416" font-size="10.5" fill="#57606a" text-anchor="middle">承包商管理</text>
+  <rect x="1052" y="402" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="1086" y="416" font-size="10.5" fill="#57606a" text-anchor="middle">资质审核</text>
+
+  <!-- r4 票证台账与归档 -->
+  <rect x="872" y="462" width="328" height="84" rx="10" fill="#ffffff" stroke="#d7dce1" stroke-width="1.2" filter="url(#sh)"/>
+  <rect x="888" y="478" width="8" height="8" rx="2" fill="#9ca3af"/>
+  <text x="904" y="486" font-size="13.5" font-weight="700" fill="#4b5563">票证台账与归档</text>
+  <rect x="888" y="498" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="922" y="512" font-size="10.5" fill="#57606a" text-anchor="middle">票证查询</text>
+  <rect x="964" y="498" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="998" y="512" font-size="10.5" fill="#57606a" text-anchor="middle">票据打印</text>
+  <rect x="1040" y="498" width="68" height="20" rx="10" fill="#f4f5f6" stroke="#d7dce1"/>
+  <text x="1074" y="512" font-size="10.5" fill="#57606a" text-anchor="middle">归档管理</text>
+
+  <!-- 零改造说明 -->
+  <rect x="872" y="556" width="328" height="62" rx="10" fill="#fafafa" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="1036" y="581" font-size="13" font-weight="700" fill="#4b5563" text-anchor="middle">零改造 · 不重复建设</text>
+  <text x="1036" y="601" font-size="11" fill="#6b7280" text-anchor="middle">票证业务与审批流全部沿用既有系统</text>
+
+  <!-- ===== 底部协同硬约束横幅 ===== -->
+  <rect x="24" y="652" width="1192" height="40" rx="10" fill="#fffbeb" stroke="#ecd9a0"/>
+  <path d="M48 662 L59 681 H37 Z" fill="#fbbf24" stroke="#d97706" stroke-width="1"/>
+  <text x="48" y="677" font-size="11" font-weight="800" fill="#92400e" text-anchor="middle">!</text>
+  <text x="76" y="677" font-size="12.5" fill="#92400e">协同硬约束：作业票「已批准」是现场作业放行的前置条件；完工验收结果回传是作业票关闭的触发依据</text>
+</svg>
