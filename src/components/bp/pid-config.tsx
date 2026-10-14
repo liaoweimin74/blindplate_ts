@@ -51,6 +51,8 @@ import {
   type StdMajor, type StdSymbol,
 } from '@/components/bp/std'
 import { contentInsetBox } from '@/lib/bp-pid-layout'
+import { shapesNode } from '@/components/configurator/shape-icon'
+import { STD_SHAPE_DATA } from '@/lib/configurator-packs/std-shapes'
 import {
   // 类型
   NodeGeom, Selection, Anchor, EdgeDirection, ConnEndpoint, RoutePoint,
@@ -4243,7 +4245,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                               fill="rgba(13,148,136,0.08)" stroke={TEAL} strokeWidth={1.4} strokeDasharray="6 4"
                             />
                             <g transform={`translate(${mousePos.x - placingStdSym.sw / 2} ${mousePos.y - placingStdSym.sh / 2})`} className="pid-std" opacity={0.85}>
-                              {placingStdSym.render({ stroke: '#44403c', fill: '#fff' })}
+                              {shapesNode(STD_SHAPE_DATA[placingStdSym.id]?.shapes ?? [], { stroke: '#44403c', fill: '#fff' })}
                             </g>
                             <text x={mousePos.x} y={mousePos.y - placingStdSym.sh / 2 - 6} textAnchor="middle" fontSize={11} fill={TEAL}>
                               {placingStdSym.label}

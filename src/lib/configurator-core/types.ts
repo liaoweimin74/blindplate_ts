@@ -1,11 +1,14 @@
 // ============ 组态引擎核心类型（零框架依赖 · Vue/React 共用） ============
 // 本包是「与具体业务无关」的通用组态能力：文档模型 / 几何 / 自动布局 / 图元注册表 / 属性 schema / 撤销栈。
 // 业务系统（React / Vue / 原生）通过三个扩展点接入：
-//   ① 图元注册表 SymbolRegistry：分类树与符号元数据（图形渲染由各框架适配层实现）
+//   ① 图元注册表 SymbolRegistry：分类树与符号元数据（SymbolMeta.draw 携带零框架 Shape IR 图形数据，
+//      React/Vue/原生用各自映射器渲染同一份数据）
 //   ② 属性 schema PropFieldDef：每个符号声明自己的扩展属性，属性面板按 schema 自动渲染
 //   ③ 业务绑定字段：节点/连线/标注上的业务字段（泛型 N/E/M 超集）引擎只透传不解释，
 //      绑定 UI 走适配层插槽（React children / Vue slot），交互意图走事件回调
 // JSON 序列化兼容：DiagramDoc 的字段命名与既有 PID content 完全一致（shapes/connections/marks）。
+
+import type { Shape } from './shapes'
 
 /** 锚点方位（逻辑锚点名，挂接旋转后物理朝向用 physAnchor 换算） */
 export type Anchor = 'top' | 'right' | 'bottom' | 'left'
@@ -158,6 +161,12 @@ export interface SymbolMeta {
   props?: PropFieldDef[]
   /** 可挂接：拖到连线上自动旋转对齐并断开粘合（语义由宿主决定） */
   mountable?: boolean
+  /**
+   * 框架无关绘制数据（Shape IR）：返回符号在设计空间 (0,0)-(defaultW,defaultH) 内的几何描述。
+   * 零框架——React 经 data→JSX 映射器、Vue/原生经 shape-dom（createElementNS）渲染同一份数据。
+   * 注册表元数据自此自含图形，任何框架拿到 registry 即可完整渲染图元库。
+   */
+  draw?: () => Shape[]
 }
 
 /** 图元注册表：一个业务域一套（BPMS 工艺图元 / 基础图形 / 自定义图元各一， palette 多页签天然支持多注册表） */

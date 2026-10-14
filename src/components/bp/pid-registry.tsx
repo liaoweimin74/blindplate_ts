@@ -13,6 +13,7 @@ import { Circle, Database, Factory, Fan, FlaskConical, Hourglass, Minus, Shapes,
 import { cn } from '@/lib/utils'
 import { setInsetResolver, type SymbolMeta, type SymbolRegistry } from '@/lib/configurator-core'
 import { contentInsetBox } from '@/lib/bp-pid-layout'
+import { STD_SHAPE_DATA } from '@/lib/configurator-packs/std-shapes'
 import { StdSymbolShape, StdSymbolThumb, STD_SYMBOLS, STD_MAJOR_ORDER, STD_MAJOR_LABEL, STD_SUBGROUPS } from '@/components/bp/std'
 
 // 1. 内容边界解析器注入：std 符号按 bbox 表内收（锚点贴符号真实内容，不悬空）
@@ -84,6 +85,8 @@ export function buildStdRegistry(): SymbolRegistry {
       defaultH: sym.sh,
       desc: sym.desc,
       standard: sym.standard,
+      // 零框架 Shape IR 绘制数据：注册表自含图形，Vue/原生壳可脱离 React 渲染同一图元
+      draw: () => STD_SHAPE_DATA[sym.id]?.shapes ?? [],
     })),
   }
 }
