@@ -656,3 +656,23 @@ Stage Summary:
 - core 框选纯函数与 'select' 手势配套落地，Vue/React 双端共用同一命中策略
 - Phase 3 剩余（下轮建议）：①连线创建手势化（锚点拖拽到目标一步创建，兼容既有两步点击）②diagram-editor 通用编排组件（工具栏/画布/图元库/属性面板容器 core 化）③多选工具条补「对齐分布」等排版操作
 - 本地领先远程 6 提交（Task 117~121）待用户「push」；巡检 cron 390197 在位
+
+---
+Task ID: 122
+Agent: 主会话(Z.ai Code)
+Task: 用户「继续下一轮」——Phase 3 第二批：连线创建手势化（锚点拖拽一步连线）+ 多选对齐/均匀分布（Task 121 交接 ①③）
+
+Work Log:
+- 【core 扩展 canvas-controller.ts】GestureKind 新增 'conn-draft'（锚点拖拽连线草稿手势）；新增多选排版纯函数：alignBoxes（六向对齐 left/hcenter/right/top/vcenter/bottom，全体包围盒基准，PosPatch 补丁模型宿主按 id 回写）+ distributeBoxes（水平/垂直均分，Figma 惯例首尾固定中间等间距，成员 <3 返回 null / 负间距返回空数组双态区分），泛型 Pick<NodeGeom> 宿主超集直接可用，经 index.ts export * 自动透出
+- 【pid-config 连线手势】commitConn 共享提交提取（同图元同边静默拒绝=取消语义 + 同向查重 toast + 端点 t 归一化，两步点击与拖拽手势共用，onAnchorClick 瘦身）；startConnDraft 挂锚点环带 pointerDown——按住拖到目标松手即连：moveThreshold=4 轻点让位 click 两步流、first 移动 arm shapeClick 抑制紧随 click 防误触两步流、onEnd arm click 防空白松手清选择、snapConnEnd 实时吸附目标 + teal 虚线引导线/吸附点渲染（connDraft state）
+- 【pid-config 多选排版】多选工具条新增「对齐」弹出面板（aria-expanded/menu 契约）：6 对齐按钮（AlignStart/Center/End Vertical/Horizontal lucide 族）+ 分隔线 + 2 均分按钮（<3 禁用灰显 title 提示）；applyAlign/applyDistribute 走 mutate 漏斗=单笔撤销事务；重叠均分 toast「无法均分：选中图元沿该轴相互重叠」（E2E 发现静默跳过体验差后补）；bulkIds 清空 useEffect 自动收起面板；操作指南两处 li 同步（拖拽连线/对齐均分）
+- 【E2E·agent-browser 编辑态全绿】登录（验证码截图读取，演示账号实为 zhangg 非 process）→ 脱苯图基线 15 图元/19 连线（38 polyline=19×2）：①拖拽连线：pointerdown s-e67 底缘环带→拖至 s-e58 V102 左缘环带松手→38→40 ✓ Ctrl+Z→38 ✓（注意绑定角标 IP-xx 文字会拦截环带右侧 pointer 事件=既有现象，选底缘点绕开）②两步点击回归：s-e70 环带 click→s-e72 本体 click→38→40 ✓ 撤销→38 ✓（commitConn 重构零回归）③框选 4 图元（3 泵+E103）→左对齐→三泵标签 x 精确汇聚 442.5（=min x 422+半宽）y 不动 ✓ 撤销还原 ✓④大范围框选 10 图元→水平均分→P101/P103/P102/P104 标签 x=408.5/455.5/502.5/833.5 与手算逐位吻合（首 E102=245 尾 P106=880.5 固定，gap=55/9）✓ 撤销还原 ✓⑤重叠均分→toast「无法均分」✓；刷新后 API 30 号图 15/19/19 零残留
+- 【环境排障】package.json dev 脚本含 PowerShell 的 Tee-Object 在 bash 下 127 → 直接 bunx next dev -p 3000 后台启动写 dev.log；清理僵尸 next-server（监听不响应）后正常；agent-browser ref 点击对齐菜单项被兄弟按钮遮挡判定拦截 → 改 eval aria-label 直点
+- 【验证】bun 冒烟 26/26（首版 2 例预期写错：distribute.v 实际 gap=25 非 20、resizeBox nw 距固定点 31≥minW 不触发钳制，修正后全绿）；tsc src/ 零错误；ESLint 仅 5 个 PPT 脚本既有；dev.log 零 error（仅 E2E 登录 prisma query）
+- 【commit】b64f306（2 文件 +243/-20：canvas-controller.ts + pid-config.tsx）；未 push 等用户指令
+
+Stage Summary:
+- Phase 3 交互清单再划两项：连线「点两下」与「拖一步」双手势并存（轻点/拖拽阈值自动分流，误触抑制闭环），多选排版能力补齐（对齐六向+均分两轴，与替换成/批量删除并列工具条）
+- core 纯函数持续沉淀：alignBoxes/distributeBoxes 与 hitTestRect/normRect 同族，Vue 壳接多选工具条时可直接复用（conn-draft 手势同 core，Vue 壳暂无连线模型未接入）
+- Phase 3 剩余（下轮建议）：①diagram-editor 通用编排组件（工具栏/画布/图元库/属性面板容器 core 化，Task 116 原始诉求的最终收束）②Vue 壳补连线模型+工具条以对齐 React 交互能力 ③已知小刺：std 图元绑定角标文字拦截环带指针（点击/拖拽连线在角标区域失效，可 pointerEvents=none 修）
+- 本地领先远程 7 提交（Task 117~122）待用户「push」；巡检 cron 390197 在位
