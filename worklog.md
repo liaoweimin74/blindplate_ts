@@ -696,3 +696,26 @@ Stage Summary:
 - Vue 壳交互补齐正式降级（用户确认不可验证+无消费方）；框架无关验证责任收敛到 core 纯函数冒烟
 - 下一轮建议：**diagram-viewer 只读查看组件**（Task 116「公共组态组件」需求最真实的一块）——pid-config 查看态 / pid-locate 移动端放大 PID 图 / pid-import 原图预览三处真实消费方重复「SVG 渲染+缩放平移+图例+显隐开关」，先抽 core viewport/显隐开关再上 React 壳
 - 本地领先远程 8 提交（Task 117~123）待用户「push」；巡检 cron 390197 在位；db/custom.db 工作区脏（SQLite 页整理无数据变化，不提交）
+
+---
+Task ID: 124
+Agent: 主会话(Z.ai Code)
+Task: 用户「下一轮」——Phase 4 启动：diagram-viewer 方向第一步，视口数学下沉 core（pid-config/pid-locate 四件套去重）
+
+Work Log:
+- 【重复面确认】精读三处消费方：pid-config（编辑器主画布，容器实测动态比）与 pid-locate（移动端定位弹窗，固定画布比）的 zoomAt/onWheel/minimapNavTo **逐行重复**（连 1.12 步进与锚点换算都一样，注释互写「同款」），minimapNavTo letterbox 逆换算 12 行×2；pid-import 原图查看器为 img+百分比 DOM 方案，与 viewBox 异构
+- 【core 新增 viewport.ts】四纯函数：zoomViewport（锚点缩放，w clamp [minW,maxW]，h 比例策略留给宿主 applyVb——两种 h 策略完美兼容）/ wheelZoomIntent（WheelEvent+svg rect → factor+世界锚点）/ minimapNavigateWorld（meet 等比+letterbox 居中偏移逆换算）/ panByScreen（屏幕位移→viewBox）；WHEEL_ZOOM_STEP=1.12 常量化
+- 【React 适配层 use-wheel-zoom.ts】svg wheel 绑定生命周期统一 hook（非 passive preventDefault + enabled 开关 + bindKey 重挂载重绑——pid-locate 图切换 key 变化场景）
+- 【接入】pid-config：zoomAt/onWheel→hook、minimapNavTo 换 core；pid-locate：同三处 + startPan 从手写 window listeners 换 core createCanvasController 'pan' 手势（与编辑器主画布同源，panByScreen 平移）
+- 【决策】pid-import 不接入（DOM zoom 异构方案，改动面>收益）；diagram-viewer 通用容器组件本轮不做（core 数学下沉已消除最大重复，UI 壳两处特色保留——缩放悬浮栏 vs 工具栏档位）
+- 【冒烟】scripts/smoke-viewport.ts 17/17：中心/锚点缩放、锚原点、中心锚等价、clamp 双向+minW 缩小合法扩展、防除零、wheel 锚点换算（scale=1/3 精确）、zero-rect 双态、letterbox 逆换算（中心/原点）、平移；首版 1 例断言预期写错（中心缩放视口变宽 x/y 负向扩展），实现数学正确
+- 【E2E·全绿】环境：dev server 三次死亡（2 次 OOM dmesg 实锤 + 1 次沙箱会话清理）——处置：pkill chrome 残留（6 进程 ~780MB）+ (cmd & disown) 启动跨命令存活；pid-locate 弹窗（隔离方案 GL-202609-018 详情→定位）六路径：①focusView 自动聚焦 w=400=CANVAS_W/3 ②滚轮 w 400→357.14=÷1.12 锚点 (660,299) 纹丝不动 ③拖拽平移 (-80,-50)px→Δ(+34.51,+21.57) 世界单位逐位吻合（scale=2.3185）④档位放大 357.14/1.3=274.7<minW→clamp 300 锚点不动 ⑤俯瞰图导航点击 (937,596)→vb=(450,262.5) 与手算逐位一致 ⑥回到定位点复位与初始聚焦值完全一致；pid-config 滚轮回归 w=1344=1200×1.12 中心不动（动态 h 比回填契约生效）
+- 【顺手修】package.json dev 脚本 PowerShell 残留（Tee-Object → tee，bash 兼容）——下次可直接 bun run dev
+- 【验证】tsc src/ 零错误；lint 仅 5 个 PPT 脚本既有；dev.log 零 error；无数据改动（viewBox 纯视图态）
+- 【commit】b103f54（7 文件：viewport.ts/use-wheel-zoom.ts/smoke-viewport.ts 新增 + pid-config/pid-locate/index.ts/package.json 修改）；未 push 等用户指令
+
+Stage Summary:
+- 「同一套 viewBox 数学」收敛完成：视口缩放/平移/俯瞰导航从两处逐行重复变为 core 唯一实现，pid-config 与 pid-locate 通过纯函数共享（框架无关，Vue 壳接入时直接可用）
+- diagram-viewer 大方向落地第一步：数学层 core 化已完成，UI 容器组件化暂缓（两处 UI 特色不同，等第三处消费方出现再抽象）
+- 下一轮建议：①pid-config 业务功能对齐重写评估（主数据绑定/隔离点标志/装置归属/底图——Task 116 后半）或 ②Task 115 作业票共存方案文档 / Task 114 PPT 痛点页
+- 本地领先远程 9 提交（Task 117~124）待用户「push」；巡检 cron 390197 在位；db/custom.db 脏（页整理，不提交）
