@@ -878,3 +878,19 @@ Stage Summary:
 - Vue 壳从「零依赖注释示例」转正为「真实 Vue 3 运行时可路由模块」：三条契约（registry Shape IR 直用/缩略图一行接入/画布同源控制器）全部拿到运行时证据，跨框架响应式桥接链路实测打通
 - 用户三问终答：目录 src/components/configurator/vue/（壳 configurator-vue.ts + 本轮新增 vue-shell-demo.tsx）；此前仅 tsc 编译级；现在可通过导航「组态内核演示」访问（单路由 AppShell 模块切换，非 URL 路由——平台预览仅暴露 / 约束下的等价解）
 - 下轮建议：①Vue 壳补连线/框选批量/属性面板 schema（原 YAGNI 项，现有真实演示宿主可承接）②buildStdRegistry 缩略图扩全量 126 枚+分组折叠 ③演示画布接入 history 撤销栈对齐 pid-config
+
+---
+Task ID: 133
+Agent: 主会话(Z.ai Code)
+Task: 用户「把组态相关的框架无关的代码及 vue 壳打包成 zip 放项目根目录」——独立组态包交付
+
+Work Log:
+- 【依赖边界审计】core 11 文件外部导入=0（全相对路径自洽）；configurator-packs/std-shapes.ts 仅 type-only 引 core（126 枚石化符号 Shape IR 数据包，框架无关 ✅）；vue 壳 3 处 '@/lib/configurator-core' 别名——唯一需改写项；pid-registry.tsx 含 React JSX 排除（buildStdRegistry 的注册树构建依赖 React 侧 STD_SYMBOLS 常量，README 已注明用 core buildRegistry 自建）
+- 【包结构】configurator-standalone.zip（52KB/23 文件/181KB 解压）：src/configurator-core（verbatim 11 文件）+ src/configurator-packs/std-shapes.ts + src/vue-shell/configurator-vue.ts（sed 别名→'../configurator-core'）+ examples/SymbolThumb.vue + examples/CanvasBoardDemo.vue（壳头注释 SFC 示例转正为可拷贝文件）+ README.md（三条接入契约/底层 API 清单/设计口径）+ package.json（vue 为可选 peer）+ tsconfig.json（strict/ES2022/bundler）
+- 【完整性自证】暂存区独立 tsc：首跑 2 报错均系包配置过严（noUnusedLocals 触存量未用变量/ES2020 lib 缺 replaceAll）→ 校准 ES2022+去 noUnusedLocals 后 strict 全绿零输出——**未安装 vue/react 前提下编译通过 = 零依赖铁证**
+- 【防误吞】zip 入 .gitignore（防快照 hook 第 7 次 add -A 类垃圾提交卷入分发件）；暂存目录 .staging-configurator 打包后即删零残留
+
+Stage Summary:
+- 交付物：/home/z/my-project/configurator-standalone.zip（52KB）——零框架组态内核 + Vue 3 壳 + std 图元数据包 + 双 SFC 示例 + README，任意 Vue 3 / 原生 JS / 其他框架宿主可解压即用
+- 包内自洽性：别名改写后相对导入闭环，独立 strict tsc 通过；unzip -t 无错
+- 仓库侧零侵入：源码未动一行（sed 仅作用于包副本），.gitignore +1 行防护

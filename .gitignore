@@ -68,3 +68,6 @@ assets/fonts/
 
 # pptx conversion artifacts
 /download/qa/
+
+# 框架无关组态包分发件（Task 133，本地交付物不入库）
+configurator-standalone.zip
