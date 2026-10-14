@@ -69,6 +69,8 @@ import {
   hitTestRect, normRect, isRealRubber,
   // 多选对齐 / 均匀分布（Phase 3：多选工具条配套纯函数，Vue 壳共用）
   alignBoxes, distributeBoxes,
+  // 视口数学（Phase 4：viewBox 缩放/平移/俯瞰图导航唯一下沉点，pid-locate 共用）
+  zoomViewport, minimapNavigateWorld,
   type LineDraft, type ConnEndTarget, type RubberRect, type AlignMode, type DistributeAxis,
   // 几何
   clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline,
@@ -79,6 +81,7 @@ import {
   autoLayout, type SymbolRegistry,
 } from '@/lib/configurator-core'
 import { SymbolPalette, NodePropertyPanel, NumField, ColorSwatches } from '@/components/configurator'
+import { useWheelZoom } from '@/components/configurator/use-wheel-zoom'
 import {
   buildStdRegistry, buildBasicRegistry, buildCustomRegistry, pidTypeLibOf, pidTypeLabel,
   pidThumbRenderer, customRowIdOf, PID_TYPE_LIBRARY, type PidTypeLibItem,
@@ -1760,12 +1763,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     setVb({ x: next.x, y: next.y, w, h })
   }, [])
   const zoomAt = useCallback((factor: number, ax?: number, ay?: number) => {
+    // 锚点缩放数学在 core/viewport.zoomViewport（与 pid-locate 同源）；h 由 applyVb 按容器实测比例回填
     const cur = vbRef.current
-    const cx = ax ?? cur.x + cur.w / 2
-    const cy = ay ?? cur.y + cur.h / 2
-    const nw = clamp(cur.w / factor, CANVAS_MIN_W, CANVAS_MAX_W)
-    const k = nw / cur.w
-    applyVb({ x: cx - (cx - cur.x) * k, y: cy - (cy - cur.y) * k, w: nw })
+    const next = zoomViewport(cur, factor, CANVAS_MIN_W, CANVAS_MAX_W, ax, ay)
+    applyVb(next)
   }, [applyVb])
   const resetView = useCallback(() => setVb({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_W * canvasRatioRef.current }), [])
 
@@ -1812,22 +1813,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }, [detailLoading, full])
 
-  // 滚轮缩放（以鼠标位置为锚点）：原生监听非 passive 才能 preventDefault 阻止页面滚动
-  // detailLoading 参与依赖：骨架屏阶段 svg 未挂载，加载完成后必须重新绑定
-  useEffect(() => {
-    const svg = svgRef.current
-    if (!svg || detailLoading) return
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      const r = svg.getBoundingClientRect()
-      if (r.width === 0) return
-      const v = vbRef.current
-      const s = r.width / v.w
-      zoomAt(e.deltaY > 0 ? 1 / 1.12 : 1.12, v.x + (e.clientX - r.left) / s, v.y + (e.clientY - r.top) / s)
-    }
-    svg.addEventListener('wheel', onWheel, { passive: false })
-    return () => svg.removeEventListener('wheel', onWheel)
-  }, [zoomAt, detailLoading])
+  // 滚轮缩放（以鼠标位置为锚点）：事件绑定生命周期在 useWheelZoom（React 适配层薄壳），
+  // 数学在 core/viewport.wheelZoomIntent（与 pid-locate 同源）；detailLoading 参与 enabled：骨架屏阶段 svg 未挂载
+  useWheelZoom(svgRef, { enabled: !detailLoading, vbRef, zoomAt })
 
   const startPan = (e: React.PointerEvent<SVGSVGElement>) => {
     const svg = svgRef.current
@@ -1853,18 +1841,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     })
   }
 
-  // ---- 俯瞰图导航：点击/拖拽缩略图 → 画布视口中心移动到对应世界坐标（保持当前缩放倍率） ----
+  // ---- 俯瞰图导航：点击/拖拽缩略图 → 画布视口中心移动到对应世界坐标（保持当前缩放倍率）；
+  //      letterbox 逆换算在 core/viewport.minimapNavigateWorld（与 pid-locate 同源） ----
   const minimapNavTo = (clientX: number, clientY: number, svg: SVGSVGElement) => {
-    const r = svg.getBoundingClientRect()
-    if (r.width === 0 || r.height === 0) return
-    const m = minimapBoundsOf(vbRef.current)
-    const s = Math.min(r.width / m.w, r.height / m.h) // preserveAspectRatio=meet 等比缩放比
-    const ox = (r.width - m.w * s) / 2 // letterbox 居中偏移（缩略图容器与包围盒宽高比不一致时）
-    const oy = (r.height - m.h * s) / 2
-    const wx = m.x + (clientX - r.left - ox) / s
-    const wy = m.y + (clientY - r.top - oy) / s
+    const w = minimapNavigateWorld(clientX, clientY, svg.getBoundingClientRect(), minimapBoundsOf(vbRef.current))
+    if (!w) return
     const v = vbRef.current
-    setVb({ x: wx - v.w / 2, y: wy - v.h / 2, w: v.w, h: v.h })
+    setVb({ x: w.x - v.w / 2, y: w.y - v.h / 2, w: v.w, h: v.h })
   }
 
   // ---- 自动布局（编辑态工具栏）：确认弹窗 → 应用快照对比 + toast 撤销 ----

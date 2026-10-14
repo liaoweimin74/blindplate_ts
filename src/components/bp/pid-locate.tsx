@@ -24,6 +24,9 @@ import {
 } from './pid-config'
 import { MapPin, Crosshair, ZoomIn, ZoomOut, ImageOff, LocateFixed, Workflow, Layers, Map as MapIcon, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+// 视口数学直连 core（Phase 4 去重：此前与 pid-config 各持一份逐行相同的 zoomAt/onWheel/minimapNavTo）
+import { zoomViewport, minimapNavigateWorld, panByScreen, createCanvasController } from '@/lib/configurator-core'
+import { useWheelZoom } from '@/components/configurator/use-wheel-zoom'
 
 /** 可定位的隔离点（兼容方案隔离点 / 作业票点位两种来源） */
 export interface LocatePoint {
@@ -191,18 +194,14 @@ export function PidLocateDialog({
 
   const boxH = boxW > 0 ? Math.round((boxW * CANVAS_H) / CANVAS_W) : 0
 
-  // ---- 视图控制（与 PID 组态主画布同款 viewBox 数学）：缩放（锚点为中心）/ 定位聚焦 / 空白拖拽平移，画布无边界 ----
+  // ---- 视图控制（锚点缩放/聚焦/复位/平移；数学在 core/viewport 与 pid-config 同源） ----
   const applyVb = useCallback((next: { x: number; y: number; w: number }) => {
     const w = Math.max(CANVAS_MIN_W, Math.min(CANVAS_MAX_W, next.w))
     setVb({ x: next.x, y: next.y, w, h: (w * CANVAS_H) / CANVAS_W })
   }, [])
   const zoomAt = useCallback((factor: number, ax?: number, ay?: number) => {
-    const cur = vbRef.current
-    const cx = ax ?? cur.x + cur.w / 2
-    const cy = ay ?? cur.y + cur.h / 2
-    const nw = Math.max(CANVAS_MIN_W, Math.min(CANVAS_MAX_W, cur.w / factor))
-    const k = nw / cur.w
-    applyVb({ x: cx - (cx - cur.x) * k, y: cy - (cy - cur.y) * k, w: nw })
+    const next = zoomViewport(vbRef.current, factor, CANVAS_MIN_W, CANVAS_MAX_W, ax, ay)
+    applyVb(next)
   }, [applyVb])
   const focusView = useCallback((m: { x: number; y: number }) => {
     const w = CANVAS_W / FOCUS_Z
@@ -210,22 +209,9 @@ export function PidLocateDialog({
   }, [applyVb])
   const resetView = useCallback(() => setVb({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H }), [])
 
-  // 滚轮缩放（以鼠标位置为锚点）：原生监听非 passive 才能 preventDefault 阻止弹窗滚动
-  // loading / 无图阶段 svg 未挂载（ref 为空直接返回），挂载后依赖变化重新绑定
-  useEffect(() => {
-    const svg = svgRef.current
-    if (!svg) return
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      const r = svg.getBoundingClientRect()
-      if (r.width === 0) return
-      const v = vbRef.current
-      const s = r.width / v.w
-      zoomAt(e.deltaY > 0 ? 1 / 1.12 : 1.12, v.x + (e.clientX - r.left) / s, v.y + (e.clientY - r.top) / s)
-    }
-    svg.addEventListener('wheel', onWheel, { passive: false })
-    return () => svg.removeEventListener('wheel', onWheel)
-  }, [zoomAt, loading, activeDiagram?.id])
+  // 滚轮缩放（以鼠标位置为锚点）：绑定生命周期在 useWheelZoom，数学在 core/viewport.wheelZoomIntent；
+  // loading / 无图阶段不绑定，bindKey=图 id：svg 随图切换重挂载后重新绑定
+  useWheelZoom(svgRef, { enabled: !loading, bindKey: activeDiagram?.id ?? 0, vbRef, zoomAt })
 
   // 定位点/所属图/候选图变化 → 视角自动聚焦；未挂标点 → 全景概览
   // （focusKey 语义守卫：父组件重渲染导致 activeHit 引用变化但定位目标未变时，不打断用户当前视角）
@@ -238,7 +224,8 @@ export function PidLocateDialog({
     else resetView()
   }, [open, focusKey, activeHit, focusView, resetView])
 
-  // 空白拖拽平移（画布本身无点击语义，无需位移阈值/点击吞除）
+  // 空白拖拽平移（画布本身无点击语义，无需位移阈值；手势会话走 core createCanvasController 与 pid-config 同源）
+  const canvasCtl = useMemo(() => createCanvasController<{ x: number; y: number }>({ toPoint: (cx, cy) => ({ x: cx, y: cy }) }), [])
   const startPan = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.button !== 0) return
     const svg = svgRef.current
@@ -246,32 +233,26 @@ export function PidLocateDialog({
     const startCx = e.clientX
     const startCy = e.clientY
     const startVb = vbRef.current
-    setPanning(true)
-    const onMove = (ev: PointerEvent) => {
-      const s = svg.getBoundingClientRect().width / startVb.w
-      applyVb({ x: startVb.x - (ev.clientX - startCx) / s, y: startVb.y - (ev.clientY - startCy) / s, w: startVb.w })
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setPanning(false)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    canvasCtl.run({
+      kind: 'pan',
+      start: { x: startCx, y: startCy },
+      toPoint: (cx, cy) => ({ x: cx, y: cy }),
+      onMove: (p) => {
+        setPanning(true)
+        const s = svg.getBoundingClientRect().width / startVb.w
+        applyVb(panByScreen(startVb, p.x - startCx, p.y - startCy, s))
+      },
+      onEnd: () => setPanning(false),
+    })
   }
 
-  // ---- 俯瞰图导航：点击/拖拽缩略图 → 视口中心移动到对应世界坐标（保持当前缩放倍率） ----
+  // ---- 俯瞰图导航：点击/拖拽缩略图 → 视口中心移动到对应世界坐标（保持当前缩放倍率）；
+  //      letterbox 逆换算在 core/viewport.minimapNavigateWorld 与 pid-config 同源 ----
   const minimapNavTo = (clientX: number, clientY: number, navSvg: SVGSVGElement) => {
-    const r = navSvg.getBoundingClientRect()
-    if (r.width === 0 || r.height === 0) return
-    const m = minimapBoundsOf(vbRef.current)
-    const s = Math.min(r.width / m.w, r.height / m.h) // preserveAspectRatio=meet 等比缩放比
-    const ox = (r.width - m.w * s) / 2 // letterbox 居中偏移
-    const oy = (r.height - m.h * s) / 2
-    const wx = m.x + (clientX - r.left - ox) / s
-    const wy = m.y + (clientY - r.top - oy) / s
+    const w = minimapNavigateWorld(clientX, clientY, navSvg.getBoundingClientRect(), minimapBoundsOf(vbRef.current))
+    if (!w) return
     const v = vbRef.current
-    setVb({ x: wx - v.w / 2, y: wy - v.h / 2, w: v.w, h: v.h })
+    setVb({ x: w.x - v.w / 2, y: w.y - v.h / 2, w: v.w, h: v.h })
   }
 
   // 俯瞰图世界包围盒（画布区域 ∪ 当前视口 + 留白）：随平移/缩放动态扩展，无限画布下视口永在框内
