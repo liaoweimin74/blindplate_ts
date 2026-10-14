@@ -66,7 +66,7 @@ import {
   // 布局 / 注册表
   autoLayout, type SymbolRegistry,
 } from '@/lib/configurator-core'
-import { SymbolPalette, NumField, ColorSwatches } from '@/components/configurator'
+import { SymbolPalette, NodePropertyPanel, NumField, ColorSwatches } from '@/components/configurator'
 import {
   buildStdRegistry, buildBasicRegistry, buildCustomRegistry, pidTypeLibOf, pidTypeLabel,
   pidThumbRenderer, customRowIdOf, PID_TYPE_LIBRARY, type PidTypeLibItem,
@@ -4777,179 +4777,124 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 bp-thin-scrollbar">
                   {selectedShape ? (
                     <div className="space-y-3">
-                      <div className="text-xs font-medium text-stone-700">图元属性</div>
-                      <div className="grid gap-1.5">
-                        <Label className="text-[11px] text-stone-500">名称</Label>
-                        <Input
-                          className="h-8" value={selectedShape.label}
-                          onChange={(e) => updateShape(selectedShape.id, { label: e.target.value })}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-stone-500">类型</span>
-                        <Badge variant="outline" className="border-stone-200 bg-stone-50 text-stone-600">
-                          {typeLabel(selectedShape.type)}
-                        </Badge>
-                      </div>
-
-                      {/* 管线挂接状态（Task 75）：可挂接图元显示所属管线 + 手动解除（拖拽挂接的镜像操作） */}
-                      {isMountableShape(selectedShape) && (() => {
-                        const segs = content.connections.filter((c) => c.fromShape === selectedShape.id || c.toShape === selectedShape.id)
-                        const pipeIds = [...new Set(segs.map((c) => c.pipelineId).filter((v): v is number => v != null))]
-                        const pipe = pipeIds.length === 1 ? pipeOptions.find((p) => p.id === pipeIds[0]) ?? null : null
-                        return segs.length === 0 || pipeIds.length === 0 ? (
-                          <div className="rounded-md border border-stone-200 bg-stone-50 px-2.5 py-2 text-[11px] leading-relaxed text-stone-500">
-                            可挂接图元 · 未挂接管线
-                            <div className="text-stone-400">拖到已绑定管线的连线上自动旋转对齐并串接</div>
-                          </div>
-                        ) : (
-                          <div className="space-y-1.5">
-                            <Label className="text-[11px] text-stone-500">所属管线</Label>
-                            <div className="rounded-md border border-teal-200 bg-teal-50 p-2 text-[11px] leading-relaxed text-teal-800">
-                              <span className="font-medium">{pipe ? `${pipe.code} · ${pipe.name}` : pipeIds.length === 1 ? `#${pipeIds[0]}` : '多段归属不一致'}</span>
-                              <div className="text-teal-600">管线已在图元处断开并与两端粘合（{segs.length} 段{selectedShape.rotation ? ` · 旋转 ${selectedShape.rotation}°` : ''}）</div>
+<NodePropertyPanel
+                        node={selectedShape}
+                        typeLabel={typeLabel(selectedShape.type)}
+                        minW={libOf(selectedShape.type).minW}
+                        minH={libOf(selectedShape.type).minH}
+                        styleLocked={selectedShape.type === 'symbol'}
+                        onPatch={(patch) => updateShape(selectedShape.id, patch)}
+                      >
+                        {/* 管线挂接状态（Task 75）：可挂接图元显示所属管线 + 手动解除（拖拽挂接的镜像操作）——业务绑定插槽 */}
+                        {isMountableShape(selectedShape) && (() => {
+                          const segs = content.connections.filter((c) => c.fromShape === selectedShape.id || c.toShape === selectedShape.id)
+                          const pipeIds = [...new Set(segs.map((c) => c.pipelineId).filter((v): v is number => v != null))]
+                          const pipe = pipeIds.length === 1 ? pipeOptions.find((p) => p.id === pipeIds[0]) ?? null : null
+                          return segs.length === 0 || pipeIds.length === 0 ? (
+                            <div className="rounded-md border border-stone-200 bg-stone-50 px-2.5 py-2 text-[11px] leading-relaxed text-stone-500">
+                              可挂接图元 · 未挂接管线
+                              <div className="text-stone-400">拖到已绑定管线的连线上自动旋转对齐并串接</div>
                             </div>
-                            <Button
-                              variant="outline"
-                              className="h-8 w-full border-rose-200 text-rose-600 hover:bg-rose-50"
-                              title="解除挂接：两段连线合并闭合、图元旋转复位"
-                              onClick={() => {
-                                if (window.confirm('解除该图元的管线挂接？管线将在原位自动闭合。')) unmountSelectedShape(selectedShape.id)
-                              }}
-                            >
-                              <Unlink className="h-3.5 w-3.5" /> 解除挂接
-                            </Button>
-                          </div>
-                        )
-                      })()}
-
-                      {/* 绑定设备（保存图后与连线绑定管线联动回写管线起止设备） */}
-                      <div className="space-y-1.5">
-                        <Label className="text-[11px] text-stone-500">绑定设备</Label>
-                        <select
-                          className="h-8 w-full rounded-md border border-stone-200 bg-white px-2 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
-                          value={selectedShape.equipmentId ?? ''}
-                          onChange={(e) => {
-                            const v = e.target.value === '' ? null : Number(e.target.value)
-                            updateShape(selectedShape.id, { equipmentId: v })
-                          }}
-                        >
-                          <option value="">未绑定</option>
-                          {equipOptions.map((e) => (
-                            <option key={e.id} value={e.id}>{e.code} · {e.name}</option>
-                          ))}
-                        </select>
-                        {selectedShape.equipmentId != null && (() => {
-                          const eq = equipOptions.find((x) => x.id === selectedShape.equipmentId)
-                          return eq ? (
+                          ) : (
                             <div className="space-y-1.5">
-                              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] leading-relaxed text-emerald-800">
-                                <div className="flex items-center justify-between gap-1.5">
-                                  <span className="min-w-0 truncate font-medium">{eq.code} · {eq.name}</span>
-                                  <button
-                                    type="button"
-                                    className="shrink-0 rounded border border-emerald-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
-                                    onClick={openEqEdit}
-                                    title="编辑该设备的基础数据（位号/名称/类型/装置）"
-                                  >
-                                    <Pencil className="mr-0.5 inline h-2.5 w-2.5" />编辑主数据
-                                  </button>
-                                </div>
-                                <div className="text-emerald-600">（{EQUIP_TYPE_MAP[eq.type]?.label ?? eq.type}{eq.unitName ? ` · ${eq.unitName}` : ''}）保存图时将自动更新该设备的管线连接关系</div>
+                              <Label className="text-[11px] text-stone-500">所属管线</Label>
+                              <div className="rounded-md border border-teal-200 bg-teal-50 p-2 text-[11px] leading-relaxed text-teal-800">
+                                <span className="font-medium">{pipe ? `${pipe.code} · ${pipe.name}` : pipeIds.length === 1 ? `#${pipeIds[0]}` : '多段归属不一致'}</span>
+                                <div className="text-teal-600">管线已在图元处断开并与两端粘合（{segs.length} 段{selectedShape.rotation ? ` · 旋转 ${selectedShape.rotation}°` : ''}）</div>
                               </div>
-                              {eqEditOpen && (
-                                <div className="space-y-1.5 rounded-md border border-emerald-200 bg-white p-2">
-                                  <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">编辑设备主数据</div>
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    <Input value={eqForm.code} onChange={(e) => setEqForm((f) => ({ ...f, code: e.target.value }))} className="h-7 font-mono text-xs" placeholder="位号" aria-label="设备位号" />
-                                    <Input value={eqForm.name} onChange={(e) => setEqForm((f) => ({ ...f, name: e.target.value }))} className="h-7 text-xs" placeholder="设备名称" aria-label="设备名称" />
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    <select
-                                      className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
-                                      value={eqForm.type}
-                                      onChange={(e) => setEqForm((f) => ({ ...f, type: e.target.value }))}
-                                      aria-label="设备类型"
-                                    >
-                                      {Object.entries(EQUIP_TYPE_MAP).map(([k, v]) => (
-                                        <option key={k} value={k}>{v.label}</option>
-                                      ))}
-                                    </select>
-                                    <select
-                                      className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
-                                      value={eqForm.unitId}
-                                      onChange={(e) => setEqForm((f) => ({ ...f, unitId: e.target.value }))}
-                                      aria-label="所属装置"
-                                    >
-                                      <option value="">不关联装置</option>
-                                      {units.map((u) => (
-                                        <option key={u.id} value={String(u.id)}>{u.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="flex justify-end gap-1.5">
-                                    <Button variant="outline" className="h-7 border-stone-200 px-2 text-[11px] text-stone-500 hover:bg-stone-50" disabled={eqSaving} onClick={() => setEqEditOpen(false)}>
-                                      取消
-                                    </Button>
-                                    <Button className="h-7 bg-emerald-600 px-2.5 text-[11px] text-white hover:bg-emerald-700" disabled={eqSaving} onClick={() => { void saveEqMaster() }}>
-                                      {eqSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}保存
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
+                              <Button
+                                variant="outline"
+                                className="h-8 w-full border-rose-200 text-rose-600 hover:bg-rose-50"
+                                title="解除挂接：两段连线合并闭合、图元旋转复位"
+                                onClick={() => {
+                                  if (window.confirm('解除该图元的管线挂接？管线将在原位自动闭合。')) unmountSelectedShape(selectedShape.id)
+                                }}
+                              >
+                                <Unlink className="h-3.5 w-3.5" /> 解除挂接
+                              </Button>
                             </div>
-                          ) : null
+                          )
                         })()}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <NumField
-                          label="X" value={selectedShape.x} min={-CANVAS_W * 100} max={CANVAS_W * 100}
-                          onChange={(v) => updateShape(selectedShape.id, { x: v })}
-                        />
-                        <NumField
-                          label="Y" value={selectedShape.y} min={-CANVAS_H * 100} max={CANVAS_H * 100}
-                          onChange={(v) => updateShape(selectedShape.id, { y: v })}
-                        />
-                        <NumField
-                          label="宽 W" value={selectedShape.w} min={libOf(selectedShape.type).minW} max={CANVAS_W * 100}
-                          onChange={(v) => updateShape(selectedShape.id, { w: v })}
-                        />
-                        <NumField
-                          label="高 H" value={selectedShape.h} min={libOf(selectedShape.type).minH} max={CANVAS_H * 100}
-                          onChange={(v) => updateShape(selectedShape.id, { h: v })}
-                        />
-                      </div>
-                      {selectedShape.type === 'line' && (
-                        <Button
-                          variant="outline"
-                          className="h-8 w-full border-stone-200 text-stone-600 hover:bg-stone-50"
-                          title="镜像翻转直线方向（/ ↔ \）"
-                          onClick={() => updateShape(selectedShape.id, { flip: !selectedShape.flip })}
-                        >
-                          <MoveDiagonal className="h-3.5 w-3.5" /> 交换对角方向
-                        </Button>
-                      )}
-                      {selectedShape.type === 'symbol' ? (
-                        <div className="rounded-md bg-violet-50/70 px-2.5 py-2 text-[11px] leading-relaxed text-violet-700">
-                          自定义图元实例 · 构成与颜色在「图元编辑器」中维护，实例随组态图独立保存
+
+                        {/* 绑定设备（保存图后与连线绑定管线联动回写管线起止设备）——业务绑定插槽 */}
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] text-stone-500">绑定设备</Label>
+                          <select
+                            className="h-8 w-full rounded-md border border-stone-200 bg-white px-2 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
+                            value={selectedShape.equipmentId ?? ''}
+                            onChange={(e) => {
+                              const v = e.target.value === '' ? null : Number(e.target.value)
+                              updateShape(selectedShape.id, { equipmentId: v })
+                            }}
+                          >
+                            <option value="">未绑定</option>
+                            {equipOptions.map((e) => (
+                              <option key={e.id} value={e.id}>{e.code} · {e.name}</option>
+                            ))}
+                          </select>
+                          {selectedShape.equipmentId != null && (() => {
+                            const eq = equipOptions.find((x) => x.id === selectedShape.equipmentId)
+                            return eq ? (
+                              <div className="space-y-1.5">
+                                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[11px] leading-relaxed text-emerald-800">
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="min-w-0 truncate font-medium">{eq.code} · {eq.name}</span>
+                                    <button
+                                      type="button"
+                                      className="shrink-0 rounded border border-emerald-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                                      onClick={openEqEdit}
+                                      title="编辑该设备的基础数据（位号/名称/类型/装置）"
+                                    >
+                                      <Pencil className="mr-0.5 inline h-2.5 w-2.5" />编辑主数据
+                                    </button>
+                                  </div>
+                                  <div className="text-emerald-600">（{EQUIP_TYPE_MAP[eq.type]?.label ?? eq.type}{eq.unitName ? ` · ${eq.unitName}` : ''}）保存图时将自动更新该设备的管线连接关系</div>
+                                </div>
+                                {eqEditOpen && (
+                                  <div className="space-y-1.5 rounded-md border border-emerald-200 bg-white p-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">编辑设备主数据</div>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <Input value={eqForm.code} onChange={(e) => setEqForm((f) => ({ ...f, code: e.target.value }))} className="h-7 font-mono text-xs" placeholder="位号" aria-label="设备位号" />
+                                      <Input value={eqForm.name} onChange={(e) => setEqForm((f) => ({ ...f, name: e.target.value }))} className="h-7 text-xs" placeholder="设备名称" aria-label="设备名称" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <select
+                                        className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
+                                        value={eqForm.type}
+                                        onChange={(e) => setEqForm((f) => ({ ...f, type: e.target.value }))}
+                                        aria-label="设备类型"
+                                      >
+                                        {Object.entries(EQUIP_TYPE_MAP).map(([k, v]) => (
+                                          <option key={k} value={k}>{v.label}</option>
+                                        ))}
+                                      </select>
+                                      <select
+                                        className="h-7 w-full rounded-md border border-stone-200 bg-white px-1.5 text-xs text-stone-700 focus:border-emerald-500 focus:outline-none"
+                                        value={eqForm.unitId}
+                                        onChange={(e) => setEqForm((f) => ({ ...f, unitId: e.target.value }))}
+                                        aria-label="所属装置"
+                                      >
+                                        <option value="">不关联装置</option>
+                                        {units.map((u) => (
+                                          <option key={u.id} value={String(u.id)}>{u.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="flex justify-end gap-1.5">
+                                      <Button variant="outline" className="h-7 border-stone-200 px-2 text-[11px] text-stone-500 hover:bg-stone-50" disabled={eqSaving} onClick={() => setEqEditOpen(false)}>
+                                        取消
+                                      </Button>
+                                      <Button className="h-7 bg-emerald-600 px-2.5 text-[11px] text-white hover:bg-emerald-700" disabled={eqSaving} onClick={() => { void saveEqMaster() }}>
+                                        {eqSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}保存
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : null
+                          })()}
                         </div>
-                      ) : (
-                        <>
-                          <ColorSwatches
-                            label="填充色"
-                            palette={FILL_PALETTE}
-                            value={selectedShape.fill ?? '#ffffff'}
-                            onChange={(c) => updateShape(selectedShape.id, { fill: c })}
-                          />
-                          <ColorSwatches
-                            label="描边色"
-                            palette={STROKE_PALETTE}
-                            value={selectedShape.stroke ?? '#44403c'}
-                            onChange={(c) => updateShape(selectedShape.id, { stroke: c })}
-                          />
-                        </>
-                      )}
-                      {/* 图元操作按钮（副本/存为自定义/删除/编辑源图元）已悬浮至画布中选中图元右上角 */}
+                      </NodePropertyPanel>
                     </div>
                   ) : selectedConn ? (
                     <div className="space-y-3">

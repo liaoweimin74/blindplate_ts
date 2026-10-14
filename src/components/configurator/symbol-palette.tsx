@@ -145,6 +145,7 @@ export function SymbolPalette({ registry, renderThumb, onPick, activeSymbolId, s
 
   return (
     <div className={cn('px-1 pb-2', className)}>
+      <PaletteSearch value={kw} onChange={setKw} placeholder={searchPlaceholder} />
       {tree.map(({ group, subgroups, looseSymbols }) => {
         const total = looseSymbols.length + subgroups.reduce((s, x) => s + x.symbols.length, 0)
         if (total === 0) return null
