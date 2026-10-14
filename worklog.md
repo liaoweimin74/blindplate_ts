@@ -612,3 +612,26 @@ Stage Summary:
 - 撤销/重做全事务接入完成：增删改/属性/连线改接/挂接/拖拽五类/直线/布局全覆盖，工具栏+键盘双入口，跨图清栈，快捷键含 Ctrl+Shift+Z 变体
 - 修复一个用户可感知级 bug（撤销链断裂），E2E 回归用例固化（双撤销撤放置）
 - Phase 2 剩余（建议下轮）：diagram-canvas 画布交互层泛型化搬迁（选择/拖动/resize/连线状态机→core createCanvasController）+ diagram-editor 编排 + Vue 画布壳共用控制器
+
+---
+Task ID: 120
+Agent: 主会话(Z.ai Code)
+Task: 用户「继续完成剩余任务」——Task 116 Phase 2 收尾：diagram-canvas 画布交互层泛型化搬迁（worklog 118/119 交接项）
+
+Work Log:
+- 【勘察】画布交互层无独立文件，内嵌 pid-config.tsx（5989 行）：主画布 7 手势（pan/startDragShape/startDragMark/startDragConnLabel/startDragConnSeg/startDragConnEnd/startResize/直线橡皮筋）+ 图元编辑器 3 手势，全部同构 window pointermove/pointerup 循环 + 4 个 click 抑制 ref（suppressClick/suppressShapeClick/connDragEnd/lineEnd）
+- 【core/canvas-controller.ts 新增 325 行零框架】①runGesture/createCanvasController：统一手势会话（GestureSession.moved 首移标记 + onMove(p,s,first) first=事务压栈时机 + moveThreshold 轻点语义 + toPoint 可覆写支持平移屏幕系）②ClickGuard：arm/block 时间戳（click 350/shapeClick 400/connDragEnd 350/lineEnd 350，与原 ref 语义逐一对齐）③resizeBox 纯函数（对角固定点/最小尺寸方向钳制/lockSquare 正圆/flip 翻转向/clampRect 编辑器边界）+ fixedCornerOf ④labelTAt（投影 clamp [0.06,0.94] 3 位小数）⑤snapConnEnd（锚点区最近者）⑥isTinyLineDraft ⑦connExists/rewireConnTarget（EdgeGeom 级：noop/same-anchor/dup 三态，freeT 归一化+清 midOverride）
+- 【pid-config 薄壳化】两个组件各建一个 controller（useMemo 捕获首帧 toSvgPoint/toEditorPoint 闭包安全：仅读稳定 ref）；9 手势全部 canvasCtl.run/editCtl.run 化（first→pushHistory 保持撤销事务边界）；4 个抑制 ref 删除收敛 guard.block；onAnchorClick 查重与端点改接判重切 connExists/rewireConnTarget；净删重复指针循环约 200 行（627 行增删）
+- 【Vue 壳】configurator-vue.ts 新增 mountCanvasBoard（约 160 行原生 DOM）：同一 createCanvasController + resizeBox 实现点选/拖动/四角缩放/Esc 取消，证明画布交互层框架无关；修正两处活引用陷阱（拖拽偏移按下捕获一次、缩放基准 b0 快照否则对角固定点漂移）；头注释契约第 3 条同步更新
+- 【冒烟】bun 27/27 SMOKE-OK（fixedCornerOf/resizeBox 6 例含 minClamp/flip/clampRect、isTiny 阈值、labelTAt clamp、snapConnEnd 命中/未命中、connExists/rewire 四态、runGesture 合成事件阈值+first+moved、guard 窗口）；首版 4 例预期写错（非 core bug）修正后全绿
+- 【E2E·agent-browser 编辑态全绿】登录→台账管理→PID 组态（脱苯 15/19/19 基线）：①拖动图元 transform(311,93)→(394,176) 屏幕位移 30px÷0.3633=82.6≈83 canvas 精确 + Ctrl+Z 还原 ✓②SE 角柄缩放 30×15→62×51 + 撤销精确还原 ✓③连线：锚点环带点击→pendingConn teal r=6 圆→目标图元本体→连线 19→20 + 撤销→19 ✓④直线工具放置：橡皮筋 15→16 + 撤销→15 ✓⑤端点改接：选中连线（rose r=6 双端钮）→合成事件链拖 to 钮→route 306→456.9 走向变化（连线数不变）+ 撤销→基线 ✓⑥平移（miss-click 意外真实发生）：viewBox 偏移=拖拽 delta÷scale 精确 ✓
+- 【E2E 排障三课】①角柄仅 8 canvas 单位≈2.9px，b.x+4 取中偏 2.5px 点空→冒泡成 pan（改 b.width/2 精确取中即中）②锚点环带本体留洞（保选中/拖动），点边内 2px 落洞穿透，须点边外环带③直线工具保持激活（Esc 退出），placingShape 拦截 conn 点击与拖动——E2E 前先退出放置态；连线中点圆 pointer-events 渲染在 style 非属性，DOM 查询用 style.pointerEvents
+- 【cron 代提交处置】巡检 cron 把本轮 4 文件以 UUID 消息提交（0030331），远程未推（ls-remote 验证），amend 为规范消息 1ca8c90
+- 【验证】tsc src/ 零错误；ESLint 零新增；dev.log 零 error；刷新后 API shapeCount:15/markCount:19 零残留（全部编辑未保存）；基线 15/19/19 完整
+- 【commit】1ca8c90（4 文件 +754/-370）；worklog 本节独立提交；未 push 等用户指令
+
+Stage Summary:
+- 组态引擎三层架构 Phase 2 收尾完成：画布交互层（手势状态机/命中/拖拽/缩放/连线/橡皮筋/误触抑制）全部下沉 core 受控控制器，React 壳只留「toPoint 换算 + 业务回调」，Vue/原生壳一行 createCanvasController({toPoint}) 获得同等交互——用户「Vue 和 React 共用」约束在模型/绘制/交互三层全部达成
+- core 扩展点全景：SymbolRegistry（图形+元数据）/PropFieldDef schema（属性）/children 插槽（绑定 UI）/createCanvasController（交互）/createHistory（撤销）——新框架接入只需实现渲染映射 + toPoint + 面板表单
+- Phase 3 建议（可选）：①pid-config 剩余 UI 段（工具栏/图元库容器/属性面板容器）编排为 diagram-editor 通用组件②框选（bulk 多选橡皮筋，core 已预留 'select' 手势 kind）③连线创建手势化（band 点击两步→拖拽到目标一步）
+- 本地领先远程 5 提交（Task 117~120 全部代码+worklog）待用户「push」；巡检 cron 390197 在位
