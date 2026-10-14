@@ -190,6 +190,37 @@ export function resizeBox(i: ResizeInput): ResizeResult {
   }
 }
 
+// ---------- 纯几何：框选橡皮筋（'select' 手势配套） ----------
+
+/** 轴对齐矩形（画布坐标；x0<=x1, y0<=y1 由 normRect 保证） */
+export interface RubberRect { x0: number; y0: number; x1: number; y1: number }
+
+/** 任意两角归一化为轴对齐矩形（橡皮筋 onMove 里每帧调用） */
+export function normRect(ax: number, ay: number, bx: number, by: number): RubberRect {
+  return { x0: Math.min(ax, bx), y0: Math.min(ay, by), x1: Math.max(ax, bx), y1: Math.max(ay, by) }
+}
+
+/** 橡皮筋是否有效（任一轴跨度 ≥ minSpan，轻点不算框选） */
+export function isRealRubber(r: RubberRect, minSpan = 3): boolean {
+  return Math.max(r.x1 - r.x0, r.y1 - r.y0) >= minSpan
+}
+
+/**
+ * 框选命中：包围盒与橡皮筋相交的图元 id（相交即选中，CAD/Figma 惯例）。
+ * 只看 x/y/w/h 包围盒（旋转图元用未旋转包围盒，与单选 hitShape 粒度一致）。
+ */
+export function hitTestRect<N extends Pick<NodeGeom, 'id' | 'x' | 'y' | 'w' | 'h'>>(
+  shapes: N[],
+  r: RubberRect,
+): string[] {
+  const out: string[] = []
+  for (const s of shapes) {
+    if (s.x + s.w < r.x0 || s.x > r.x1 || s.y + s.h < r.y0 || s.y > r.y1) continue
+    out.push(s.id)
+  }
+  return out
+}
+
 // ---------- 纯几何：连线标注沿线 / 端点吸附 / 橡皮筋 ----------
 
 /** 直线橡皮筋草稿（sx/sy 起点 ex/ey 终点） */

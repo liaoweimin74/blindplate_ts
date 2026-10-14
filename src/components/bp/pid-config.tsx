@@ -63,7 +63,9 @@ import {
   createHistory,
   // 画布交互控制器（Phase 2 泛型化：手势会话/误触抑制/四角缩放/端点吸附/连线改接全部 core 化，Vue 壳共用）
   createCanvasController, resizeBox, fixedCornerOf, labelTAt, snapConnEnd, isTinyLineDraft, connExists, rewireConnTarget,
-  type LineDraft, type ConnEndTarget,
+  // 框选橡皮筋（Phase 3：'select' 手势配套命中测试，Vue 壳共用）
+  hitTestRect, normRect, isRealRubber,
+  type LineDraft, type ConnEndTarget, type RubberRect,
   // 几何
   clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline,
   anchorPoint, anchorPointT, physAnchor, outward, anchorZoneBox, nearestFreeAnchorAt, nearestAnchorAt,
@@ -1374,8 +1376,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [placingStdId, setPlacingStdId] = useState<string | null>(null)
   // 图元库侧栏：三页签 + 内建图元大分类/子分类两级手风琴 + 搜索 + 悬停信息卡
   const [libTab, setLibTab] = useState<'std' | 'basic' | 'custom'>('std')
-  // ---- 多选（Shift/Ctrl/Cmd 点击追加）与批量操作：多选悬浮工具条 +「替换成」对话框（Task 89） ----
+  // ---- 多选（Shift/Ctrl/Cmd 点击追加 / Shift+空白拖拽框选）与批量操作：多选悬浮工具条 +「替换成」对话框（Task 89，框选+批量拖动 Phase 3） ----
   const [bulkIds, setBulkIds] = useState<string[]>([])
+  const [rubber, setRubber] = useState<RubberRect | null>(null) // 框选橡皮筋（画布坐标，渲染用）
+  const rubberRef = useRef<RubberRect | null>(null)
   const [replaceDlgOpen, setReplaceDlgOpen] = useState(false)
   const [replaceTargetIds, setReplaceTargetIds] = useState<string[]>([]) // 进入对话框时的目标图元快照（防中途删除悬空）
   const [dlgSearch, setDlgSearch] = useState('')
@@ -2706,10 +2710,42 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   }
 
   // ---- 画布 pointerdown：空白左键拖拽平移（三态通用）+ 直线橡皮筋（编辑态直线工具；core 手势会话） ----
+  // ---- 框选橡皮筋（Phase 3）：Shift + 空白拖拽 → 'select' 手势 → hitTestRect 相交命中 → bulkIds ----
+  const startRubberSelect = (e: React.PointerEvent<SVGSVGElement>) => {
+    const p = toSvgPoint(e)
+    if (!p) return
+    e.preventDefault()
+    let r: RubberRect = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }
+    const setR = (v: RubberRect | null) => { rubberRef.current = v; setRubber(v) }
+    setR(r)
+    canvasCtl.run({
+      kind: 'select',
+      start: p,
+      moveThreshold: 3, // 轻点保留普通空白 click 语义（取消选中/清多选），不进框选流程
+      onMove: (q) => {
+        r = normRect(p.x, p.y, q.x, q.y)
+        setR(r)
+      },
+      onEnd: (_q, sess) => {
+        setR(null)
+        if (!sess.moved) return // 轻点：交给 handleCanvasClick（清选中/清多选）
+        canvasCtl.guard.arm('click') // 框选结束吞 click，防误清刚选中的多选集
+        const hits = hitTestRect(contentRef.current.shapes, r)
+        setBulkIds(hits)
+        if (hits.length) {
+          // 属性面板跟随最后一个命中图元（与 Shift 点选语义一致）
+          setSelected({ kind: 'shape', id: hits[hits.length - 1] })
+        }
+      },
+    })
+  }
+
   const handleCanvasPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     // 平移：编辑态放置/连线挂起时让位给落点流程（placingXxx 走 click 落点）；直线绘制模式不平移
     if (e.button === 0 && !(mode === 'edit' && (placingShape || placingMark || placingSymbol || pendingConn))) {
-      startPan(e)
+      // Shift + 空白拖拽 = 框选（Task 89 点选多选的橡皮筋补充；普通空白拖拽仍为平移）
+      if (mode === 'edit' && !e.altKey && (e.shiftKey || e.ctrlKey || e.metaKey)) startRubberSelect(e)
+      else startPan(e)
     }
     if (mode !== 'edit' || placingShape !== 'line') return
     const p = toSvgPoint(e)
@@ -2920,9 +2956,46 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   }
 
   // ---- 拖拽移动（图元 / 标注；core 手势会话：first=首次实际移动=事务压栈时机） ----
+  // ---- 多选整体拖动（Phase 3）：点中多选成员时全体成员同位移；首移压撤销栈（与单拖同事务语义） ----
+  const startBulkDrag = (e: React.PointerEvent<SVGElement>, hitId: string) => {
+    const start = toSvgPoint(e)
+    if (!start) return
+    const origins = new Map(
+      contentRef.current.shapes
+        .filter((s) => bulkIds.includes(s.id) || s.id === hitId)
+        .map((s) => [s.id, { x: s.x, y: s.y } as const]),
+    )
+    canvasCtl.run({
+      kind: 'drag-shape',
+      targetId: hitId,
+      start,
+      onMove: (p, _sess, first) => {
+        if (first) pushHistory() // 拖拽事务：首次实际移动时压栈（撤销恢复拖拽前位置）
+        canvasCtl.guard.arm('shapeClick')
+        const dx = p.x - start.x
+        const dy = p.y - start.y
+        setContent((prev) => ({
+          ...prev,
+          shapes: prev.shapes.map((sh) => {
+            const o = origins.get(sh.id)
+            return o ? { ...sh, x: Math.round(o.x + dx), y: Math.round(o.y + dy) } : sh
+          }),
+        }))
+      },
+      onEnd: (_p, sess) => {
+        if (sess.moved) setDirty(true)
+      },
+    })
+  }
+
   const startDragShape = (e: React.PointerEvent<SVGElement>, s: PidShape) => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol || pendingConn) return // 连线挂起时让位：点目标图元本体 = 连线（Task 86-2）
     e.stopPropagation()
+    // 多选整体拖动（Phase 3）：点中的成员在多选集内且成员 > 1 时，全体一起位移
+    if (bulkIds.length > 1 && bulkIds.includes(s.id)) {
+      startBulkDrag(e, s.id)
+      return
+    }
     const start = toSvgPoint(e)
     if (!start) return
     const offX = start.x - s.x
@@ -4256,6 +4329,17 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         </text>
                       </g>
                     )}
+                    {/* 框选橡皮筋（Phase 3）：teal 半透明填充 + 虚线描边；non-scaling-stroke 视觉恒定 */}
+                    {rubber && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={rubber.x0} y={rubber.y0}
+                          width={Math.max(rubber.x1 - rubber.x0, 0.01)} height={Math.max(rubber.y1 - rubber.y0, 0.01)}
+                          fill="rgba(13,148,136,0.08)" stroke="#0d9488" strokeWidth={1.5}
+                          strokeDasharray="6 3" vectorEffect="non-scaling-stroke" rx={2}
+                        />
+                      </g>
+                    )}
                     {mode === 'edit' && placingSymbol && mousePos && (
                       <g pointerEvents="none" opacity={0.8}>
                         {(() => {
@@ -4560,21 +4644,28 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                   )
                 })()}
 
-                {/* 多选悬浮工具条（Task 89）：悬于最后选中图元上方——已选计数 + 替换成 + 批量删除 + 退出多选 */}
+                {/* 多选悬浮工具条（Task 89 点选 / Phase 3 框选）：悬于全体包围盒上方中央——已选计数 + 替换成 + 批量删除 + 退出多选 */}
                 {mode === 'edit' && !detailLoading && bulkIds.length > 0 && canvasW > 0 && (() => {
-                  const lastId = bulkIds[bulkIds.length - 1]
-                  const bs = content.shapes.find((x) => x.id === lastId)
-                  if (!bs) return null
+                  const members = content.shapes.filter((x) => bulkIds.includes(x.id))
+                  if (!members.length) return null
+                  // 全体包围盒（Phase 3：框选/批量拖动后工具条跟随整体选择而非最后单图元）
+                  const bb = members.reduce(
+                    (acc, s) => ({
+                      x0: Math.min(acc.x0, s.x), y0: Math.min(acc.y0, s.y),
+                      x1: Math.max(acc.x1, s.x + s.w), y1: Math.max(acc.y1, s.y + s.h),
+                    }),
+                    { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity },
+                  )
                   const k = canvasW / vb.w
-                  const px = (bs.x + bs.w - vb.x) * k
-                  const py = (bs.y - vb.y) * k
+                  const px = ((bb.x0 + bb.x1) / 2 - vb.x) * k
+                  const py = (bb.y0 - vb.y) * k
                   if (px < -60 || px > canvasW + 60 || py < -60 || py > (canvasH || 9999) + 60) return null
                   const left = Math.min(Math.max(px, 260), canvasW - 8)
                   const top = Math.max(py, 44)
                   return (
                     <div
                       className="absolute z-20 flex items-center gap-1 rounded-lg border border-teal-200 bg-white/95 p-1 shadow-md backdrop-blur"
-                      style={{ left, top, transform: 'translate(-100%, -100%) translateY(-10px)' }}
+                      style={{ left, top, transform: 'translate(-50%, -100%) translateY(-10px)' }}
                     >
                       <span className="whitespace-nowrap rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700">已选 {bulkIds.length} 个</span>
                       <button

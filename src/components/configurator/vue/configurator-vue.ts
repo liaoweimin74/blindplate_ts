@@ -29,13 +29,14 @@
 //      SymbolMeta.draw() 返回零框架 Shape IR —— Vue/React 渲染同一份数据
 //   2. 缩略图：mountSymbolThumb(el, meta) 一行接入（本文件）
 //   3. 画布：createCanvasController({ toPoint }) 一行获得与 React 组态画布
-//      完全一致的交互（点选/拖动/四角缩放/直线橡皮筋/连线端点吸附改接/click 误触抑制），
-//      几何策略（resizeBox/labelTAt/snapConnEnd）与连线模型操作（connExists/rewireConnTarget）
+//      完全一致的交互（点选/拖动/多选整体拖动/Shift+空白框选/四角缩放/直线橡皮筋/
+//      连线端点吸附改接/click 误触抑制），几何策略（resizeBox/labelTAt/snapConnEnd/
+//      hitTestRect 框选命中）与连线模型操作（connExists/rewireConnTarget）
 //      全部 core 化——Vue 壳与 React 壳共用同一控制器（见本文件 mountCanvasBoard 示例）
 //   4. 属性面板：PropFieldDef schema 驱动，Vue 表单组件按 schema 自动渲染，
 //      业务绑定走 Vue slot（对应 React children 插槽）
 import type { ShapePaint, SymbolMeta } from '@/lib/configurator-core'
-import { createCanvasController, resizeBox, type CanvasPoint } from '@/lib/configurator-core'
+import { createCanvasController, resizeBox, hitTestRect, normRect, type CanvasPoint, type RubberRect } from '@/lib/configurator-core'
 import { shapesToSvgElement } from '@/lib/configurator-core'
 
 export interface ThumbMountOptions {
@@ -116,6 +117,7 @@ export function mountCanvasBoard(el: HTMLElement, opts: CanvasBoardOptions = {})
     { id: 'b3', label: '泵', x: 520, y: 300, w: 90, h: 70, fill: '#ede9fe' },
   ]).map((b) => ({ ...b }))
   let selectedId: string | null = null
+  const bulkIds = new Set<string>() // 多选集（Shift+空白框选 / Shift+点选；成员整体拖动）
 
   const svg = boardEl('svg', { viewBox: `0 0 ${VW} ${VH}`, class: 'w-full h-full block select-none touch-none', style: 'background:#fafaf9' })
   const defs = boardEl('defs', {}, svg)
@@ -124,6 +126,43 @@ export function mountCanvasBoard(el: HTMLElement, opts: CanvasBoardOptions = {})
   boardEl('rect', { x: 0, y: 0, width: VW, height: VH, fill: 'url(#board-grid)' }, svg)
   const boxLayer = boardEl('g', {}, svg)
   const selLayer = boardEl('g', {}, svg) // 选中框 + 角柄（恒在最上层）
+  const rubberLayer = boardEl('g', { 'pointer-events': 'none', visibility: 'hidden' }, svg) // 框选橡皮筋（最上层，非交互）
+
+  // Shift + 空白拖拽 = 框选橡皮筋（与 React 壳同源：normRect + hitTestRect 相交命中）
+  function startRubberSelect(sx: number, sy: number) {
+    let r: RubberRect = { x0: sx, y0: sy, x1: sx, y1: sy }
+    const show = (v: RubberRect | null) => {
+      if (!v) {
+        rubberLayer.setAttribute('visibility', 'hidden')
+        return
+      }
+      rubberLayer.replaceChildren(boardEl('rect', {
+        x: v.x0, y: v.y0, width: Math.max(v.x1 - v.x0, 0.01), height: Math.max(v.y1 - v.y0, 0.01),
+        rx: 2, fill: 'rgba(13,148,136,0.08)', stroke: BOARD_TEAL, 'stroke-width': 1.5,
+        'stroke-dasharray': '6 3', 'vector-effect': 'non-scaling-stroke',
+      }))
+      rubberLayer.setAttribute('visibility', 'visible')
+    }
+    show(r)
+    ctl.run({
+      kind: 'select',
+      start: { x: sx, y: sy },
+      moveThreshold: 3, // 轻点保留普通空白点击语义
+      onMove: (p) => {
+        r = normRect(sx, sy, p.x, p.y)
+        show(r)
+      },
+      onEnd: (_p, sess) => {
+        show(null)
+        if (!sess.moved) return
+        bulkIds.clear()
+        for (const id of hitTestRect(boxes, r)) bulkIds.add(id)
+        if (bulkIds.size) selectedId = [...bulkIds][bulkIds.size - 1] // 属性面板语义跟随最后命中
+        renderBoxes()
+        renderSelection()
+      },
+    })
+  }
 
   // 与 React 壳同源：一个 toPoint 换算 + createCanvasController = 全部画布交互
   const ctl = createCanvasController<CanvasPoint>({
@@ -174,17 +213,52 @@ export function mountCanvasBoard(el: HTMLElement, opts: CanvasBoardOptions = {})
     boxLayer.replaceChildren()
     for (const b of boxes) {
       const g = boardEl('g', {}, boxLayer)
-      boardEl('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 3, fill: b.fill ?? '#fff', stroke: b.stroke ?? '#44403c', 'stroke-width': 1.5, cursor: 'move' }, g)
+      // 多选成员高亮：teal 双描边（与 React 壳 Task 89 isBulk 同语义）
+      const isBulk = bulkIds.has(b.id)
+      boardEl('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 3, fill: b.fill ?? '#fff', stroke: isBulk ? BOARD_TEAL : (b.stroke ?? '#44403c'), 'stroke-width': isBulk ? 2.5 : 1.5, cursor: 'move' }, g)
       const t = boardEl('text', { x: b.x + b.w / 2, y: b.y + b.h / 2 + 4, 'text-anchor': 'middle', 'font-size': 13, fill: '#57534e', 'font-family': 'PingFang SC, Microsoft YaHei, sans-serif', 'pointer-events': 'none' }, g)
       t.textContent = b.label
       g.addEventListener('pointerdown', (e) => {
         e.stopPropagation()
-        selectedId = b.id
-        renderBoxes()
-        renderSelection()
         const r0 = svg.getBoundingClientRect()
         const sx = ((e.clientX - r0.left) * VW) / r0.width
         const sy = ((e.clientY - r0.top) * VH) / r0.height
+        // Shift + 点选：加入/移出多选（与 React 壳 handleShapeClick 同语义）
+        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+          if (bulkIds.has(b.id)) bulkIds.delete(b.id)
+          else bulkIds.add(b.id)
+          selectedId = b.id
+          renderBoxes()
+          renderSelection()
+          return
+        }
+        if (bulkIds.size && !bulkIds.has(b.id)) bulkIds.clear()
+        selectedId = b.id
+        renderBoxes()
+        renderSelection()
+        // 多选整体拖动（Phase 3）：点中成员在多选集且成员 > 1 时全体同位移（ origins 按下时快照）
+        if (bulkIds.size > 1 && bulkIds.has(b.id)) {
+          const origins = new Map(boxes.filter((x) => bulkIds.has(x.id)).map((x) => [x.id, { x: x.x, y: x.y }] as const))
+          ctl.run({
+            kind: 'drag-shape',
+            targetId: b.id,
+            start: { x: sx, y: sy },
+            onMove: (p) => {
+              const dx = p.x - sx
+              const dy = p.y - sy
+              for (const x of boxes) {
+                const o = origins.get(x.id)
+                if (!o) continue
+                x.x = Math.round(o.x + dx)
+                x.y = Math.round(o.y + dy)
+              }
+              renderBoxes()
+              renderSelection()
+            },
+            onEnd: (_p, s) => { if (s.moved) notify() },
+          })
+          return
+        }
         const offX = sx - b.x // 拖拽偏移按下时捕获一次（指针 → 图元左上角）
         const offY = sy - b.y
         ctl.run({
@@ -203,14 +277,23 @@ export function mountCanvasBoard(el: HTMLElement, opts: CanvasBoardOptions = {})
     }
   }
 
-  svg.addEventListener('pointerdown', () => { // 点空白取消选中
+  svg.addEventListener('pointerdown', (e) => { // 空白按下：Shift/Ctrl/Cmd = 框选；普通 = 取消选中 + 清多选
+    const r0 = svg.getBoundingClientRect()
+    const sx = ((e.clientX - r0.left) * VW) / r0.width
+    const sy = ((e.clientY - r0.top) * VH) / r0.height
+    if ((e.shiftKey || e.ctrlKey || e.metaKey) && !e.altKey) {
+      startRubberSelect(sx, sy)
+      return
+    }
     selectedId = null
+    bulkIds.clear()
     renderBoxes()
     renderSelection()
   })
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       selectedId = null
+      bulkIds.clear()
       renderBoxes()
       renderSelection()
     }
