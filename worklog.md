@@ -859,3 +859,22 @@ Stage Summary:
 - 仓库终态：a75c61a LOCAL==REMOTE ahead 0，Task 126~130 全部成果上云（diagram-viewer 壳/底图/attachBox 修复/导出+搜索定位/worklog）
 - 环境韧性档案：GITHUB_TOKEN 抹除×6 + cron 清空×1——沙箱重建双杀清单齐备，每轮开场核查已成铁律
 - 下轮轮转（2881896 驱动）：主线队列全清后进入自主 QA + 新需求循环，优先候选=pid-import 压缩链路回归、图纸导出文件名规范化、画布快捷键帮助面板
+
+---
+Task ID: 132
+Agent: 主会话(Z.ai Code)
+Task: 用户三问（Vue 壳目录/测过没/能否路由访问）——YAGNI 挂起项转正：真实 Vue 3 运行时演示模块 + 模块路由接入 + E2E
+
+Work Log:
+- 【答疑考古】Vue 壳实体 = src/components/configurator/vue/configurator-vue.ts（310 行零依赖双 API：mountSymbolThumb/mountCanvasBoard，Vue SFC 用法仅存于注释）；历史测试状态=仅 tsc 编译验证，零运行时证据；无路由可访问（vue 未安装、无消费者引用）——三问答案促成挂起项转正
+- 【运行时】bun add vue@3.5.44（仅运行时，无 SFC 构建依赖）；Next 16 SSR 安全：createApp 全部位于 useEffect 内，动态 import('vue') 保证 vue 运行时+演示模块+buildStdRegistry 落独立 chunk 不污染主包
+- 【新模块】src/components/configurator/vue/vue-shell-demo.tsx：React 壳 useEffect → Promise.all 三路动态 import → createApp(render fn) 挂载真实 Vue 应用——Vue 响应式状态条（画布图元/手势落定次数/最后操作）+ mountCanvasBoard 画布宿主(420px) + mountSymbolThumb×10 缩略图横条；卸载清理链 app.unmount→onUnmounted→disposes 全断
+- 【路由接入】app-shell 五处注册：ModuleKey 'vue-demo' / NAV 顶层「组态内核演示」(Boxes 图标) / MODULE_META / ModuleRouter case / 动态 import；覆盖演示画布缺省配色（壳默认泵 #ede9fe 紫系）为 teal/emerald/stone 合规色
+- 【静态】tsc 净（修 1 处 app 类型缺 mount）；lint 5 error=PPT 脚本存量不变
+- 【E2E·agent-browser 全绿】①导航「组态内核演示」：vue@3.5 徽标+状态条 3/0/内核就绪+SvgRoot 三图元+10 缩略图（立式储罐→固定床反应器 Shape IR 全渲染）②合成 PointerEvent 拖动反应器（window 级 move/up，抓取点 (100,100) 设计坐标 k=1.115）：rect x 60→120 y 60→100 精确 +60,+40、手势落定次数 0→1、最后操作「反应器 → (120, 100)」——内核 onChange → Vue ref → render fn 重渲染跨框架桥接实测③切换 pid-config 再返回：opCount 复位 0=卸载/重挂生命周期干净④pid-config 烟测：90 SVG/E103 在位/图元库正常=注册变更零波及；dev.log 零 error
+- 【排障】登录页快照发现浏览器持久化登录态直接进主壳（Task 128 验证码直解未需复用）；rg 输出污染再现（'123456' 吞为 'n'）——Read 工具复核 seed.ts 定案凭据 admin/123456
+
+Stage Summary:
+- Vue 壳从「零依赖注释示例」转正为「真实 Vue 3 运行时可路由模块」：三条契约（registry Shape IR 直用/缩略图一行接入/画布同源控制器）全部拿到运行时证据，跨框架响应式桥接链路实测打通
+- 用户三问终答：目录 src/components/configurator/vue/（壳 configurator-vue.ts + 本轮新增 vue-shell-demo.tsx）；此前仅 tsc 编译级；现在可通过导航「组态内核演示」访问（单路由 AppShell 模块切换，非 URL 路由——平台预览仅暴露 / 约束下的等价解）
+- 下轮建议：①Vue 壳补连线/框选批量/属性面板 schema（原 YAGNI 项，现有真实演示宿主可承接）②buildStdRegistry 缩略图扩全量 126 枚+分组折叠 ③演示画布接入 history 撤销栈对齐 pid-config

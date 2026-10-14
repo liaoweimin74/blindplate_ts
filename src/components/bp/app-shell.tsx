@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   LayoutDashboard, ClipboardList, FileSignature, TicketCheck, BookOpen,
   BarChart3, Database, Settings, Smartphone, Menu, X, Factory, ChevronDown, ShieldCheck,
-  RefreshCw, ShieldAlert, ListChecks, FlaskConical, DraftingCompass,
+  RefreshCw, ShieldAlert, ListChecks, FlaskConical, DraftingCompass, Boxes,
   User, KeyRound, Eye, EyeOff,
 } from 'lucide-react'
 
@@ -26,6 +26,7 @@ import PipelineMasterModule from '@/components/bp/pipeline-master'
 import BaseDataModule from '@/components/bp/base-data'
 import SystemMgmtModule from '@/components/bp/system-mgmt'
 import MobilePreviewModule from '@/components/bp/mobile-preview'
+import VueShellDemoModule from '@/components/configurator/vue/vue-shell-demo'
 import NotificationBell from '@/components/bp/notification-bell'
 import GlobalSearch from '@/components/bp/global-search'
 import UserMenu from '@/components/bp/user-menu'
@@ -37,6 +38,7 @@ type ModuleKey =
   // 拆分后的独立模块（schemes/task-mgmt 保留兼容旧跳转）
   | 'isolation-scheme' | 'disposal-scheme' | 'ticket-mgmt' | 'task-track'
   | 'blind-status' | 'iso-point-master'
+  | 'vue-demo'
 
 interface NavItem {
   key: string
@@ -97,6 +99,7 @@ const NAV: NavItem[] = [
     { key: 'audit', label: '操作日志' },
   ] },
   { key: 'mobile-preview', label: '移动端预览', icon: Smartphone },
+  { key: 'vue-demo', label: '组态内核演示', icon: Boxes },
 ]
 
 const MODULE_META: Record<ModuleKey, { title: string; desc: string }> = {
@@ -119,6 +122,7 @@ const MODULE_META: Record<ModuleKey, { title: string; desc: string }> = {
   'ticket-mgmt': { title: '开作业票', desc: '盲板抽堵安全作业票签发与批准（GB 30871）' },
   'task-track': { title: '作业任务跟踪', desc: '作业任务执行进度跟踪与现场逐点确认' },
   'blind-status': { title: '盲板状态', desc: '按装置查看 PID 组态图上隔离点实时通/盲与作业状态（只读）' },
+  'vue-demo': { title: '组态内核演示', desc: 'Vue 3 壳接入零框架组态内核——与 PID 组态共用同一画布控制器 / 图元 Shape IR / 几何策略（跨框架同源验证）' },
 }
 
 const ROLE_TIP_MAP: Record<string, string> = {
@@ -370,6 +374,7 @@ function ModuleRouter({ active, moduleProps, onLogout }: { active: ModuleKey; mo
     case 'stats': return <StatsModule {...moduleProps} />
     case 'pid-config': return <PidConfigModule key="pid-edit" {...moduleProps} />
     case 'blind-status': return <PidConfigModule key="pid-readonly" {...moduleProps} readOnly />
+    case 'vue-demo': return <VueShellDemoModule />
     case 'pipeline-master': return <PipelineMasterModule key="pm-pipelines" {...moduleProps} singleTab="pipelines" />
     case 'iso-point-master': return <PipelineMasterModule key="pm-points" {...moduleProps} singleTab="points" />
     case 'base-data': return <BaseDataModule key="bd-all" {...moduleProps} />
