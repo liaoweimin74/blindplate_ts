@@ -547,3 +547,26 @@ Stage Summary:
 - 方案文档配图全面升级：mermaid 默认样式 → 手工精修 SVG（分层带/徽章/图标/编号时序/分支底色），信息量不减反增（新增「不直连」✕ 符号、九环节 pill 矩阵、14 步编号、协同硬约束横幅），配色遵循项目铁律
 - SVG 与 md 分离存放（diagrams/ 相对引用），GitHub/Typora/VS Code/语雀自动渲染，单图可复用于 PPT/Word
 - 本地领先远程 2 提交（f3614f8 cron 代提交 + f796d70 本轮）待用户「push」；巡检 cron 390197 待核查
+
+---
+Task ID: 117
+Agent: 主会话(Z.ai Code)
+Task: 用户要求重构组态页面——提取与具体业务数据无关的公共组态组件，并用它重新实现组态页面；追加约束：组件要考虑给 Vue 和 React 开发者共用（封装方式框架无关）
+
+Work Log:
+- 【架构盘点】精读 pid-config.tsx（6778 行/110 useState）：模型段/几何段/自动布局/图元库/属性面板/画布交互分层；确认导出消费面（app-shell 默认导出、work-requests 用 ISO_STATE_STYLE、pid-locate 用 11 个引擎性导出）与 contentInsetBox 依赖 STD_SYMBOL_BBOX 的解耦点
+- 【三层封装定案】（CodeMirror/Tiptap 同构范式，向用户确认）：①core 零框架 vanilla TS（Vue/React 共用）②React 适配层薄壳（渲染桥+面板组件，事件契约即 Vue 壳契约）③业务宿主（注册表注入+绑定插槽）
+- 【核心层 src/lib/configurator-core（6 文件零框架）】types.ts（NodeGeom/EdgeGeom/MarkGeom/DiagramDoc/Selection/SymbolRegistry/PropFieldDef，字段名与现有 content JSON 完全兼容零迁移）｜geometry.ts（锚点/自由锚点t/正交路由/投影/命中/吸附全泛型化 + setInsetResolver 内容边界注入解耦 std bbox 表 + rotateAnchorName 族自含）｜auto-layout.ts（Sugiyama 简化泛型版）｜registry.ts（buildRegistry/groupTreeOf/searchSymbols）｜history.ts（撤销重做栈，新增能力）｜constants.ts（画布/语义色/吸附阈值/色板）
+- 【React 适配层 src/components/configurator】symbol-palette.tsx（SymbolPalette 注册表驱动：多注册表页签由宿主 Tabs 组合、两级手风琴 stack 模式、搜索内置、HoverTip 悬停卡、PaletteCell action 业务钮插槽）｜property-panel.tsx（NodePropertyPanel：名称/类型徽章/XYWH/flip/色板 + schema 扩展属性区 + styleLocked + children 业务绑定插槽）｜fields.tsx（NumField/ColorSwatches/PropFieldEditor 六型 schema 编辑器）
+- 【BPMS 适配 src/components/bp/pid-registry.tsx】buildStdRegistry（std 五大类 126 符号→SymbolRegistry）/buildBasicRegistry/buildCustomRegistry（动态）/PID_TYPE_LIBRARY（含 icon 与旧 equip 兼容占位）/setInsetResolver 注入 contentInsetBox/pidThumbRenderer 缩略图分派（std 查表/basic 微缩/custom parts 递归）
+- 【pid-config.tsx 宿主化 -670 行】模型段 PidShape extends NodeGeom（业务字段留超集）、几何/布局/常量/色板/NumField/ColorSwatches/SHAPE_LIBRARY/libOf/typeLabel 全部切引擎 import（兼容别名保持旧导出名，pid-locate/work-requests 零改动）；图元库三页签改 <SymbolPalette>（std/basic/custom 三注册表实例 + cellAction 注入「以为基础新建」与自定义图元编辑/复制/删除钮）；属性面板图元分支改 <NodePropertyPanel>（挂接状态卡+绑定设备卡转 children 插槽）
+- 【修复过程】MultiEdit 部分写盘导致 import 块重复（tsc 116 个 TS2300）→ python 清理；palette 替换吞滚动容器开标签 → 补回；SymbolPalette 漏集成 PaletteSearch → E2E 发现后补
+- 【E2E·agent-browser】登录（SVG 验证码提取 BZ5P）→ PID 组态（脱苯图 15图元/19连线/19标注自动加载渲染✓）→ 放置链路（basic 页签 pick 矩形→画布点击→图元 15→16✓）→ NodePropertyPanel 结构（名称/绑定设备插槽/X Y W H/色板/徽章「矩形」✓）→ 名称编辑 onPatch 落值✓ → Delete 删除还原 15（未保存零残留）→ 引擎搜索「闸阀」→1 命中✓ → hover 真实鼠标 → HoverTip 三行卡（立式储罐/EN ISO 10628/64×80）截图✓ → 分组树 126 符号五类两级手风琴✓ → 查看模式状态 chip 16 处+六态图例+10s 轮询截图✓ → dev.log 零 error
+- 【验证】tsc src/ 零错误；ESLint 达基线（PPT 脚本 5 既有）；E2E 数据零残留（改名+放置+删除均未保存，刷新丢弃）
+- 【commit】2a8d03d（引擎+适配层+palette 接入，13 文件 +1854/-943）→ 3cb26d8（属性面板接入，+113/-167）；未 push 等用户指令
+
+Stage Summary:
+- 组态引擎三层封装落地：core（Vue/React 可共用，含 Vue 接入契约注释）/React 适配层/BPMS 宿主；用户三大诉求各有落点——图元分类图形=SymbolRegistry 注入、扩展属性=PropFieldDef schema、业务绑定=children 插槽+意图回调
+- PID 组态页图元库与属性面板已由引擎组件实现，交互行为与重构前对齐（E2E 全链路验证）
+- Phase 2 待做（建议下轮）：diagram-canvas 画布交互层泛型化搬迁（选择/拖动/resize/连线/中段/端点/橡皮筋/挂接→引擎受控组件）+ diagram-editor 编排 + 撤销重做 UI（history.ts 已就绪）+ Vue 适配层示例壳
+- 引擎扩展点文档在 core/index.ts 头注释；多注册表页签/搜索/悬停卡/schema 面板均为开箱组件
