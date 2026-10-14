@@ -9,7 +9,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, Link2, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
-  MousePointer2, Map as MapIcon, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer,
+  MousePointer2, Map as MapIcon, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Redo2, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer, Undo2,
   Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
 } from 'lucide-react'
 import { ModuleProps, entryActionEventName } from '@/lib/bp-types'
@@ -60,6 +60,7 @@ import {
   CANVAS_W, CANVAS_H, STROKE, LINE, TEAL, ROSE, GRID_S, GRID_L,
   FILL_PALETTE, STROKE_PALETTE, ANCHOR_LABEL, MARK_EDGE_SNAP_DIST, LABEL_T_MIN, LABEL_T_MAX, CONN_END_SNAP_DIST,
   minimapBoundsOf,
+  createHistory,
   // 几何
   clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline, projectToPolyline,
   anchorPoint, anchorPointT, physAnchor, outward, anchorZoneBox, nearestFreeAnchorAt, nearestAnchorAt,
@@ -1637,11 +1638,58 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const masterByIdRef = useRef(masterById)
   masterByIdRef.current = masterById
 
-  /** 统一内容变更入口：任何图元/连线/标注的增删改都置 dirty */
+  /** 统一内容变更入口：任何图元/连线/标注的增删改都置 dirty（并压栈撤销快照） */
   const mutate = (fn: (prev: PidContent) => PidContent) => {
+    pushHistory()
     setContent((prev) => fn(prev))
     setDirty(true)
   }
+
+  // ---- 撤销/重做（快照栈）：离散提交走 mutate 漏斗压栈，拖拽类在首次实际移动时压栈，
+  //      加载/新建图时清栈。快照为全量 JSON（图元/连线/标注），与保存格式同构。 ----
+  const histRef = useRef(createHistory<PidContent>(80))
+  const lastSnapKeyRef = useRef('')
+  const [histSize, setHistSize] = useState({ undo: 0, redo: 0 })
+  const snapKeyOf = (c: PidContent) => JSON.stringify(c)
+  /** 压栈当前内容快照（同状态重复压栈自动合并，防同 tick 连续 mutate 产生冗余步骤） */
+  const pushHistory = () => {
+    const snap = structuredClone(contentRef.current)
+    const key = snapKeyOf(snap)
+    if (key === lastSnapKeyRef.current) return
+    lastSnapKeyRef.current = key
+    histRef.current.push(snap)
+    setHistSize(histRef.current.size())
+  }
+  /** 加载/新建组态图时清空历史（跨图撤销无意义） */
+  const resetHistory = () => {
+    histRef.current.clear()
+    lastSnapKeyRef.current = ''
+    setHistSize(histRef.current.size())
+  }
+  const applyHistSnapshot = (snap: PidContent) => {
+    // 清空去重键：撤销/重做后的下一个「压栈前状态」可能恰好等于恢复态（如再次放置前=恢复态），
+    // 若沿用去重会误吞该快照，导致该操作永久无法撤销
+    lastSnapKeyRef.current = ''
+    setContent(snap)
+    setDirty(true)
+    setSelected(null)
+    setBulkIds([])
+    setHistSize(histRef.current.size())
+  }
+  const undoContent = () => {
+    if (mode !== 'edit') return
+    const prev = histRef.current.undo(structuredClone(contentRef.current))
+    if (prev) applyHistSnapshot(prev)
+  }
+  const redoContent = () => {
+    if (mode !== 'edit') return
+    const next = histRef.current.redo(structuredClone(contentRef.current))
+    if (next) applyHistSnapshot(next)
+  }
+  const undoContentRef = useRef(undoContent)
+  undoContentRef.current = undoContent
+  const redoContentRef = useRef(redoContent)
+  redoContentRef.current = redoContent
 
   // ---- 全屏/窗口切换 ----
   const enterFull = () => {
@@ -1840,7 +1888,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
   // ---- 自动布局（编辑态工具栏）：确认弹窗 → 应用快照对比 + toast 撤销 ----
   const [layoutConfirmOpen, setLayoutConfirmOpen] = useState(false)
-  const layoutSnapshotRef = useRef<PidContent | null>(null)
+  // 注：自动布局快照已由 pushHistory/undoContent 接管（快照栈统一回退）
   const applyAutoLayout = () => {
     setLayoutConfirmOpen(false)
     const before = contentRef.current
@@ -1863,7 +1911,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       toast({ title: '已是整齐布局', description: '当前图元位置与连线走向无需调整' })
       return
     }
-    layoutSnapshotRef.current = before
+    pushHistory() // 自动布局事务：压栈布局前快照（Toast 撤销/ Ctrl+Z 均可回退）
     setContent(after)
     setDirty(true)
     toast({
@@ -1874,12 +1922,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         <ToastAction
           altText="撤销自动布局"
           onClick={() => {
-            if (layoutSnapshotRef.current) {
-              setContent(layoutSnapshotRef.current)
-              setDirty(true)
-              toast({ title: '已撤销自动布局', description: '已恢复布局前的位置（尚未保存）' })
-              layoutSnapshotRef.current = null
-            }
+            undoContentRef.current()
+            toast({ title: '已撤销自动布局', description: '已恢复布局前的位置（尚未保存）' })
           }}
         >
           撤销
@@ -2126,6 +2170,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       setActiveId(id)
       setDetailName(data.item.name)
       setContent(parseContent(data.item.content))
+      resetHistory() // 换图后历史清空（跨图撤销无意义）
       setDirty(false)
       setStatusPoints([])
       setStatusAt(null)
@@ -2343,6 +2388,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const addLineShape = (sx: number, sy: number, ex: number, ey: number) => {
     const lib = libOf('line')
     const sid = uid('s')
+    pushHistory() // 直线落笔事务：压栈落笔前快照
     setContent((prev) => {
       const seq = prev.shapes.filter((s) => s.type === 'line').length + 1
       const shape: PidShape = {
@@ -2660,6 +2706,14 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         if (!s) return
         e.preventDefault()
         duplicateShapeRef.current(s)
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        if (mode !== 'edit') return
+        e.preventDefault()
+        undoContentRef.current()
+      } else if ((e.ctrlKey || e.metaKey) && ((e.key === 'y' || e.key === 'Y') || (e.shiftKey && (e.key === 'z' || e.key === 'Z')))) {
+        if (mode !== 'edit') return
+        e.preventDefault()
+        redoContentRef.current()
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (mode !== 'edit') return
         if (bulkIds.length) { e.preventDefault(); deleteBulkShapesRef.current(); return } // 多选态直达批量删除
@@ -2914,7 +2968,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const onMove = (ev: PointerEvent) => {
       const p = toSvgPoint(ev)
       if (!p) return
-      moved = true
+      if (!moved) { moved = true; pushHistory() } // 拖拽事务：首次实际移动时压栈（撤销恢复拖拽前位置）
       suppressShapeClickAtRef.current = Date.now() + 400 // 拖动过：紧随的 click 不作连线点击处理（全域锚点命中区防误触发）
       // 无限画布：拖拽不限制在 0..CANVAS_W（与放置/缩放边界策略一致）
       const nx = Math.round(p.x - offX)
@@ -2961,7 +3015,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const onMove = (ev: PointerEvent) => {
       const p = toSvgPoint(ev)
       if (!p) return
-      moved = true
+      if (!moved) { moved = true; pushHistory() }
       const nx = Math.round(p.x - offX)
       const ny = Math.round(p.y - offY)
       last = { x: nx, y: ny }
@@ -3005,7 +3059,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       if (!p) return
       const proj = projectToPolyline(pts, p.x, p.y)
       if (!proj) return
-      moved = true
+      if (!moved) { moved = true; pushHistory() }
       // 投影参数 clamp 在两端 6% 内（不盖住锚点/设备），保留 3 位小数存储
       const t = Math.round(clamp(proj.t, LABEL_T_MIN, LABEL_T_MAX) * 1000) / 1000
       setContent((prev) => ({
@@ -3033,7 +3087,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const onMove = (ev: PointerEvent) => {
       const p = toSvgPoint(ev)
       if (!p) return
-      moved = true
+      if (!moved) { moved = true; pushHistory() }
       const val = Math.round(axis === 'x' ? p.x : p.y) // 无限画布：中段覆盖值不限制在画布内
       setContent((prev) => ({
         ...prev,
@@ -3134,7 +3188,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const onMove = (ev: PointerEvent) => {
       const raw = toSvgPoint(ev)
       if (!raw) return
-      moved = true
+      if (!moved) { moved = true; pushHistory() }
       const px = raw.x // 无限画布：缩放指针/新边界不再限制在 0..CANVAS_W
       const py = raw.y
       let x1 = Math.min(fx, px)
@@ -3268,6 +3322,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         setActiveId(null)
         setDetailName('')
         setContent(EMPTY_CONTENT)
+        resetHistory()
         setDirty(false)
         setSelected(null)
         setBulkIds([])
@@ -3769,6 +3824,28 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               <TabsTrigger value="view" className="px-4">查看</TabsTrigger>
             </TabsList>
           </Tabs>
+          )}
+          {!readOnly && mode === 'edit' && (
+            <>
+              <Button
+                variant="outline"
+                className="h-10 w-10 p-0"
+                title="撤销（Ctrl+Z）：回退上一次增删改/拖拽/布局"
+                disabled={histSize.undo === 0}
+                onClick={() => undoContentRef.current()}
+              >
+                <Undo2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 w-10 p-0"
+                title="重做（Ctrl+Y 或 Ctrl+Shift+Z）"
+                disabled={histSize.redo === 0}
+                onClick={() => redoContentRef.current()}
+              >
+                <Redo2 className="h-4 w-4" />
+              </Button>
+            </>
           )}
           <div className="flex-1" />
           {mode === 'edit' ? (
