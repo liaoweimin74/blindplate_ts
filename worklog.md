@@ -719,3 +719,21 @@ Stage Summary:
 - diagram-viewer 大方向落地第一步：数学层 core 化已完成，UI 容器组件化暂缓（两处 UI 特色不同，等第三处消费方出现再抽象）
 - 下一轮建议：①pid-config 业务功能对齐重写评估（主数据绑定/隔离点标志/装置归属/底图——Task 116 后半）或 ②Task 115 作业票共存方案文档 / Task 114 PPT 痛点页
 - 本地领先远程 9 提交（Task 117~124）待用户「push」；巡检 cron 390197 在位；db/custom.db 脏（页整理，不提交）
+
+---
+Task ID: 125
+Agent: 主会话(Z.ai Code)
+Task: 用户指令「push」——Task 116~124 共 30 提交上云（token 第 6 次被平台抹除→已按纪律向用户索取）
+
+Work Log:
+- 【仓库考古】推送前发现三处状态异常：①HEAD 3864620 为快照 hook 产生的 UUID 垃圾提交（仅 db/custom.db 二进制页churn）②origin/main 领先 1 个未拉取提交 bbb32da（9月16日 Task 113 worklog 节，19 行）③本地 78d6f87 与 bbb32da 是同一 Task 113 worklog 节在分叉两端的重复提交（同日同内容独立落库）
+- 【垃圾清理】git reset --soft HEAD~1 + restore --staged db/custom.db 丢弃 3864620（live db 文件零接触），历史收敛至 54954ba
+- 【分叉整合】先 git pull --rebase 因 db 脏被拒→备份 live db 至 /tmp→checkout 清树→首次 pull 网络挂起 120s 被杀（无 rebase 残留，ls-remote 复测连通正常）→改用缓存引用 git rebase origin/main 一次通过 30/30 零冲突（两侧同内容增行被三方合并自动吸收，Task 113 节 grep 恰 1 处无重复）
+- 【push 受阻】连接间歇抖动一次（128s 超时）后复推命中真实根因：could not read Username——沙箱 home 目录今日重建（.gitconfig 13:30 重生），全盘排查 credential helper/~/.git-credentials/~/.netrc/gh CLI/ssh key/env token 零命中，.env 被平台重生成仅剩 DATABASE_URL（50 字节），GITHUB_TOKEN 第 6 次被抹除
+- 【推送前核验（就绪待推）】ahead 30 behind 0；outgoing diff 敏感扫描（github_pat≥60位/ghp_≥30位）零命中；live db 已还原（脏态惯例不提交）；rebase 后工作树即 HEAD 无半途状态
+- 【纪律执行】按 worklog 434 行既定纪律：push 遇凭据缺失直接向用户索取 fine-grained PAT（Contents: read+write），到位后一步 git push 即可（30 提交已 rebase 就位，无需其他操作）
+
+Stage Summary:
+- 30 提交（Task 116 组态引擎框架无关化全套 + Task 123 徽章热区修复 + Task 124 视口数学下沉）已完成 rebase 整合并通过全部推送前核验，卡在唯一缺口：GitHub 凭据
+- 运维事实更新：GITHUB_TOKEN 已 6 次被平台抹除（本次为沙箱 home 重建连带 .env 重生成）； PAT 到位后写入 .env（check-ignore 确认不追踪）→ 推送 → ls-remote 三方验证
+- 风险提示：本次 30 提交中含 2 个历史 UUID 快照提交（ea6e956/8e8a50b 时代仅 db churn），已随历史入库属既有口径，不再 rewrite
