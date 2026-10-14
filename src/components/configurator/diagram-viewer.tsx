@@ -61,6 +61,8 @@ export interface DiagramViewportApi {
   vbRef: RefObject<ViewportRect>
   /** 取景框容器 ref（必须挂到裁剪容器上；measure 模式靠它实测） */
   boxRef: RefObject<HTMLDivElement | null>
+  /** 容器挂载入口（ref 回调直用）：late-mount 安全的 RO 测量（containerW/measureRatio 首测+跟随） */
+  attachBox: (el: HTMLDivElement | null) => void
   /** svg ref（必须挂到 viewBox svg 上；滚轮绑定/平移换算用） */
   svgRef: RefObject<SVGSVGElement | null>
   /** 实测容器宽 px（0 = 未测量；base100='container' 的 100% 基准） */
@@ -162,28 +164,41 @@ export function useDiagramViewport(opts: DiagramViewportOptions): DiagramViewpor
   }, [])
 
   // ---- 容器测量：containerW（base100/percent 用）+ measure 模式的实测高宽比；
-  //      比例变化时同步校正当前视口高（保持 x/y/w，防窗口缩放后坐标漂移；observer 回调非 effect 同步） ----
-  useEffect(() => {
+  //      比例变化时同步校正当前视口高（保持 x/y/w，防窗口缩放后坐标漂移）。
+  //      RO 生命周期在 attachBox（ref 回调）内而非 effect：容器可 late-mount（如 pid-config
+  //      主画布在编辑 tab 切换后才渲染），effect 只在组件 mount 跑一次会永久错过
+  //      （Task 128 E2E 实测：boxRef 悬空 → containerW 恒 0 → 浮动工具条永不渲染，
+  //      且 measure 比例停留初值 → vb 与容器比例错配 → 指针换算 y 向恒定偏差） ----
+  const roRef = useRef<ResizeObserver | null>(null)
+  const measure = useCallback(() => {
     const el = boxRef.current
     if (!el) return
-    const measure = () => {
-      const r = el.getBoundingClientRect()
-      if (r.width > 4 && r.height > 4) {
-        setContainerW(Math.round(r.width))
-        if (ratioMode === 'measure') {
-          const ratio = r.height / r.width
-          setMeasureRatio(ratio)
-          setVb((v) => {
-            const h = v.w * ratio
-            return Math.abs(h - v.h) < 0.5 ? v : { ...v, h }
-          })
-        }
+    const r = el.getBoundingClientRect()
+    if (r.width > 4 && r.height > 4) {
+      setContainerW(Math.round(r.width))
+      if (ratioMode === 'measure') {
+        const ratio = r.height / r.width
+        setMeasureRatio(ratio)
+        setVb((v) => {
+          const h = v.w * ratio
+          return Math.abs(h - v.h) < 0.5 ? v : { ...v, h }
+        })
       }
     }
-    const ro = new ResizeObserver(measure)
-    ro.observe(el) // observe 即触发一次初始回调，无需手劲首测
-    return () => ro.disconnect()
   }, [ratioMode])
+  /** 容器挂载入口（ref 回调直用）：挂载即建 RO 并首测，卸载即断开——late-mount 安全 */
+  const attachBox = useCallback((el: HTMLDivElement | null) => {
+    boxRef.current = el
+    roRef.current?.disconnect()
+    roRef.current = null
+    if (!el) return
+    const ro = new ResizeObserver(measure) // observe 即触发一次初始回调，无需手劲首测
+    ro.observe(el)
+    roRef.current = ro
+    measure()
+  }, [measure])
+  // 卸载清理（attachBox 的 disconnect 仅覆盖容器换挂场景；组件级卸载由本 effect 兜底）
+  useEffect(() => () => roRef.current?.disconnect(), [])
 
   // initial='width'：世界尺寸就绪后全宽适配一次（图片 naturalWidth 异步到达时重适配）；
   // 视口初始化属测量后同步校正语义，非派生状态，豁免 setState-in-effect
@@ -238,7 +253,7 @@ export function useDiagramViewport(opts: DiagramViewportOptions): DiagramViewpor
   const atMax = vb.w <= minW + 0.5
 
   return {
-    vb, setVb, vbRef: vbRef as RefObject<ViewportRect>, boxRef, svgRef,
+    vb, setVb, vbRef: vbRef as RefObject<ViewportRect>, boxRef, svgRef, attachBox,
     containerW, ratio: ratioMode === 'aspect' ? worldH / worldW : measureRatio,
     zoomAt, resetView, fitWorld, setPercent, focusOn, navToWorld, startPan, panning,
     percent, atMin, atMax, bounds: minimapBoundsOf(vb),
@@ -476,7 +491,7 @@ export function DiagramViewer({
   height?: number
 }) {
   const vp = useDiagramViewport({ worldW, worldH, base100, minZoom, maxZoom, ratio, initial, enabled })
-  const { boxRef: vpBoxRef, svgRef: vpSvgRef } = vp
+  const { attachBox: vpAttachBox, svgRef: vpSvgRef } = vp
   const [minimapOpen, setMinimapOpen] = useState(minimapDefaultOpen)
   const pid = useId().replace(/:/g, '') // 多实例同屏 pattern id 防冲突
 
@@ -492,7 +507,7 @@ export function DiagramViewer({
   return (
     <>
       <div
-        ref={vpBoxRef}
+        ref={vpAttachBox}
         className={cn('relative w-full overflow-hidden rounded-lg border bg-white', boxClassName)}
         style={{ ...aspectStyle, ...boxStyle }}
       >

@@ -1414,7 +1414,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     ratio: 'measure',      // 容器实测比：画布占满可用高度，无 letterbox 坐标偏移
     enabled: !detailLoading,
   })
-  const { vb, setVb, vbRef, svgRef, zoomAt, resetView, panning, percent: zoomPercent, atMin: zoomAtMin, atMax: zoomAtMax } = vp
+  // boxRef 必须挂主画布裁剪容器：ResizeObserver 测 containerW（工具条渲染/定位）+ measure 比例回填
+  // （Task 128 E2E 实测：漏挂 → containerW 恒 0，单选/多选浮动工具条永不渲染，且 measure 比例
+  //   停留在初值 worldH/worldW，vb 与容器比例错配产生 letterbox，指针换算 y 向恒定偏差）
+  const { vb, setVb, vbRef, svgRef, attachBox: vpAttachBox, zoomAt, resetView, panning, percent: zoomPercent, atMin: zoomAtMin, atMax: zoomAtMax } = vp
   const canvasW = vp.containerW // 浮动工具条定位 clamp 用
   const [canvasH, setCanvasH] = useState(0) // 0 = 未测量（回落到画布比例兜底）
   // click 误触抑制时间戳已收敛至 canvasCtl.guard（平移/图元拖动/连线/落笔四类，core ClickGuard）
@@ -4188,7 +4191,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 </div>
               )}
               <div
-                ref={canvasBoxRef}
+                ref={(el) => { canvasBoxRef.current = el; vpAttachBox(el) }} // 双挂：本地高度测量 + hook 容器测量（attachBox 内建 RO，late-mount 安全）
                 className="relative overflow-hidden rounded-lg border bg-white"
                 style={canvasH > 0 ? { height: canvasH } : { aspectRatio: `${CANVAS_W} / ${CANVAS_H}` }}
               >

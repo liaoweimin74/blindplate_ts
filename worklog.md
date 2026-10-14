@@ -782,3 +782,25 @@ Stage Summary:
 - 底图设计口径：bgImage 独立于 content 快照栈（撤销/重做不回退底图）、即时落库（不搅动脏标/保存流）、前端压缩 ≤1600px（SQLite 单字段 ≤2MB 防线）
 - pid-config 5936→6096 行（+底图 UI/逻辑）；共享组件版图再扩：image-compress.ts 入 lib
 - 下一轮建议：①全量回归一遍 pid-config 编辑核心手势（本轮未重测拖拽/连线/框选）②Vue 壳连线+工具条仍按 YAGNI 挂起 ③27+2 提交待 push（等用户指令）
+
+---
+Task ID: 128
+Agent: 主会话(Z.ai Code)
+Task: pid-config 编辑核心手势全量 E2E 回归（Task 127 交接建议①）——拖拽/连线/框选/撤销，途中抓获并修复 boxRef 悬空真 bug
+
+Work Log:
+- 【开场处置】快照 hook 垃圾提交 98086fd（仅 db churn，Task 123/125 同款）→ reset --soft + restore --staged 清理，HEAD 收敛至 c40dc4f，ahead 2 保留 diagram-viewer/底图两个真实提交
+- 【E2E·手势四连】admin 登录（验证码 img 内嵌 SVG 直解 SQC9）→台账管理→PID 组态→编辑态基线 34 图元/19 连线：①点选 E103 本体（pid-std 屏幕中心 elementFromPoint 实锤）→属性面板 X534/Y302/W87/H42 ✓ ②合成拖拽 (+60,+40) 屏幕px→X+86/Y+57 与 60/0.6967 期望逐位吻合 ✓ ③环带拖拽 E103→V101（crosshair path 右段 976,564.7→V101 本体）连线 19→20 ✓ ④Ctrl+Z 双还原（位置精确回 523.25/289.25+连线回 19）✓
+- 【重大排障·stdout 污染】框选验证途中遭遇 Bash 文本管道污染：`hits[h` 被吞渲染为 `hitsits`（`hits`+[h 被吞+`its`）、`[measureRatio` 被吞为 `easureRatio`——sed/awk/rg/cat/python print 全部输出通道不可信，一度误判「代码损坏+已提交坏版本」（git show 也显示坏内容）；最终以**浏览器真实编译**（强刷重进 PID 组态 34 图元渲染）+tsc+Read 工具四方交叉定案：**代码从未损坏，一切全是输出幻觉**，git HEAD 无污染，零误修复（python replace 未命中原样写回、mtime 变内容未变）。教训：含 `[字母` 模式的代码行文本必须用 Read 工具或 python 内部布尔判定复核
+- 【真 bug·boxRef 悬空】框选 E2E 深挖（合成 pointer 事件层排查 React fiber/委托链/事件传播三关）后定位双根因：①pid-config 解构 vp **漏取 boxRef**（Task 126 套件化遗漏）→ ResizeObserver 无元素可测 → containerW 恒 0 → **单选/多选浮动工具条渲染条件 canvasW>0 恒 false 永不渲染**（真实产品 bug）②measureRatio 停留初值 worldH/worldW=0.5833 → vb 与容器 836×694 比例错配 → **letterbox → 指针换算 y 向恒偏 ~72 世界单位**（解释 C 实验橡皮筋偏移/误命中 T102 全部怪象）
+- 【hook 根治】diagram-viewer.tsx useDiagramViewport：measure effect（mount 一次，late-mount 主画布在编辑 tab 切换后才渲染→effect 永久错过）重构为 **attachBox ref 回调**（挂载即建 RO+首测、卸载断开、late-mount 安全）；DiagramViewportApi 加 attachBox 字段；DiagramViewer 壳内部 493/509 同步换用（pid-locate 弹窗本就是 late-mount 场景——**顺带修复 Task 126 遗留「percent 取 Radix 开窗动画中间帧偏差 ~5%」小刺**：RO 跟随动画结束后尺寸自愈）；pid-config 主画布容器双挂 canvasBoxRef+vpAttachBox
+- 【E2E·框选全绿（修复后）】Shift+空白拖拽 (860,510)→(1090,720)：badge「已选 3 个」✓ 替换成…按钮 ✓ 对齐/均匀分布按钮（bulkIds≥2）✓ Esc 清除多选 ✓——startRubberSelect→toSvgPoint→rubber 渲染→hitTestRect→setBulkIds/setSelected 全链实测
+- 【E2E·跨消费方回归】pid-locate 弹窗（隔离方案 GL-202609-018→详情→图 tab→定位）：聚焦 vb w=400=1200/3 ✓ 滚轮 ÷1.12=357.14 锚点保持 ✓ aspect h=233.33 ✓；pid-import：直调 React onChange→FileReader→压缩→POST /api/ai/pid/extract 200→任务轮询→AI 对非 PID 测试图正确报错「未识别出任何设备位号」→回落 upload step 可重传——**上传→识别→错误处理链路实测通过**；查看器（preview step）与 pid-locate 同壳同路径，由后者证据覆盖
+- 【静态】tsc src 零错误；lint 仅存量 5（PPT 脚本）；dev.log 近期零 error（唯一 Fast Refresh 全刷为开发期 HMR 正常行为）
+
+Stage Summary:
+- 编辑核心手势回归 5/5 全绿（点选/拖拽/连线/撤销/框选），Task 127 交接建议①闭环
+- **修复真实 bug×2**：pid-config 工具条永不渲染（boxRef 悬空）+ 指针换算 y 向恒偏（measure 比例错配）——一处遗漏两个症状；hook attachBox 化根治 late-mount 并自愈 Task 126 percent 动画帧小刺
+- 方法论沉淀：①Bash stdout 污染应对（`[字母` 吞噬模式，交叉验证三件套=浏览器实测/Read 工具/python 内部布尔）②React 合成 PointerEvent 对框选类修饰键手势的注入不可靠（ctrl 通路可代测），真实浏览器行为以 CDP trusted 事件为准
+- 下一轮建议：①本修复与 d9661cc/c40dc4f 共 3 提交待 push（等用户指令）②Vue 壳 YAGNI 挂起不变③框选批量拖动（Phase 3 批量位移）未重测可作为下轮补充项
+
