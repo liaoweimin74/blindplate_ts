@@ -20,6 +20,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { DiagramViewer, type DiagramViewportApi } from '@/components/configurator/diagram-viewer'
+import { loadImageAsDataUrl } from '@/lib/image-compress'
 
 // ============ 类型 ============
 interface EqRow { enabled: boolean; code: string; name: string; type: string; x: number | null; y: number | null; w: number | null; h: number | null }
@@ -53,32 +54,6 @@ export interface PidImportWizardProps {
 }
 
 const EQUIP_TYPES = Object.keys(EQUIP_TYPE_MAP)
-
-/** 压缩上传图片：最长边 ≤1600px、JPEG 85%——VLM 内部会将长边缩到 ~1344，1600 与原图在模型侧等效但传输/编码更快 */
-async function loadImageAsDataUrl(file: File): Promise<string> {
-  const url = URL.createObjectURL(file)
-  try {
-    const img = document.createElement('img')
-    await new Promise<void>((res, rej) => {
-      img.onload = () => res()
-      img.onerror = () => rej(new Error('图片读取失败'))
-      img.src = url
-    })
-    const MAX = 1600
-    const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('画布初始化失败')
-    ctx.fillStyle = '#fff'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-    return canvas.toDataURL('image/jpeg', 0.85)
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
 
 export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImportWizardProps) {
   const { toast } = useToast()

@@ -426,7 +426,7 @@ export function ViewerMinimap({
 
 export function DiagramViewer({
   worldW, worldH, base100, minZoom, maxZoom, ratio, initial = 'world', enabled = true, bindKey,
-  desktop = false, defs, scene, minimapScene, minimapDefaultOpen = false,
+  desktop = false, bgImage, bgOpacity = 0.55, defs, scene, minimapScene, minimapDefaultOpen = false,
   toggles, extra, showReset = false, legend,
   onSvgPointerDown, onSvgPointerMove, onSvgClick, svgClassName,
   boxClassName, boxStyle, height, onViewportApi,
@@ -444,6 +444,10 @@ export function DiagramViewer({
   bindKey?: string | number
   /** 无限桌面：白底+双层网格跟随视口 + 世界原点虚线框（PID 画布风格） */
   desktop?: boolean
+  /** 底图（PID 扫描图/照片 data URL，Task 127）：绘制在世界原点区域内、网格之下，衬底对位描画 */
+  bgImage?: string | null
+  /** 底图不透明度（默认 0.55） */
+  bgOpacity?: number
   /** 额外 svg defs（箭头 marker 等） */
   defs?: ReactNode
   /** 世界坐标场景内容（svg 内部，viewBox 变换后渲染） */
@@ -522,6 +526,10 @@ export function DiagramViewer({
             <>
               {/* 无限桌面：白底+网格跟随视口（3 倍视口尺寸，拖到任何位置都有桌面） */}
               <rect x={vp.vb.x - vp.vb.w} y={vp.vb.y - vp.vb.h} width={vp.vb.w * 3} height={vp.vb.h * 3} fill="#fff" />
+              {/* 底图衬底（网格之下，对位描画） */}
+              {bgImage && (
+                <image href={bgImage} x={0} y={0} width={worldW} height={worldH} preserveAspectRatio="xMidYMid meet" opacity={bgOpacity} pointerEvents="none" />
+              )}
               <rect x={vp.vb.x - vp.vb.w} y={vp.vb.y - vp.vb.h} width={vp.vb.w * 3} height={vp.vb.h * 3} fill={`url(#${pid}-grid-l)`} />
               {/* 世界原点标界虚线框（无限桌面上找回「家」的参照） */}
               <rect x={0} y={0} width={worldW} height={worldH} fill="none" stroke="#d6d3d1" strokeWidth={1.2} strokeDasharray="12 8" vectorEffect="non-scaling-stroke" pointerEvents="none" />

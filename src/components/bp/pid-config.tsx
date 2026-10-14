@@ -12,13 +12,15 @@ import {
   Expand, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, Link2, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Redo2, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer, Undo2,
-  Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
+  Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon, Image as ImageIcon,
 } from 'lucide-react'
 import { ModuleProps, entryActionEventName } from '@/lib/bp-types'
 import {
   STATUS_MAP, SCHEME_STATUS_MAP, TICKET_STATUS_MAP, TASK_STATUS_MAP, CONCLUSION_MAP, EQUIP_TYPE_MAP,
 } from '@/lib/bp-types'
 import { apiDelete, apiGet, apiPost, apiPut, fmtDateTime } from '@/lib/bp-api'
+import { loadImageAsDataUrl } from '@/lib/image-compress'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useToast } from '@/hooks/use-toast'
 import { ToastAction } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -216,6 +218,7 @@ interface DiagramDetail {
   unitId: number | null
   unitName?: string | null
   content: unknown
+  bgImage?: string | null
 }
 
 interface UnitOpt {
@@ -1444,6 +1447,14 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   //      Task 126 浮层框/导航手势收敛至 ViewerMinimap） ----
   const [minimapOpen, setMinimapOpen] = useState(false)
 
+  // ---- 底图（Task 127）：PID 扫描图/照片衬底，随图存 bgImage 列（不入 content 快照栈）；
+  //      上传/移除即时 PUT 落库，透明度/显隐为本地偏好 ----
+  const [bgImage, setBgImage] = useState<string | null>(null)
+  const [bgVisible, setBgVisible] = useState(true)
+  const [bgOpacity, setBgOpacity] = useState(0.55)
+  const [bgUploading, setBgUploading] = useState(false)
+  const bgFileRef = useRef<HTMLInputElement | null>(null)
+
   // ---- 面板折叠（图元库/属性面板）：localStorage 记忆开关状态，移动端首次默认折叠给画布留空间 ----
   const [libCollapsed, setLibCollapsed] = useState(false)
   const [propsCollapsed, setPropsCollapsed] = useState(false)
@@ -2066,6 +2077,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       setActiveId(id)
       setDetailName(data.item.name)
       setContent(parseContent(data.item.content))
+      setBgImage(data.item.bgImage ?? null)
       resetHistory() // 换图后历史清空（跨图撤销无意义）
       setDirty(false)
       setStatusPoints([])
@@ -2077,6 +2089,36 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       setDetailLoading(false)
     }
   }, [saveContent, toast, resetView])
+
+  // ---- 底图上传/更换/移除（Task 127）：即时 PUT 落库，不入 content 快照栈与脏标记 ----
+  const uploadBg = async (file: File) => {
+    if (!activeId || bgUploading) return
+    setBgUploading(true)
+    try {
+      const dataUrl = await loadImageAsDataUrl(file, 1600, 0.85)
+      await apiPut(`/api/pid-diagrams/${activeId}`, { bgImage: dataUrl })
+      setBgImage(dataUrl)
+      setBgVisible(true)
+      toast({ title: '底图已上传', description: '底图衬于网格之下，图元/连线可直接对位描画；可在底图菜单调透明度或移除' })
+    } catch (err) {
+      toast({ title: '底图上传失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setBgUploading(false)
+    }
+  }
+  const removeBg = async () => {
+    if (!activeId || bgUploading) return
+    setBgUploading(true)
+    try {
+      await apiPut(`/api/pid-diagrams/${activeId}`, { bgImage: null })
+      setBgImage(null)
+      toast({ title: '底图已移除' })
+    } catch (err) {
+      toast({ title: '底图移除失败', description: (err as Error).message, variant: 'destructive' })
+    } finally {
+      setBgUploading(false)
+    }
+  }
 
   // 首次加载/删除当前图后自动选中第一张
   useEffect(() => {
@@ -3775,6 +3817,82 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
             <Trash2 className="h-4 w-4" />
           </Button>
           )}
+          {/* 底图（Task 127）：扫描图/照片衬底，编辑态可传/换/删，查看态仅调显隐/透明度 */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn('h-10 w-10 p-0', bgImage && bgVisible && 'border-teal-200 bg-teal-50 text-teal-700')}
+                title="底图：上传 PID 扫描图/照片作为画布衬底（网格之下），可调透明度辅助对位描画"
+                disabled={!activeDiagram}
+              >
+                {bgUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-3" align="start">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-stone-700">画布底图</span>
+                  {bgImage && !readOnly && (
+                    <button
+                      type="button"
+                      className="text-[11px] text-rose-600 underline-offset-2 hover:underline disabled:opacity-40"
+                      onClick={() => void removeBg()}
+                      disabled={bgUploading}
+                    >
+                      移除底图
+                    </button>
+                  )}
+                </div>
+                {bgImage ? (
+                  <div className="overflow-hidden rounded-md border bg-stone-100">
+                    <img src={bgImage} alt="画布底图预览" className="h-24 w-full object-contain" />
+                  </div>
+                ) : (
+                  <p className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-2.5 py-3 text-[11px] leading-relaxed text-stone-500">
+                    上传 PID 扫描图或现场照片作为底图（≤1600px 自动压缩），衬于网格之下，图元/连线可对位描画
+                  </p>
+                )}
+                {bgImage && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-stone-600">
+                      <span>透明度</span>
+                      <span className="font-mono">{Math.round(bgOpacity * 100)}%</span>
+                    </div>
+                    <input
+                      type="range" min={0.05} max={1} step={0.05} value={bgOpacity}
+                      onChange={(e) => setBgOpacity(Number(e.target.value))}
+                      className="w-full accent-teal-600"
+                      aria-label="底图透明度"
+                    />
+                  </div>
+                )}
+                {!readOnly && (
+                  <>
+                    <input
+                      ref={bgFileRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) void uploadBg(f)
+                        e.target.value = ''
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      className="h-8 w-full text-xs"
+                      disabled={!activeId || bgUploading}
+                      onClick={() => bgFileRef.current?.click()}
+                    >
+                      {bgUploading ? '上传中…' : bgImage ? '更换底图' : '上传底图'}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           <div className="mx-1 h-6 w-px bg-stone-200" />
           {!readOnly && (
           <Tabs value={mode} onValueChange={(v) => void switchMode(v as 'edit' | 'view')}>
@@ -4104,6 +4222,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
                     {/* 无限画布底：白底+网格跟随当前视口（平移到任何位置都有可绘制桌面），画布原点区域虚线框标界 */}
                     <rect x={vb.x - vb.w} y={vb.y - vb.h} width={vb.w * 3} height={vb.h * 3} fill="#fff" />
+                    {/* 底图衬底（Task 127）：扫描图/照片贴世界原点区域内、网格之下，对位描画 */}
+                    {bgVisible && bgImage && (
+                      <image
+                        href={bgImage} x={0} y={0} width={CANVAS_W} height={CANVAS_H}
+                        preserveAspectRatio="xMidYMid meet" opacity={bgOpacity} pointerEvents="none"
+                      />
+                    )}
                     <rect
                       x={vb.x - vb.w} y={vb.y - vb.h} width={vb.w * 3} height={vb.h * 3} fill="url(#bp-pid-grid-l)"
                       className={cn(
@@ -4422,6 +4547,17 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         on: showBindBadge,
                         onToggle: () => toggleCanvasFlag(setShowBindBadge, 'bp-pid-show-badge', !showBindBadge),
                       },
+                      ...(bgImage
+                        ? [
+                            {
+                              key: 'bg',
+                              label: bgVisible ? '底图：显示中，点击隐藏底图衬底' : '底图：已隐藏，点击显示底图衬底',
+                              icon: <ImageIcon className="h-4 w-4" />,
+                              on: bgVisible,
+                              onToggle: () => setBgVisible((v) => !v),
+                            },
+                          ]
+                        : []),
                     ]}
                   />
 

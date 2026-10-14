@@ -20,7 +20,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 }
 
-/** PUT /api/pid-diagrams/[id] 部分更新（name/unitId/content） */
+/** PUT /api/pid-diagrams/[id] 部分更新（name/unitId/content/bgImage） */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
@@ -34,6 +34,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       name?: string
       unitId?: number | null
       content?: string
+      bgImage?: string | null
     } = {}
     if (body.name !== undefined) {
       const name = str(body.name)
@@ -50,6 +51,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         if (!unit) return jsonError('关联装置不存在')
       }
       data.unitId = unitId
+    }
+    if (body.bgImage !== undefined) {
+      // 底图（Task 127）：null=移除；字符串必须为 image data URL，≤2MB（前端 ≤1600px JPEG 压缩后典型 ~300KB）
+      if (body.bgImage === null) {
+        data.bgImage = null
+      } else {
+        const bg = str(body.bgImage)
+        if (!bg.startsWith('data:image/') || bg.length > 2 * 1024 * 1024) {
+          return jsonError('bgImage 必须为 ≤2MB 的图片 data URL')
+        }
+        data.bgImage = bg
+      }
     }
     if (body.content !== undefined && body.content !== null) {
       const normalized = normalizePidContent(body.content)

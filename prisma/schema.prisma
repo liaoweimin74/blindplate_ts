@@ -420,6 +420,8 @@ model PidDiagram {
   name      String
   unitId    Int?
   content   String   @default("{}")
+  /// 底图（PID 扫描图/照片 data URL，≤1600px JPEG 压缩；Task 127）：图元对位描画的衬底，不入 content 快照栈
+  bgImage   String?
   createdBy String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

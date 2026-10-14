@@ -761,3 +761,24 @@ Stage Summary:
 - 框架无关契约再验证：壳仅依赖 core/viewport 纯函数+useWheelZoom 薄壳，Vue 壳可按同 API 组装（core 数学+DOM 绑定各写各的）
 - 遗留小刺：①viewer 容器测量取 Radix 开窗动画中间帧（percent 显示偏差 ~5%，RO 稳定后自愈）②pid-import 提取等待期无取消按钮（存量）
 - 下一阶段：Task 127 Phase 4 本体（pid-config 业务对齐重写：主数据绑定/隔离点标志/装置归属/底图）
+
+---
+Task ID: 127
+Agent: 主会话(Z.ai Code)
+Task: Phase 4 收官——pid-config 业务对齐缺口盘点 + 底图功能全链路落地（主数据绑定/隔离点标志/装置归属经核查已在位）
+
+Work Log:
+- 【缺口盘点】对照四项：①主数据绑定（设备 eqForm/管线 pipelineId/隔离点 masterPointId）✅存量 ②隔离点标志（MarkGlyph 六态+实时状态着色）✅存量 ③装置归属（图/设备/管线三级 unitId 编辑）✅存量 ④底图 ❌真实缺口——PidDiagram 无 bgImage 字段、画布无衬底渲染，确为本阶段唯一实体工程
+- 【数据层】prisma PidDiagram 新增 bgImage String?（注释：不入 content 快照栈）→ db:push ✅；踩坑：dev server 先于 push 启动，内存 Prisma Client 无新字段 → PUT 500 Unknown argument → 重启 dev server 解决（schema 变更必重启的运维事实固化）
+- 【API】PUT /api/pid-diagrams/[id] 扩展 bgImage：null=移除；字符串须 data:image/ 前缀且 ≤2MB（前端 ≤1600px JPEG 压缩后典型 ~300KB）
+- 【共享工具】新建 src/lib/image-compress.ts loadImageAsDataUrl（≤maxPx JPEG 压缩，Promise+cleanup 收敛），pid-import 本地同名实现删除改引（-28 行去重）
+- 【壳层】DiagramViewer 新增 bgImage/bgOpacity props：底图 <image> 绘制于白底之上/网格之下（世界原点区域内 meet letterbox，pointerEvents=none）——pid-locate 零改动即得底图能力（DiagramLite +bgImage 透传）
+- 【pid-config 接入】状态四件（bgImage/bgVisible/bgOpacity/bgUploading）+ selectDiagram 装载 + uploadBg/removeBg（即时 PUT 落库，不入快照栈不置脏标）+ 画布渲染插层 + 工具条底图 Popover（预览/透明度滑杆/移除/更换，编辑态可传删、查看态仅调显示）+ ViewerControls 显隐 toggle chip（有底图才出现）
+- 【E2E·agent-browser】上传（DataTransfer 直注 file input 规避 agent-browser upload 聚焦关闭 Radix Popover 的坑）：svg image=1 + opacity 0.55 + toast ✅ →透明度滑杆 0.55→0.25 实时生效 ✅ →显隐开关 1→0→1 ✅ →pid-locate 弹窗底图透出 bgInLocate=1 ✅ →移除：画布 0+toast+DB count=0 零残留 ✅ →截图：米色底图衬网格之下、图元/标注对位其上 ✅
+- 【E2E 排坑补录】①CSS 属性选择器 [accept=image/*] 未加引号致静默匹配失败（* 为通配符）②Radix Popover 开启渲染有延迟，查太快误判 ③HMR 后页面状态半新半旧，底图流程需整页刷新重跑
+
+Stage Summary:
+- Phase 4 四项全部闭环：底图为最后一实体功能——上传→衬底对位→透明度/显隐→跨端（定位弹窗）→移除，全链路 E2E 实测通过且 DB 零残留
+- 底图设计口径：bgImage 独立于 content 快照栈（撤销/重做不回退底图）、即时落库（不搅动脏标/保存流）、前端压缩 ≤1600px（SQLite 单字段 ≤2MB 防线）
+- pid-config 5936→6096 行（+底图 UI/逻辑）；共享组件版图再扩：image-compress.ts 入 lib
+- 下一轮建议：①全量回归一遍 pid-config 编辑核心手势（本轮未重测拖拽/连线/框选）②Vue 壳连线+工具条仍按 YAGNI 挂起 ③27+2 提交待 push（等用户指令）

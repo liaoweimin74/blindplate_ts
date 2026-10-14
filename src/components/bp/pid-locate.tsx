@@ -43,6 +43,7 @@ interface DiagramLite {
   unitName?: string | null
   unitId?: number | null
   content: PidContent
+  bgImage?: string | null
 }
 
 /** 单个隔离点在一张图中的挂标命中 */
@@ -105,12 +106,12 @@ export function PidLocateDialog({
         const listResp = await apiGet<{ list: { id: number; name: string; unitName?: string | null; unitId?: number | null }[] }>('/api/pid-diagrams')
         const metas = (listResp.list ?? []).slice(0, 24)
         const details = await Promise.all(
-          metas.map((m) => apiGet<{ item: { id: number; name: string; unitName?: string | null; unitId?: number | null; content: unknown } }>(`/api/pid-diagrams/${m.id}`).catch(() => null)),
+          metas.map((m) => apiGet<{ item: { id: number; name: string; unitName?: string | null; unitId?: number | null; content: unknown; bgImage?: string | null } }>(`/api/pid-diagrams/${m.id}`).catch(() => null)),
         )
         if (cancelled) return
         const arr: DiagramLite[] = []
         details.forEach((d, i) => {
-          if (d?.item) arr.push({ id: d.item.id, name: d.item.name, unitName: d.item.unitName ?? metas[i].unitName ?? null, unitId: d.item.unitId ?? metas[i].unitId ?? null, content: parseContent(d.item.content) })
+          if (d?.item) arr.push({ id: d.item.id, name: d.item.name, unitName: d.item.unitName ?? metas[i].unitName ?? null, unitId: d.item.unitId ?? metas[i].unitId ?? null, content: parseContent(d.item.content), bgImage: d.item.bgImage ?? null })
         })
         setDiagrams(arr)
       } catch {
@@ -286,6 +287,7 @@ export function PidLocateDialog({
             enabled
             bindKey={activeDiagram.id}
             desktop
+            bgImage={activeDiagram.bgImage}
             onViewportApi={(api) => { viewerApiRef.current = api }}
             defs={
               <marker id="bp-loc-arrow" viewBox="0 0 10 10" refX={9} refY={5} markerWidth={5.5} markerHeight={5.5} orient="auto-start-reverse">
