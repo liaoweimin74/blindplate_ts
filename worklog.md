@@ -676,3 +676,23 @@ Stage Summary:
 - core 纯函数持续沉淀：alignBoxes/distributeBoxes 与 hitTestRect/normRect 同族，Vue 壳接多选工具条时可直接复用（conn-draft 手势同 core，Vue 壳暂无连线模型未接入）
 - Phase 3 剩余（下轮建议）：①diagram-editor 通用编排组件（工具栏/画布/图元库/属性面板容器 core 化，Task 116 原始诉求的最终收束）②Vue 壳补连线模型+工具条以对齐 React 交互能力 ③已知小刺：std 图元绑定角标文字拦截环带指针（点击/拖拽连线在角标区域失效，可 pointerEvents=none 修）
 - 本地领先远程 7 提交（Task 117~122）待用户「push」；巡检 cron 390197 在位
+
+---
+Task ID: 123
+Agent: 主会话(Z.ai Code)
+Task: 用户问进度后继续 Phase 3 收尾——修「管线号徽章隐形热区拦截环带」小刺；用户质疑 Vue 壳补齐在本项目不可验证，决策降级
+
+Work Log:
+- 【排障·定位真凶】Task 122 遗留小刺「绑定角标文字拦截环带」实为误判：绑定设备角标(3599)与隔离点管线徽章(3720)早有 pointerEvents=none；真凶是 renderConnBadges 的**隐形命中矩形**（(wHalf*2+10)×22 透明拖拽热区，编辑态 pointerEvents=auto，且管线号徽章图层在 renderConnBadges 于所有图元锚点环带之后渲染=层级最高）
+- 【修复】热区收紧为 (wHalf*2+6)×18，与可见徽章 (wHalf*2)×16 外扩仅每边 ~1px（旧版 ~2.2px 隐形外扩圈）——拖拽可操作性保留，视觉错位区消除
+- 【用户方向修正】用户指出「本项目是 React 的，Vue 补齐没法验证」——采纳：Vue 壳补连线+工具条降级为「等真实 Vue 消费方再做」(YAGNI)；core 纯函数 26/26 冒烟兜底框架无关契约，Vue 壳作为薄壳随 core 免费受益
+- 【E2E·agent-browser 全绿】登录（验证码 QJKB）→ PID 组态（台账管理子菜单）脱苯图基线 15/19/19：①热区量化对比：命中 26.3×6.5 vs 可见 24.1×5.8 屏幕px=新尺寸生效 ②徽章拖拽不回归：(781.6,374)→(796.3,373.9) 沿水平连线滑 14.7px labelT 投影正常 ③环带拖拽连线主路径：E105→V102 连线 19→20 ✓ ④Ctrl+Z 还原 19 ✓ ⑤点选 E105 属性面板正常（X618/Y463/W94/H39+绑定设备）⑥徽章 labelT 撤销还原+刷新后 15/19/19 零残留（视口 y 差 27px=scrollY 修正后精确吻合）
+- 【E2E 排障课】①React key 不入 DOM，徽章须用 title 文本特征定位 ②title.parentElement 是命中 rect 本身（title 为 rect 子元素），g 要再上一层 ③g.cursor-move bbox 含标签/选中框比本体大，落点须 elementFromPoint 扫描 cursor-crosshair 环带 ④空白处 down+move=pan 手势，视图平移后所有屏幕坐标失效须重测，pan 后内容可能被 svg 裁剪（g bbox 渲染在视口外）⑤浏览器刷新保留 scrollY，坐标断言须加 scrollY 修正
+- 【提交事故与处置】git commit 后被系统自动快照 hook 覆盖 message 为 UUID 且裹挟 db/custom.db 二进制噪音 → git reset --soft + restore --staged db + 重新提交干净 7e3e6db（仅 pid-config.tsx 1 文件）
+- 【验证】tsc src/ 零错误（examples/skills 报错为既有基线）；ESLint 仅 5 个 PPT 脚本既有；dev.log 零 error
+
+Stage Summary:
+- Phase 3 已知小刺清零：管线号徽章热区≈可见徽章轮廓，环带与徽章的指针权界清晰（徽章本体=拖标注，环带=连线）
+- Vue 壳交互补齐正式降级（用户确认不可验证+无消费方）；框架无关验证责任收敛到 core 纯函数冒烟
+- 下一轮建议：**diagram-viewer 只读查看组件**（Task 116「公共组态组件」需求最真实的一块）——pid-config 查看态 / pid-locate 移动端放大 PID 图 / pid-import 原图预览三处真实消费方重复「SVG 渲染+缩放平移+图例+显隐开关」，先抽 core viewport/显隐开关再上 React 壳
+- 本地领先远程 8 提交（Task 117~123）待用户「push」；巡检 cron 390197 在位；db/custom.db 工作区脏（SQLite 页整理无数据变化，不提交）
