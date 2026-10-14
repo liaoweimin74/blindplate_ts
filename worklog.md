@@ -842,3 +842,20 @@ Stage Summary:
 - 仓库同步闭环：Task 126~129 全部成果（diagram-viewer 壳/底图/双 bug 修复/导出/搜索定位）已上云
 - 待办队列全清：主线 ①②③④ 完结（Task 126~129），Vue 壳 YAGNI 挂起，4 决策项（T101/T-101 双编码、PRESSURE 口径、私有化 Qwen 网关、管线迁移扩大范围）仍待用户拍板
 - 下一轮建议：15min webDevReview cron 自主轮转（QA 回归 + 自主新需求），无阻塞项
+
+---
+Task ID: 131
+Agent: 主会话(Z.ai Code)
+Task: 用户「继续」——worklog 提交补推 + 逃逸垃圾提交溯源 + QA cron 重建
+
+Work Log:
+- 【补推】worklog 提交（c1e37fa）两次被 context cancel 打断后第三次成功，但推送窗口混入新快照垃圾提交 a75c61a（UUID 名，仅 db/custom.db churn）——**6 次出现首次逃逸上云**
+- 【溯源定案】.git/hooks 空（仅 sample）+ core.hooksPath 未配置 + 无用户级快照进程 → UUID 垃圾提交系**沙箱平台级会话持久化机制**（平台侧注入，不可禁用），触发源为 dev server/E2E QA 对 db/custom.db 的写 churn
+- 【push 纪律 v2 固化】①推送前 rg UUID 模式清扫（`git log --format=%s` 匹配 8-4-4-4-12 UUID 命名）②推送一律用显式 SHA（`git push origin $(git rev-parse HEAD):main`，命令构造时锁定哈希，窗口期新垃圾不随行）③逃逸上云的 a75c61a 内容无害（与仓库既有 tracked db 同类）不做 force rewrite
+- 【QA cron 重建】15min webDevReview 调度器被沙箱重建清空（list total=0，与 GITHUB_TOKEN 同源第 7 次环境抹除）→ 重建 job 2881896（fixed_rate 900s），描述含项目背景+配色红线+push 纪律 v2
+- 【dev server 核查】本轮开发期间 dev.log 持续零 error（b960366 交付的导出/搜索定位/底图功能运行正常）
+
+Stage Summary:
+- 仓库终态：a75c61a LOCAL==REMOTE ahead 0，Task 126~130 全部成果上云（diagram-viewer 壳/底图/attachBox 修复/导出+搜索定位/worklog）
+- 环境韧性档案：GITHUB_TOKEN 抹除×6 + cron 清空×1——沙箱重建双杀清单齐备，每轮开场核查已成铁律
+- 下轮轮转（2881896 驱动）：主线队列全清后进入自主 QA + 新需求循环，优先候选=pid-import 压缩链路回归、图纸导出文件名规范化、画布快捷键帮助面板
