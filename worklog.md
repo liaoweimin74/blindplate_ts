@@ -570,3 +570,25 @@ Stage Summary:
 - PID 组态页图元库与属性面板已由引擎组件实现，交互行为与重构前对齐（E2E 全链路验证）
 - Phase 2 待做（建议下轮）：diagram-canvas 画布交互层泛型化搬迁（选择/拖动/resize/连线/中段/端点/橡皮筋/挂接→引擎受控组件）+ diagram-editor 编排 + 撤销重做 UI（history.ts 已就绪）+ Vue 适配层示例壳
 - 引擎扩展点文档在 core/index.ts 头注释；多注册表页签/搜索/悬停卡/schema 面板均为开箱组件
+
+---
+Task ID: 118
+Agent: 主会话(Z.ai Code)
+Task: 用户追问「画图元的部分也是与框架无关的吗？」——图元绘制层去 React 化：Shape IR 数据包 + 双映射器落地
+
+Work Log:
+- 【答案框架】当前 std 图元是 TSX（React JSX），绑定 React；解法定为「图元=纯几何数据（Shape IR）+ 每框架一个极薄映射器」：数据层零框架可 JSON 序列化，React 走 data→JSX、Vue/原生走 core createElementNS
+- 【勘察】std 库元素集盘点：g/path/circle/ellipse/rect/line/polyline/polygon/text 九种，符号内部零 transform/defs/use/marker/pattern/gradient（仅外层包装 translate+scale）→ Shape IR 可极小；绘制出口全图：画布 StdSymbolShape（pid-config:445）、拖放幻影 .render() 直调（4246）、缩略图 StdSymbolThumb（4712+pid-registry:225），pid-symbols.tsx 内同名组件为死代码未动
+- 【core 扩展】shapes.ts（Shape IR 九型 union + ShapeCommon 描边/填充/dash/cap/join/opacity + resolvePaint('{stroke}'/'{fill}' token 模板含透明度后缀) + DEFAULT_PAINT）；shape-dom.ts（shapeToElement/shapesToSvgElement，兜底语义：可填充形状缺省 fill=none、缺省 stroke=none、text 缺省 fill=描边色，per-element non-scaling-stroke）；types.ts SymbolMeta 扩展 draw?: () => Shape[]（注册表自含图形，Vue/React 拿到 registry 即可完整渲染）
+- 【转换脚本】scripts/convert-std-symbols.ts（bun 原生 TSX + react-jsx runtime）：哨兵色（控制字符包裹）渲染 → 遍历 React element 树（数组/Fragment 递归摊平、null/boolean 剔除）→ 机械映射 Shape；生成 src/lib/configurator-packs/std-shapes.ts（GENERATED 头标注，126 符号/982 形状/689 token 携带，87.5KB，每符号一行可 diff）；命中垫片（transparent sw14）、跨 token（箭头 fill={stroke}→'{stroke}'）、硬编码白底（气泡/执行机构 #fff 语义保留）、文字族/基线/dash 全部 1:1
+- 【绘制出口切换】std/index.tsx：StdSymbolShape/StdSymbolThumb 改查 STD_SHAPE_DATA + ShapeContent/ShapeSvg（React 映射器 shape-icon.tsx：renderShape/shapesNode/ShapeContent/ShapeSvg 四 API，与 DOM 渲染器同一套兜底语义）；未知 stdId 虚线矩形兜底保留；pid-config 幻影改 shapesNode(STD_SHAPE_DATA[...])；pid-registry buildStdRegistry 注入 draw
+- 【Vue 示例壳】components/configurator/vue/configurator-vue.ts（零 vue/react 依赖可拆独立包）：mountSymbolThumb(el, meta) 一行接入 + SFC 用法/契约四点注释（registry 自含图形/缩略图/画布事件契约/schema 面板+slot）
+- 【修复】脚本 Record→Shape 断言改 as unknown as Shape；import.meta.dir→process.cwd()（TS lib 兼容）；Shape.baseline 收窄为 React SVG 联合类型对齐（'auto'|'middle'|'central'|'hanging'|'mathematical'|'alphabetic'）
+- 【验证】tsc src/ 零错误（examples/skills 既有噪音除外）；ESLint 仅 5 个 PPT 脚本既有；bun 冒烟：126 符号遍历 + token 解析（'#0d9488'/'#0d948855'/'#e7e5e4'）SMOKE-OK；agent-browser E2E：PID 组态脱苯图画布 15 图元数据渲染✓（g.pid-std=15、首组 9 矢量子元素）、palette 容器与储罐缩略图视觉一致✓、放置立式储罐 15→16✓（属性面板「标准图例」X733/Y337）、Delete 还原 15✓ 零残留、dev.log 零 error
+- 【commit】本轮 1 commit（引擎 core/数据包/双映射器/出口切换/Vue 壳/转换脚本）；未 push 等用户指令
+
+Stage Summary:
+- 「画图元部分与框架无关」达成：图元 = Shape IR 纯数据（configurator-packs/std-shapes.ts，零框架零颜色），React/Vue/原生消费同一份数据各自映射，画布/幻影/缩略图/palette 四条绘制路径全部数据驱动，视觉与重构前 1:1
+- 架构三层定型：core（模型/几何/布局/注册表/历史/Shape IR/DOM 渲染器，全零框架）→ 框架适配层（React 映射器 40 行/Vue mount 函数 30 行）→ 业务宿主（pid-registry 注入 std 数据+schema+绑定）
+- 改图元流程：std/*.tsx 设计源修改 → bun scripts/convert-std-symbols.ts 重新生成数据包 → 全端生效
+- 下轮建议（Phase 2 收尾）：diagram-canvas 画布交互层泛型化搬迁（选择/拖动/resize/连线/橡皮筋→core 受控控制器）+ 撤销重做 UI 接 history.ts + Vue 画布壳共用 createCanvasController
