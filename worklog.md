@@ -592,3 +592,23 @@ Stage Summary:
 - 架构三层定型：core（模型/几何/布局/注册表/历史/Shape IR/DOM 渲染器，全零框架）→ 框架适配层（React 映射器 40 行/Vue mount 函数 30 行）→ 业务宿主（pid-registry 注入 std 数据+schema+绑定）
 - 改图元流程：std/*.tsx 设计源修改 → bun scripts/convert-std-symbols.ts 重新生成数据包 → 全端生效
 - 下轮建议（Phase 2 收尾）：diagram-canvas 画布交互层泛型化搬迁（选择/拖动/resize/连线/橡皮筋→core 受控控制器）+ 撤销重做 UI 接 history.ts + Vue 画布壳共用 createCanvasController
+
+---
+Task ID: 119
+Agent: 主会话(Z.ai Code)
+Task: 「继续吧」——Phase 2 推进：撤销/重做 UI 落地（worklog 118 交接的首个收尾项）
+
+Work Log:
+- 【事务模型勘察】pid-config 文档态 = content{shapes,connections,marks}：离散提交全走 mutate 漏斗（23 处），拖拽类逐帧直调 setContent（5 处：移动/缩放/标注沿线 labelT/中段 midOverride/挂标），直线落笔与自动布局独立 setContent——事务边界天然清晰
+- 【接入设计】mutate 漏斗统一 pushHistory（8 个事务点）；拖拽类在 moved 旗标翻转瞬间压栈（无位移误触零污染）；histRef=createHistory(80) + lastSnapKeyRef 同状态去重（防同 tick 连续 mutate 冗余快照）+ histSize state 驱动按钮禁用态；加载图(2172)/新建空图(3323) resetHistory
+- 【UI/键盘】工具栏 编辑/查看 Tabs 后新增撤销/重做按钮（Undo2/Redo2，title 提示，空栈 disabled）；编辑态键盘 Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z（沿用既有 INPUT/TEXTAREA/图元编辑器/替换弹窗守卫）
+- 【自动布局重构】移除独立 layoutSnapshotRef，Toast「撤销」按钮改走 undoContentRef（与 Ctrl+Z 同一快照栈，消除旁路 desync）
+- 【E2E 抓真 bug】撤销→重做→再撤销链路中，放置操作永久无法撤销：根因 = applyHistSnapshot 沿用恢复态 key 作去重键，下一操作的「压栈前状态」恰等于恢复态被误吞；修复 = 撤销/重做后清空 lastSnapKeyRef（按钮态推演 {undo:0,redo:1} 与观测吻合后定位）
+- 【MultiEdit 部分写盘再现】16 编辑原子批次实际部分落盘且初次 rg 输出误示损坏（Read 复核完好）——按既往教训弃 MultiEdit 改独立 Edit 分批+逐批验证，全部补齐
+- 【E2E 全绿】place 16 → Ctrl+Z 15 → Ctrl+Shift+Z 16 → 拖拽位移 → 双撤销 15（回归用例：第二撤销撤掉放置，修复前卡死）→ 重做 16 → 三撤销 15 → 刷新 persisted:15 零残留；dev.log 零 error；tsc src/ 零错误；lint 仅 5 既有 PPT 脚本
+- 【commit】765d545（1 文件 +92/-15）；未 push 等用户指令
+
+Stage Summary:
+- 撤销/重做全事务接入完成：增删改/属性/连线改接/挂接/拖拽五类/直线/布局全覆盖，工具栏+键盘双入口，跨图清栈，快捷键含 Ctrl+Shift+Z 变体
+- 修复一个用户可感知级 bug（撤销链断裂），E2E 回归用例固化（双撤销撤放置）
+- Phase 2 剩余（建议下轮）：diagram-canvas 画布交互层泛型化搬迁（选择/拖动/resize/连线状态机→core createCanvasController）+ diagram-editor 编排 + Vue 画布壳共用控制器
