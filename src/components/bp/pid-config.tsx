@@ -52,12 +52,42 @@ import {
 } from '@/components/bp/std'
 import { contentInsetBox } from '@/lib/bp-pid-layout'
 import {
-  anchorNameForPhysical,
+  // 类型
+  NodeGeom, Selection, Anchor, EdgeDirection, ConnEndpoint, RoutePoint,
+  // 常量与色板
+  CANVAS_W, CANVAS_H, STROKE, LINE, TEAL, ROSE, GRID_S, GRID_L,
+  FILL_PALETTE, STROKE_PALETTE, ANCHOR_LABEL, MARK_EDGE_SNAP_DIST, LABEL_T_MIN, LABEL_T_MAX, CONN_END_SNAP_DIST,
+  minimapBoundsOf,
+  // 几何
+  clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline, projectToPolyline,
+  anchorPoint, anchorPointT, physAnchor, outward, anchorZoneBox, nearestFreeAnchorAt, nearestAnchorAt,
+  distToAnchorZone, anchorHitBandPath, anchorHitSolidPath, routeConnection, shapeLabelY,
+  rotateAnchorName, anchorNameForPhysical, oppositeAnchor,
+  // 布局 / 注册表
+  autoLayout, type SymbolRegistry,
+} from '@/lib/configurator-core'
+import { SymbolPalette, NumField, ColorSwatches } from '@/components/configurator'
+import {
+  buildStdRegistry, buildBasicRegistry, buildCustomRegistry, pidTypeLibOf, pidTypeLabel,
+  pidThumbRenderer, customRowIdOf, PID_TYPE_LIBRARY, type PidTypeLibItem,
+} from '@/components/bp/pid-registry'
+
+// ============ 引擎兼容层（保持既有导出与引用名不变） ============
+export { CANVAS_W, CANVAS_H, STROKE, LINE, TEAL, ROSE, GRID_S, GRID_L, FILL_PALETTE, STROKE_PALETTE, minimapBoundsOf, anchorPointT, routeConnection, shapeLabelY, freeT, tEq }
+export type { Anchor, ConnEndpoint, RoutePoint, Selection }
+/** 旧名兼容：标注沿线吸附阈值（引擎更名 MARK_EDGE_SNAP_DIST） */
+const MARK_PIPE_SNAP_DIST = MARK_EDGE_SNAP_DIST
+/** 旧名兼容：自动布局（引擎泛化版） */
+const autoLayoutContent = autoLayout
+/** 旧名兼容：图元类型库（已迁移 bp/pid-registry） */
+const SHAPE_LIBRARY = PID_TYPE_LIBRARY
+const libOf = pidTypeLibOf
+const typeLabel = pidTypeLabel
+import {
   findMountTarget,
   isMountableShape,
   MOUNT_SNAP_DIST,
   mountShapeOnConn,
-  rotateAnchorName,
   unmountShapeFromPipe,
   type MountTarget,
   type PolylineOf,
@@ -81,19 +111,13 @@ export const ISO_STATE_STYLE: Record<IsoState, {
 export const ISO_STATE_KEYS = ['idle', 'planned', 'approved', 'working', 'blinded', 'opened'] as const
 
 // ============ 数据模型（content JSON，与后端/演示数据一致） ============
-export interface PidShape {
-  id: string
+export interface PidShape extends NodeGeom {
+  // 几何字段（id/type/x/y/w/h/label/fill/stroke/rotation/flip）继承引擎 NodeGeom；
+  // type 收窄为 PID 字面量联合。业务扩展字段如下。
   type: 'exchanger' | 'reactor' | 'column' | 'pump' | 'tank' | 'valve'
     | 'rect' | 'circle' | 'ellipse' | 'line' | 'triangle' // 基础图形（用户自建图元）
     | 'symbol' // 自定义图元实例（来自图元编辑器）
     | 'std'    // 内建图元（五大分类符号库 std/ 查表渲染）
-  x: number
-  y: number
-  w: number
-  h: number
-  label: string
-  fill?: string   // 填充色（缺省 #fff；'transparent' 支持透明）
-  stroke?: string // 描边色（缺省 stone-700）
   symbolId?: number      // 自定义图元库引用（实例溯源，库删除后实例仍可独立渲染）
   stdId?: string         // 标准图例符号 ID（STD_SYMBOL_MAP 查表；type='std' 时必填）
   equipmentId?: number | null // 绑定的设备主数据（保存图后自动回写关联管线起止设备）
@@ -119,9 +143,8 @@ export interface SymbolPart {
   flip?: boolean // 直线部件方向（与 PidShape.flip 同语义）
 }
 
-export type Anchor = 'top' | 'right' | 'bottom' | 'left'
-
-export type PidConnDirection = 'forward' | 'reverse' | 'none'
+/** 旧名兼容：连线流向（引擎 EdgeDirection） */
+export type PidConnDirection = EdgeDirection
 
 export interface PidConn {
   id: string
@@ -135,16 +158,6 @@ export interface PidConn {
   pipelineId?: number | null   // 绑定的管线主数据（保存图后按连线起终点自动回写管线起止设备）
   labelT?: number              // 管线号标注沿折线的位置参数（0..1 归一化弧长，缺省 0.5 中点；拖动标注时写入，图元移动后按比例跟随）
   midOverride?: number         // 中段布线手动覆盖：H-H 路由的 midX / V-V 路由的 midY（拖拽中段写入；缺省自动取两端中点，改接端点后清零重排）
-}
-
-/** t 参数是否需要持久化：0.5（四向中点）即旧数据缺省行为，不写 JSON 保持干净 */
-export function freeT(t: number | undefined | null): number | undefined {
-  return typeof t === 'number' && Math.abs(t - 0.5) > 1e-6 ? t : undefined
-}
-
-/** 自由锚点 t 等值比较（去重判断用；缺省均视为 0.5） */
-export function tEq(a: number | undefined, b: number | undefined): boolean {
-  return Math.abs((a ?? 0.5) - (b ?? 0.5)) < 1e-6
 }
 
 export interface PidMark {
@@ -162,20 +175,8 @@ export interface PidContent {
   marks: PidMark[]
 }
 
-/** 连线端点描述（routeConnection 入参） */
-export interface ConnEndpoint {
-  x: number
-  y: number
-  anchor: Anchor
-}
-
-export interface RoutePoint {
-  x: number
-  y: number
-}
-
 type PidShapeType = PidShape['type']
-type Selection = { kind: 'shape' | 'conn' | 'mark'; id: string }
+
 
 // ============ API 契约类型 ============
 /** 设备主数据选项（图元绑定设备下拉） */
@@ -309,87 +310,14 @@ interface PointDossierResp {
 }
 
 // ============ 常量 ============
-export const CANVAS_W = 1200
-export const CANVAS_H = 700
-export const STROKE = '#44403c' // stone-700 图元描边
-export const LINE = '#78716c'   // stone-500 连线
-export const TEAL = '#0d9488'   // 选中框/锚点
-export const ROSE = '#e11d48'   // 隔离点标注/删除高亮
-export const GRID_S = '#e7e5e4' // stone-200 小格
-export const GRID_L = '#d6d3d1' // stone-300 粗格
-
-/** 俯瞰图世界包围盒：画布区域 ∪ 当前视口 再加留白（无限画布下视口可能远离画布原点，包围盒需动态扩展） */
-export function minimapBoundsOf(v: { x: number; y: number; w: number; h: number }) {
-  const PAD = 120
-  const minX = Math.min(0, v.x) - PAD
-  const minY = Math.min(0, v.y) - PAD
-  const maxX = Math.max(CANVAS_W, v.x + v.w) + PAD
-  const maxY = Math.max(CANVAS_H, v.y + v.h) + PAD
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
-}
-
-const ANCHOR_LABEL: Record<Anchor, string> = { top: '顶部', right: '右侧', bottom: '底部', left: '左侧' }
-
 const DISPOSAL_METHOD_LABEL: Record<string, string> = {
   VENT: '泄压降压', DRAIN: '排净', REPLACE: '置换', PURGE: '吹扫', STEAM: '蒸煮', GAS_TEST: '气体检测', ISOLATE: '切断加盲板', OTHER: '其他',
 }
-
-interface ShapeLibItem {
-  type: PidShapeType
-  label: string
-  icon: LucideIcon | React.ComponentType<{ className?: string }>
-  w: number
-  h: number
-  minW: number
-  minH: number
-  group: 'equip' | 'basic' | 'custom' // equip=旧设备图元（已从侧栏移除，仅保留定义供 libOf/旧图渲染/AI 导入/缩放下限）·基础图形（custom=自定义图元占位类型，侧栏单独渲染）
-}
-
-/** 椭圆图标（lucide 无专用 Ellipse，用内联 SVG 保证视觉一致） */
-function EllipseIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className={className}>
-      <ellipse cx="12" cy="12" rx="9.5" ry="6.5" />
-    </svg>
-  )
-}
-
-const SHAPE_LIBRARY: ShapeLibItem[] = [
-  { type: 'exchanger', label: '换热器', icon: Thermometer, w: 120, h: 70,  minW: 44, minH: 32, group: 'equip' },
-  { type: 'reactor',   label: '反应器', icon: FlaskConical, w: 90,  h: 100, minW: 44, minH: 32, group: 'equip' },
-  { type: 'column',    label: '精馏塔', icon: Factory,      w: 72,  h: 170, minW: 44, minH: 32, group: 'equip' },
-  { type: 'pump',      label: '泵',     icon: Fan,          w: 72,  h: 60,  minW: 44, minH: 32, group: 'equip' },
-  { type: 'tank',      label: '储罐',   icon: Database,     w: 110, h: 90,  minW: 44, minH: 32, group: 'equip' },
-  { type: 'valve',     label: '阀门',   icon: Hourglass,    w: 64,  h: 32,  minW: 36, minH: 24, group: 'equip' },
-  { type: 'rect',      label: '矩形',   icon: Square,       w: 120, h: 70,  minW: 16, minH: 16, group: 'basic' },
-  { type: 'circle',    label: '圆形',   icon: Circle,       w: 64,  h: 64,  minW: 14, minH: 14, group: 'basic' },
-  { type: 'ellipse',   label: '椭圆',   icon: EllipseIcon,  w: 110, h: 64,  minW: 18, minH: 12, group: 'basic' },
-  { type: 'line',      label: '直线',   icon: Minus,        w: 140, h: 4,   minW: 12, minH: 2,  group: 'basic' },
-  { type: 'triangle',  label: '三角形', icon: Triangle,     w: 80,  h: 70,  minW: 16, minH: 16, group: 'basic' },
-  // 自定义图元实例占位条目（不进侧栏；供 libOf/typeLabel/缩放下限使用）
-  { type: 'symbol',    label: '自定义图元', icon: Shapes,   w: 90,  h: 90,  minW: 24, minH: 24, group: 'custom' },
-  // 标准图例符号占位条目（不进侧栏；侧栏由 STD_SYMBOLS 宫格渲染；供 libOf 兼容返回）
-  { type: 'std',       label: '标准图例',   icon: Shapes,   w: 64,  h: 48,  minW: 24, minH: 20, group: 'custom' },
-]
-
-/** 预设色板（遵守项目配色约束：emerald/teal/amber/rose/violet/stone） */
-export const FILL_PALETTE = ['#ffffff', 'transparent', '#d1fae5', '#ccfbf1', '#fef3c7', '#fecdd3', '#ede9fe', '#f5f5f4'] as const
-export const STROKE_PALETTE = ['#44403c', '#78716c', '#059669', '#0d9488', '#d97706', '#e11d48', '#7c3aed', '#57534e'] as const
 
 const EMPTY_CONTENT: PidContent = { shapes: [], connections: [], marks: [] }
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se'
 
 // ============ 纯函数工具 ============
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, v))
-}
-
-let uidSeq = 0
-function uid(prefix: string): string {
-  uidSeq += 1
-  return `${prefix}_${Date.now().toString(36)}_${uidSeq.toString(36)}${Math.random().toString(36).slice(2, 5)}`
-}
-
 function parseContent(raw: unknown): PidContent {
   let obj: unknown = raw
   if (typeof raw === 'string') {
@@ -410,566 +338,6 @@ function parseContent(raw: unknown): PidContent {
 
 export function normalizeState(s?: string | null): IsoState {
   return s && (ISO_STATE_KEYS as readonly string[]).includes(s) ? (s as IsoState) : 'idle'
-}
-
-/** 点到线段最短距离（挂标所属管线自动计算用） */
-function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
-  const dx = x2 - x1
-  const dy = y2 - y1
-  if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1)
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
-  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
-}
-
-/** 挂标「落在管线上」判定阈值：挂标中心到已绑定管线连线折线的最短距离 ≤ 该值（SVG 单位） */
-export const MARK_PIPE_SNAP_DIST = 36
-
-/** 折线总弧长（SVG 单位） */
-function polylineLength(pts: [number, number][]): number {
-  let total = 0
-  for (let i = 0; i < pts.length - 1; i++) total += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
-  return total
-}
-
-/** 按归一化弧长参数 t（0..1）取折线上一点；零长折线返回 null（管线号标注定位用） */
-function pointAlongPolyline(pts: [number, number][], t: number): { x: number; y: number } | null {
-  const total = polylineLength(pts)
-  if (total <= 0) return null
-  let target = Math.max(0, Math.min(1, t)) * total
-  for (let i = 0; i < pts.length - 1; i++) {
-    const segLen = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
-    if (target <= segLen || i === pts.length - 2) {
-      const u = segLen === 0 ? 0 : target / segLen
-      return { x: pts[i][0] + u * (pts[i + 1][0] - pts[i][0]), y: pts[i][1] + u * (pts[i + 1][1] - pts[i][1]) }
-    }
-    target -= segLen
-  }
-  return null
-}
-
-/** 点到折线的最近投影：返回该点的归一化弧长参数 t（0..1）与距离；零长折线返回 null（管线号沿线拖动用） */
-function projectToPolyline(pts: [number, number][], px: number, py: number): { t: number; dist: number } | null {
-  const total = polylineLength(pts)
-  if (total <= 0) return null
-  let acc = 0
-  let best: { t: number; dist: number } | null = null
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [x1, y1] = pts[i]
-    const [x2, y2] = pts[i + 1]
-    const dx = x2 - x1
-    const dy = y2 - y1
-    const len2 = dx * dx + dy * dy
-    const u = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2))
-    const d = Math.hypot(px - (x1 + u * dx), py - (y1 + u * dy))
-    if (!best || d < best.dist) best = { t: (acc + u * Math.sqrt(len2)) / total, dist: d }
-    acc += Math.sqrt(len2)
-  }
-  return best
-}
-
-/** 管线号标注位置参数上下限：距连线两端各留 6%（不盖住锚点与设备图元） */
-export const LABEL_T_MIN = 0.06
-export const LABEL_T_MAX = 0.94
-
-/** 连线端点拖拽改接：指针距图元锚点 ≤ 该值（SVG 单位）时吸附为目标 */
-export const CONN_END_SNAP_DIST = 48
-
-/** 图元某锚点的绝对坐标：先内收到符号内容真实边界（消除留白悬空），再取四向中点：top=(x+w/2,y) right=(x+w,y+h/2) bottom=(x+w/2,y+h) left=(x,y+h/2) */
-export function anchorPoint(s: PidShape, a: Anchor): RoutePoint {
-  return anchorPointT(s, a)
-}
-
-/**
- * 图元锚点绝对坐标（Task 86-2 自由锚点版）：
- * - 先内收到符号内容真实边界（消除留白悬空），再取 named 边上参数 t 处的点（t=0.5 即四向中点，与 anchorPoint 完全一致）；
- * - t 语义：top/bottom 沿 x 从左到右、left/right 沿 y 从上到下（0=边起点 1=边终点）；
- * - 挂接旋转（90° 倍数）时参数点绕图元中心旋转——旋转下 t 沿边保持，与 nearestFreeAnchorAt 的换算精确互逆。
- */
-export function anchorPointT(s: PidShape, a: Anchor, t?: number): RoutePoint {
-  const b = contentInsetBox(s)
-  const u = Math.min(1, Math.max(0, typeof t === 'number' && Number.isFinite(t) ? t : 0.5))
-  const base: RoutePoint =
-    a === 'top' ? { x: b.x + u * b.w, y: b.y }
-    : a === 'bottom' ? { x: b.x + u * b.w, y: b.y + b.h }
-    : a === 'left' ? { x: b.x, y: b.y + u * b.h }
-    : { x: b.x + b.w, y: b.y + u * b.h }
-  const rot = s.rotation ?? 0
-  if (!rot) return base
-  // 挂接旋转（90° 倍数，Task 73）：锚点绕图元中心旋转
-  const cx = s.x + s.w / 2
-  const cy = s.y + s.h / 2
-  const rad = (rot * Math.PI) / 180
-  const dx = base.x - cx
-  const dy = base.y - cy
-  return { x: cx + dx * Math.cos(rad) - dy * Math.sin(rad), y: cy + dx * Math.sin(rad) + dy * Math.cos(rad) }
-}
-
-/** 挂接旋转后的物理锚点名：routeConnection 的水平/垂直路由判定按物理朝向（非锚点名） */
-function physAnchor(s: PidShape | undefined, a: Anchor): Anchor {
-  const rot = s?.rotation ?? 0
-  return rot ? rotateAnchorName(a, rot) : a
-}
-
-/** 锚点向外延伸 d 像素（自环绕行用） */
-function outward(a: Anchor, p: RoutePoint, d: number): RoutePoint {
-  switch (a) {
-    case 'top':    return { x: p.x, y: p.y - d }
-    case 'bottom': return { x: p.x, y: p.y + d }
-    case 'left':   return { x: p.x - d, y: p.y }
-    case 'right':  return { x: p.x + d, y: p.y }
-  }
-}
-
-/** 图元「边框锚点区」物理包围盒：内容盒（消除符号留白）+ 挂接旋转 90°/270° 时绕中心宽高互换（与 anchorPoint 旋转后的锚点位置一致） */
-function anchorZoneBox(s: PidShape): { x: number; y: number; w: number; h: number } {
-  const b = contentInsetBox(s)
-  const rot = (((s.rotation ?? 0) % 360) + 360) % 360
-  if (rot === 90 || rot === 270) {
-    const cx = b.x + b.w / 2
-    const cy = b.y + b.h / 2
-    return { x: cx - b.h / 2, y: cy - b.w / 2, w: b.h, h: b.w }
-  }
-  return b
-}
-
-/**
- * 自由锚点（Task 86-2）：指针落在图元边框锚点区时的吸附端点 = 最近物理边 + 沿边参数（0..1）。
- * 点击哪里端点就在哪里（不再吸附四向中点）。
- * 挂接旋转换算：物理边两端点逆旋转回逻辑 content 盒求逻辑参数，端点线性插值——统一覆盖 90/180/270
- * （旋转下沿边参数可能同向也可能反向：如 90° top→right 保持、left→top 反向；180° 全反向），与 anchorPointT 精确互逆。
- */
-function nearestFreeAnchorAt(s: PidShape, px: number, py: number): { anchor: Anchor; t: number } {
-  const b = anchorZoneBox(s)
-  const dl = Math.abs(px - b.x)
-  const dr = Math.abs(b.x + b.w - px)
-  const dt = Math.abs(py - b.y)
-  const db = Math.abs(b.y + b.h - py)
-  const dmin = Math.min(dl, dr, dt, db)
-  const phys: Anchor = dmin === dl ? 'left' : dmin === dr ? 'right' : dmin === dt ? 'top' : 'bottom'
-  // 沿物理边的参数：top/bottom 以 x 从左到右，left/right 以 y 从上到下
-  const tPhys = Math.min(1, Math.max(0,
-    phys === 'left' || phys === 'right' ? (py - b.y) / b.h : (px - b.x) / b.w))
-  const rot = s.rotation ?? 0
-  if (!rot) return { anchor: phys, t: tPhys }
-  const logical = anchorNameForPhysical(phys, rot) as Anchor
-  // 物理边参数 0/1 端点 → 逆旋转回逻辑坐标 → 逻辑边参数，端点线性插值得逻辑 t
-  const lb = contentInsetBox(s)
-  const cx = s.x + s.w / 2
-  const cy = s.y + s.h / 2
-  const rad = (rot * Math.PI) / 180
-  const cos = Math.cos(-rad)
-  const sin = Math.sin(-rad)
-  const toLogic = (x: number, y: number) => ({
-    x: cx + (x - cx) * cos - (y - cy) * sin,
-    y: cy + (x - cx) * sin + (y - cy) * cos,
-  })
-  const p0 = phys === 'left' || phys === 'top' ? { x: b.x, y: b.y }
-    : phys === 'right' ? { x: b.x + b.w, y: b.y }
-    : { x: b.x, y: b.y + b.h }
-  const p1 = phys === 'top' || phys === 'bottom' ? { x: b.x + b.w, y: p0.y } : { x: p0.x, y: b.y + b.h }
-  const par = (q: { x: number; y: number }) =>
-    logical === 'top' || logical === 'bottom' ? (q.x - lb.x) / lb.w : (q.y - lb.y) / lb.h
-  const t0 = par(toLogic(p0.x, p0.y))
-  const t1 = par(toLogic(p1.x, p1.y))
-  const t = Math.min(1, Math.max(0, t0 * (1 - tPhys) + t1 * tPhys))
-  return { anchor: logical, t }
-}
-
-/** 兼容别名（仅取边名）：连线端点拖拽吸附等只需方向的场景 */
-function nearestAnchorAt(s: PidShape, px: number, py: number): Anchor {
-  return nearestFreeAnchorAt(s, px, py).anchor
-}
-
-/** 指针到图元边框锚点区（物理包围盒）的距离：盒内为 0（连线端点拖拽吸附用） */
-function distToAnchorZone(s: PidShape, px: number, py: number): number {
-  const b = anchorZoneBox(s)
-  const dx = Math.max(b.x - px, 0, px - (b.x + b.w))
-  const dy = Math.max(b.y - py, 0, py - (b.y + b.h))
-  return Math.hypot(dx, dy)
-}
-
-/**
- * 连线锚点命中区路径（Task 86 / 86-2）：
- * - 环带模式（evenodd 打洞）：包围盒外扩 m 的边带——常态下「边框附近一圈」都可点击连线，
- *   本体区域留洞（保留点击选中/按住拖动语义）；屏幕缩放小时边带仍足够宽，不再难命中
- * - 实心模式：包围盒外扩 m 的实心矩形（含本体+周边环带全部）——连线挂起态下目标图元「本体及边框周边任意位置」
- *   点击即完成连线（杜绝点本体或笔画缝隙被画布当空白吞掉，Task 86-2 双保险第一层）
- */
-function anchorHitBandPath(s: PidShape, m = 18): string {
-  const b = anchorZoneBox(s)
-  const ox = b.x - m
-  const oy = b.y - m
-  const ow = b.w + 2 * m
-  const oh = b.h + 2 * m
-  return `M${ox},${oy}h${ow}v${oh}h${-ow}Z M${b.x},${b.y}h${b.w}v${b.h}h${-b.w}Z`
-}
-
-function anchorHitSolidPath(s: PidShape, m = 18): string {
-  const b = anchorZoneBox(s)
-  const ox = b.x - m
-  const oy = b.y - m
-  return `M${ox},${oy}h${b.w + 2 * m}v${b.h + 2 * m}h${-(b.w + 2 * m)}Z`
-}
-
-/**
- * 连线正交（曼哈顿）自动折弯路由：
- * - 双水平锚点（left/right）：取 midX 拐弯（midOverride 可手动覆盖中段竖线位置）
- * - 双垂直锚点（top/bottom）：取 midY 拐弯（midOverride 可手动覆盖中段横线位置）
- * - 混合：直角两段（无自由中段，忽略 midOverride）
- * - 同图元自环：两端锚点先向外延伸 24px 再绕行
- */
-export function routeConnection(a: ConnEndpoint, b: ConnEndpoint, sameShape = false, midOverride?: number): [number, number][] {
-  const A: RoutePoint = { x: a.x, y: a.y }
-  const B: RoutePoint = { x: b.x, y: b.y }
-  const aH = a.anchor === 'left' || a.anchor === 'right'
-  const bH = b.anchor === 'left' || b.anchor === 'right'
-  if (!sameShape) {
-    if (aH && bH) {
-      const midX = typeof midOverride === 'number' ? midOverride : (a.x + b.x) / 2
-      return [[a.x, a.y], [midX, a.y], [midX, b.y], [b.x, b.y]]
-    }
-    if (!aH && !bH) {
-      const midY = typeof midOverride === 'number' ? midOverride : (a.y + b.y) / 2
-      return [[a.x, a.y], [a.x, midY], [b.x, midY], [b.x, b.y]]
-    }
-    if (aH) return [[a.x, a.y], [b.x, a.y], [b.x, b.y]]
-    return [[a.x, a.y], [a.x, b.y], [b.x, b.y]]
-  }
-  const A2 = outward(a.anchor, A, 24)
-  const B2 = outward(b.anchor, B, 24)
-  let mid: RoutePoint[]
-  if (aH && bH) {
-    const midX = (A2.x + B2.x) / 2
-    mid = [A2, { x: midX, y: A2.y }, { x: midX, y: B2.y }, B2]
-  } else if (!aH && !bH) {
-    const midY = (A2.y + B2.y) / 2
-    mid = [A2, { x: A2.x, y: midY }, { x: B2.x, y: midY }, B2]
-  } else if (aH) {
-    mid = [A2, { x: A2.x, y: B2.y }, B2]
-  } else {
-    mid = [A2, { x: B2.x, y: A2.y }, B2]
-  }
-  return [[A.x, A.y], ...mid.map((p) => [p.x, p.y] as [number, number]), [B.x, B.y]]
-}
-
-export function shapeLabelY(s: PidShape): number {
-  return s.y + s.h + (s.type === 'reactor' ? 22 : 16)
-}
-
-// ============ 自动布局（按连线拓扑分层排列，Task 57） ============
-/** 自动布局列间距（SVG 单位）：为正交折线拐弯与管线号标注预留空间 */
-const LAYOUT_GAP_X = 130
-/** 自动布局行间距 */
-const LAYOUT_GAP_Y = 64
-/** 挂标跟随阈值：布局前挂标中心到最近连线折线的距离 ≤ 该值才视为挂在该管线上，布局后跟随重投影 */
-const LAYOUT_MARK_FOLLOW_DIST = 260
-
-/**
- * 自动布局（Sugiyama 简化版，纯函数不改组件状态）：
- * 1. 有连线图元按有效流向（缺省/forward=起点→终点，reverse 反向）DFS 最长路分层（遇环跳过回边），列内重心排序 4 轮扫掠减少连线交叉，自左向右排列；
- * 2. 未连线图元在流程区下方按阅读顺序（先上后下、先左后右）网格排列；
- * 3. 连线锚点按布局后两图元相对方位自动改选（水平占优→right/left，垂直占优→bottom/top），midOverride 清零交由自动折弯重排；
- * 4. 布局前挂在连线附近（≤ LAYOUT_MARK_FOLLOW_DIST）的标注记录「所在连线 + 弧长参数 t」，布局后重投影到该连线新路径的相同相对位置（管线位置语义不变）；
- * 5. 布局原点取当前图元包围盒左上角——整图在原视口邻域重排，不发生跳位。
- */
-export function autoLayoutContent(ct: PidContent): PidContent {
-  const shapes = ct.shapes
-  if (shapes.length === 0) return ct
-  const byId = new Map(shapes.map((s) => [s.id, s]))
-
-  // ---- 有效流向边（自环与悬空端点忽略） ----
-  const edges: { from: string; to: string }[] = []
-  for (const c of ct.connections) {
-    if (!byId.has(c.fromShape) || !byId.has(c.toShape) || c.fromShape === c.toShape) continue
-    edges.push(c.direction === 'reverse' ? { from: c.toShape, to: c.fromShape } : { from: c.fromShape, to: c.toShape })
-  }
-  const linked = new Set<string>()
-  const adj = new Map<string, string[]>() // 分层用去重邻接表
-  for (const e of edges) {
-    linked.add(e.from)
-    linked.add(e.to)
-    const list = adj.get(e.from) ?? []
-    if (!list.includes(e.to)) list.push(e.to)
-    adj.set(e.from, list)
-  }
-
-  const pos = new Map<string, { x: number; y: number }>()
-  let flowLeft = 0
-  let flowBottom = 0
-  let hasFlow = false
-
-  if (linked.size > 0) {
-    // ---- 1. 破环：三色 DFS 收集回边（grey→grey），去回边后即为 DAG ----
-    const backEdges = new Set<string>()
-    const color = new Map<string, 0 | 1 | 2>() // 0 未访问 / 1 递归栈中 / 2 已完成
-    const dfsMark = (u: string) => {
-      color.set(u, 1)
-      for (const v of adj.get(u) ?? []) {
-        const c = color.get(v) ?? 0
-        if (c === 1) backEdges.add(`${u}>${v}`)
-        else if (c === 0) dfsMark(v)
-      }
-      color.set(u, 2)
-    }
-    for (const s of shapes) if (linked.has(s.id) && (color.get(s.id) ?? 0) === 0) dfsMark(s.id)
-
-    // ---- 2. 分层：DAG 上自源点最长路（上游在最左，主流向自左向右可读） ----
-    const dagIn = new Map<string, string[]>() // 节点 → DAG 上游父节点
-    for (const e of edges) {
-      if (backEdges.has(`${e.from}>${e.to}`)) continue
-      const list = dagIn.get(e.to) ?? []
-      list.push(e.from)
-      dagIn.set(e.to, list)
-    }
-    const layerMemo = new Map<string, number>()
-    const layerOf = (u: string): number => {
-      const m = layerMemo.get(u)
-      if (m != null) return m
-      let v = 0
-      for (const p of dagIn.get(u) ?? []) v = Math.max(v, layerOf(p) + 1)
-      layerMemo.set(u, v)
-      return v
-    }
-    const layer = new Map<string, number>()
-    for (const s of shapes) if (linked.has(s.id)) layer.set(s.id, layerOf(s.id))
-
-    // ---- 3. 分列（初序按原 y 保留上下意图）+ 重心排序 4 轮扫掠减少交叉 ----
-    const layerMax = Math.max(...layer.values())
-    const colIds: string[][] = Array.from({ length: layerMax + 1 }, () => [])
-    for (const s of shapes) if (linked.has(s.id)) colIds[layer.get(s.id) ?? 0].push(s.id)
-    for (const list of colIds) list.sort((a, b) => (byId.get(a)!.y - byId.get(b)!.y) || (byId.get(a)!.x - byId.get(b)!.x))
-    const order = new Map<string, number>()
-    colIds.forEach((list) => list.forEach((id, i) => order.set(id, i)))
-    const upAdj = new Map<string, Set<string>>() // 邻接上一层（上游）
-    const downAdj = new Map<string, Set<string>>() // 邻接下一层（下游）
-    for (const e of edges) {
-      const lu = layer.get(e.from)
-      const lv = layer.get(e.to)
-      if (lu == null || lv == null) continue
-      if (lv === lu + 1) {
-        if (!downAdj.has(e.from)) downAdj.set(e.from, new Set())
-        downAdj.get(e.from)!.add(e.to)
-        if (!upAdj.has(e.to)) upAdj.set(e.to, new Set())
-        upAdj.get(e.to)!.add(e.from)
-      } else if (lu === lv + 1) {
-        if (!downAdj.has(e.to)) downAdj.set(e.to, new Set())
-        downAdj.get(e.to)!.add(e.from)
-        if (!upAdj.has(e.from)) upAdj.set(e.from, new Set())
-        upAdj.get(e.from)!.add(e.to)
-      }
-    }
-    const bary = (id: string, m: Map<string, Set<string>>): number => {
-      const ns = m.get(id)
-      if (!ns || ns.size === 0) return order.get(id) ?? 0
-      let sum = 0
-      for (const n of ns) sum += order.get(n) ?? 0
-      return sum / ns.size
-    }
-    for (let sweep = 0; sweep < 4; sweep++) {
-      if (sweep % 2 === 0) {
-        for (let l = 1; l < colIds.length; l++) {
-          colIds[l].sort((a, b) => bary(a, upAdj) - bary(b, upAdj))
-          colIds[l].forEach((id, i) => order.set(id, i))
-        }
-      } else {
-        for (let l = colIds.length - 2; l >= 0; l--) {
-          colIds[l].sort((a, b) => bary(a, downAdj) - bary(b, downAdj))
-          colIds[l].forEach((id, i) => order.set(id, i))
-        }
-      }
-    }
-
-    // ---- 4. 坐标：列 x 累积（列内水平居中），行 y 累积（各列相对最高列垂直居中） ----
-    const colMaxW = colIds.map((list) => Math.max(...list.map((id) => byId.get(id)!.w)))
-    const colX: number[] = []
-    let acc = 0
-    for (let l = 0; l < colIds.length; l++) {
-      colX[l] = acc
-      acc += colMaxW[l] + LAYOUT_GAP_X
-    }
-    const colH = colIds.map((list) => list.reduce((sum, id) => sum + byId.get(id)!.h, 0) + LAYOUT_GAP_Y * (list.length - 1))
-    const colHMax = Math.max(...colH)
-    colIds.forEach((list, l) => {
-      let y = (colHMax - colH[l]) / 2
-      for (const id of list) {
-        const s = byId.get(id)!
-        pos.set(id, { x: Math.round(colX[l] + (colMaxW[l] - s.w) / 2), y: Math.round(y) })
-        y += s.h + LAYOUT_GAP_Y
-      }
-    })
-    flowLeft = Math.min(...colX)
-    flowBottom = colHMax
-    hasFlow = true
-  }
-
-  // ---- 5. 未连线图元：流程区下方网格（阅读顺序：先上后下、先左后右） ----
-  const isolated = shapes.filter((s) => !linked.has(s.id)).sort((a, b) => (a.y - b.y) || (a.x - b.x))
-  if (isolated.length > 0) {
-    const cols = Math.max(1, Math.ceil(Math.sqrt(isolated.length)))
-    const cellW = Math.max(...isolated.map((s) => s.w)) + 56
-    const cellH = Math.max(...isolated.map((s) => s.h)) + 56
-    const gridTop = hasFlow ? flowBottom + 96 : 0
-    isolated.forEach((s, i) => {
-      const r = Math.floor(i / cols)
-      const c = i % cols
-      pos.set(s.id, {
-        x: Math.round(c * cellW + (cellW - 56 - s.w) / 2),
-        y: Math.round(gridTop + r * cellH),
-      })
-    })
-  }
-
-  // ---- 6. 平移到当前包围盒左上角（原视口邻域重排，不跳位） ----
-  const minX = Math.min(...shapes.map((s) => s.x))
-  const minY = Math.min(...shapes.map((s) => s.y))
-  for (const p of pos.values()) {
-    p.x += minX
-    p.y += minY
-  }
-
-  // ---- 7. 连线锚点按布局后相对方位改选（自环保留原锚点） ----
-  const newAnchors = new Map<string, [Anchor, Anchor]>()
-  for (const c of ct.connections) {
-    if (c.fromShape === c.toShape) continue
-    const fs = byId.get(c.fromShape)
-    const ts = byId.get(c.toShape)
-    const fp = pos.get(c.fromShape)
-    const tp = pos.get(c.toShape)
-    if (!fs || !ts || !fp || !tp) continue
-    const dx = tp.x + ts.w / 2 - (fp.x + fs.w / 2)
-    const dy = tp.y + ts.h / 2 - (fp.y + fs.h / 2)
-    newAnchors.set(
-      c.id,
-      Math.abs(dx) >= Math.abs(dy)
-        ? dx >= 0 ? ['right', 'left'] : ['left', 'right']
-        : dy >= 0 ? ['bottom', 'top'] : ['top', 'bottom'],
-    )
-  }
-
-  /** 连线折线（useNew=false 布局前含 midOverride / true 布局后新锚点自动折弯） */
-  const routeOf = (c: PidConn, useNew: boolean): [number, number][] | null => {
-    const f = byId.get(c.fromShape)
-    const t = byId.get(c.toShape)
-    if (!f || !t) return null
-    const fp = useNew ? pos.get(c.fromShape) : f
-    const tp = useNew ? pos.get(c.toShape) : t
-    if (!fp || !tp) return null
-    const fa = useNew ? (newAnchors.get(c.id)?.[0] ?? c.fromAnchor) : c.fromAnchor
-    const ta = useNew ? (newAnchors.get(c.id)?.[1] ?? c.toAnchor) : c.toAnchor
-    const fs = { ...f, x: fp.x, y: fp.y }
-    const ts = { ...t, x: tp.x, y: tp.y }
-    const a = useNew ? anchorPoint(fs, fa) : anchorPointT(fs, c.fromAnchor, c.fromT)
-    const b = useNew ? anchorPoint(ts, ta) : anchorPointT(ts, c.toAnchor, c.toT)
-    return routeConnection(
-      { x: a.x, y: a.y, anchor: physAnchor(fs, fa) },
-      { x: b.x, y: b.y, anchor: physAnchor(ts, ta) },
-      c.fromShape === c.toShape,
-      useNew ? undefined : c.midOverride,
-    )
-  }
-
-  // ---- 8. 挂标跟随：布局前找最近连线记录「所在连线+弧长参数 t」，布局后重投影到新路径同位（clamp 两端 4% 不压设备） ----
-  const follow = new Map<string, { connId: string; t: number }>()
-  if (ct.marks.length > 0 && ct.connections.length > 0) {
-    for (const m of ct.marks) {
-      let best: { connId: string; t: number; dist: number } | null = null
-      for (const c of ct.connections) {
-        const pts = routeOf(c, false)
-        if (!pts) continue
-        const proj = projectToPolyline(pts, m.x, m.y)
-        if (proj && (!best || proj.dist < best.dist)) best = { connId: c.id, t: proj.t, dist: proj.dist }
-      }
-      if (best && best.dist <= LAYOUT_MARK_FOLLOW_DIST) follow.set(m.id, { connId: best.connId, t: best.t })
-    }
-  }
-
-  const newConns: PidConn[] = ct.connections.map((c) => {
-    const an = newAnchors.get(c.id)
-    if (!an) return c.fromShape === c.toShape ? { ...c, midOverride: undefined } : c
-    // 锚点按布局后相对方位改选：原自由锚点沿边参数失效，一并清零回中点（Task 86-2）
-    return { ...c, fromAnchor: an[0], toAnchor: an[1], fromT: undefined, toT: undefined, midOverride: undefined }
-  })
-
-  const newMarks = ct.marks.map((m) => {
-    const f = follow.get(m.id)
-    if (!f) return m
-    const c = newConns.find((cc) => cc.id === f.connId)
-    const pts = c ? routeOf(c, true) : null
-    const pt = pts ? pointAlongPolyline(pts, clamp(f.t, 0.04, 0.96)) : null
-    return pt ? { ...m, x: Math.round(pt.x), y: Math.round(pt.y) } : m
-  })
-
-  const newShapes = shapes.map((s) => {
-    const p = pos.get(s.id)
-    return p ? { ...s, x: p.x, y: p.y } : s
-  })
-  return { shapes: newShapes, connections: newConns, marks: newMarks }
-}
-
-function libOf(t: PidShapeType): ShapeLibItem {
-  return SHAPE_LIBRARY.find((i) => i.type === t) ?? SHAPE_LIBRARY[0]
-}
-
-/** 图元类型中文标签（基础图形也归入，供属性面板类型徽章显示） */
-function typeLabel(t: PidShapeType): string {
-  return libOf(t).label
-}
-
-/** 图元库手风琴分类节：点击标题向下展开 / 向上折叠（内容 3 列宫格，展开带下滑淡入动画）
- *  stack=true 时内容不宫格化（大分类节内嵌子分类节用）；nested=true 时子分类缩进+左侧虚线标识层级 */
-function LibSection({ label, count, open, onToggle, stack, nested, children }: {
-  label: string; count: number; open: boolean; onToggle: () => void
-  stack?: boolean; nested?: boolean; children: React.ReactNode
-}) {
-  return (
-    <section className={cn('mb-1', nested && 'ml-2.5 border-l border-dashed border-stone-200 pl-1.5')}>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label={`展开或折叠分类：${label}`}
-        onClick={onToggle}
-        className={cn(
-          'flex w-full items-center gap-1 rounded-md font-medium transition-colors',
-          nested ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-1.5 text-[11px]',
-          open ? 'text-teal-800' : 'text-stone-500 hover:bg-stone-50',
-        )}
-      >
-        <ChevronDown className={cn('h-3 w-3 shrink-0 transition-transform duration-200', !open && '-rotate-90')} />
-        <span className="truncate">{label}</span>
-        <span className="ml-auto shrink-0 rounded-full bg-stone-100 px-1.5 text-[10px] font-normal text-stone-400">{count}</span>
-      </button>
-      {open && (
-        <div className={stack ? 'lib-expand px-0.5 pb-1.5' : 'lib-expand grid grid-cols-3 gap-1.5 px-0.5 pb-1.5'}>{children}</div>
-      )}
-    </section>
-  )
-}
-
-/** 内建图元宫格单元：缩略图+名称；悬停信息由父级 onEnter 写入 libHover，点击进入放置模式 */
-function StdLibCell({ sym, active, onPick, onEnter, onLeave }: {
-  sym: StdSymbol; active: boolean; onPick: () => void
-  onEnter: (e: React.MouseEvent<HTMLDivElement>) => void; onLeave: () => void
-}) {
-  return (
-    <div
-      className={cn(
-        'rounded-md border p-1 transition-colors',
-        active ? 'border-teal-400 bg-teal-50' : 'border-stone-200 hover:border-teal-300 hover:bg-stone-50',
-      )}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-    >
-      <button
-        type="button"
-        aria-label={`放置${sym.label}`}
-        onClick={onPick}
-        className="flex h-14 w-full items-center justify-center"
-      >
-        <StdSymbolThumb id={sym.id} className="h-12 w-full" />
-      </button>
-      <div className="truncate px-0.5 pb-0.5 text-center text-[10px] leading-tight text-stone-500">{sym.label}</div>
-    </div>
-  )
 }
 
 // ============ 图元绘制（工艺图元 + 基础图形；fill/stroke 可由属性面板自定义） ============
@@ -1140,61 +508,6 @@ export function MarkGlyph({ m, edit, state, stateLabel, hideText }: { m: PidMark
         </>
       )}
     </g>
-  )
-}
-
-/** 属性面板数值微调输入 */
-function NumField({ label, value, min, max, onChange, onBlur }: {
-  label: string
-  value: number
-  min: number
-  max: number
-  onChange: (v: number) => void
-  onBlur?: () => void // 编辑结束时触发（挂标 XY 修改后重算所属管线）
-}) {
-  return (
-    <div className="grid gap-1">
-      <Label className="text-[11px] text-stone-500">{label}</Label>
-      <Input
-        type="number" className="h-8" value={value} min={min} max={max} onBlur={onBlur}
-        onChange={(e) => {
-          const n = Number(e.target.value)
-          if (!Number.isNaN(n)) onChange(clamp(Math.round(n), min, max))
-        }}
-      />
-    </div>
-  )
-}
-
-/** 属性面板预设色板（点选设色；透明项用棋盘格底纹表示） */
-function ColorSwatches({ label, palette, value, onChange }: {
-  label: string
-  palette: readonly string[]
-  value: string
-  onChange: (c: string) => void
-}) {
-  return (
-    <div className="grid gap-1.5">
-      <Label className="text-[11px] text-stone-500">{label}</Label>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {palette.map((c) => (
-          <button
-            key={c} type="button" title={c === 'transparent' ? '透明' : c}
-            aria-label={`${label} ${c === 'transparent' ? '透明' : c}`}
-            onClick={() => onChange(c)}
-            className={cn(
-              'h-6 w-6 rounded border border-stone-300 transition-transform hover:scale-110',
-              value === c && 'ring-2 ring-teal-500 ring-offset-1',
-            )}
-            style={{
-              background: c === 'transparent'
-                ? 'repeating-conic-gradient(#d6d3d1 0% 25%, #ffffff 0% 50%) 50% / 8px 8px'
-                : c,
-            }}
-          />
-        ))}
-      </div>
-    </div>
   )
 }
 
@@ -2087,12 +1400,6 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [placingStdId, setPlacingStdId] = useState<string | null>(null)
   // 图元库侧栏：三页签 + 内建图元大分类/子分类两级手风琴 + 搜索 + 悬停信息卡
   const [libTab, setLibTab] = useState<'std' | 'basic' | 'custom'>('std')
-  // 内建图元搜索框（按名称/说明/子分类过滤，非空时平铺展示命中结果）
-  const [stdSearch, setStdSearch] = useState('')
-  // 手风琴展开状态（key：m-大分类 / 子分类id / basic / custom）；语义：undefined 时大分类默认仅设备展开、子分类全展开
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ 'm-equipment': true, basic: true, custom: true })
-  const toggleGroup = useCallback((key: string) => setOpenGroups((m) => ({ ...m, [key]: !m[key] })), [])
-  const [libHover, setLibHover] = useState<{ title: string; lines: string[]; x: number; y: number } | null>(null)
   // ---- 多选（Shift/Ctrl/Cmd 点击追加）与批量操作：多选悬浮工具条 +「替换成」对话框（Task 89） ----
   const [bulkIds, setBulkIds] = useState<string[]>([])
   const [replaceDlgOpen, setReplaceDlgOpen] = useState(false)
@@ -2242,6 +1549,11 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [symbols, setSymbols] = useState<SymbolRow[]>([])
   const [symbolsLoading, setSymbolsLoading] = useState(false)
   const [deleteSymbolTarget, setDeleteSymbolTarget] = useState<SymbolRow | null>(null)
+
+  // ---- 组态引擎注册表：std 五大类 / 基础图形 / 自定义图元（symbols 变化时重建） ----
+  const stdRegistry = useMemo(() => buildStdRegistry(), [])
+  const basicRegistry = useMemo(() => buildBasicRegistry(), [])
+  const customRegistry = useMemo(() => buildCustomRegistry(symbols), [symbols])
 
   // ---- 设备/管线主数据（图元绑定设备、连线绑定管线 + 保存回写） ----
   const [equipOptions, setEquipOptions] = useState<EquipOption[]>([])
@@ -3156,13 +2468,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   }
 
   /** 设备图元库条目「以此为模板」：以内置图元为单个基础部件进入编辑器 */
-  const enterEditorFromLib = (item: ShapeLibItem) => {
+  const enterEditorFromLib = (item: PidTypeLibItem) => {
     clearPlacementStates()
     const w = Math.min(item.w, EDITOR_SIZE - 8)
     const h = Math.min(item.h, EDITOR_SIZE - 8)
     setSymbolEditor({
       mode: 'create', basedOn: item.label,
-      parts: [{ id: uid('p'), type: item.type, x: Math.round((EDITOR_SIZE - w) / 2), y: Math.round((EDITOR_SIZE - h) / 2), w, h, label: '' }],
+      parts: [{ id: uid('p'), type: item.type as PidShape['type'], x: Math.round((EDITOR_SIZE - w) / 2), y: Math.round((EDITOR_SIZE - h) / 2), w, h, label: '' }],
     })
   }
 
@@ -4599,223 +3911,97 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     </button>
                   ))}
                 </div>
-                {libTab === 'std' && (
-                  <div className="border-b px-2 py-1.5">
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-stone-400" />
-                      <input
-                        value={stdSearch}
-                        onChange={(e) => setStdSearch(e.target.value)}
-                        placeholder="搜索图元：名称/说明/分类…"
-                        aria-label="搜索内建图元"
-                        className="h-7 w-full rounded-md border border-stone-200 bg-stone-50 pl-6 pr-6 text-[11px] text-stone-700 placeholder:text-stone-400 focus:border-teal-400 focus:bg-white focus:outline-none"
-                      />
-                      {stdSearch && (
-                        <button
-                          type="button"
-                          aria-label="清空搜索"
-                          onClick={() => setStdSearch('')}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-stone-400 hover:text-stone-600"
-                        >
-                          <CloseIcon className="h-3 w-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-                <StdSymbolStyle />
-                {/* 悬停信息卡（fixed 定位不受侧栏滚动裁剪） */}
-                {libHover && (
-                  <div
-                    className="pointer-events-none fixed z-50 w-52 rounded-md border border-stone-200 bg-white px-2.5 py-2 shadow-lg"
-                    style={{
-                      left: Math.min(libHover.x + 8, (typeof window !== 'undefined' ? window.innerWidth : 1920) - 224),
-                      top: Math.min(libHover.y, (typeof window !== 'undefined' ? window.innerHeight : 1080) - 120),
-                    }}
-                  >
-                    <div className="text-xs font-semibold text-stone-700">{libHover.title}</div>
-                    {libHover.lines.map((l, i) => (
-                      <div key={i} className={cn('text-[10px] leading-relaxed', i === 0 ? 'text-teal-700' : 'text-stone-500')}>{l}</div>
-                    ))}
-                  </div>
-                )}
+<StdSymbolStyle />
                 <div className="min-h-0 flex-1 overflow-y-auto p-2 bp-thin-scrollbar">
-                  {/* 基础图形：内置形状宫格（缩略图复用 ShapeBody 画布渲染）·手风琴分类 */}
-                  {libTab === 'basic' && (
-                    <LibSection label="基础形状" count={SHAPE_LIBRARY.filter((i) => i.group === 'basic').length} open={!!openGroups.basic} onToggle={() => toggleGroup('basic')}>
-                      {SHAPE_LIBRARY.filter((item) => item.group === 'basic').map((item) => {
-                        const activePlacing = placingShape === item.type
-                        return (
-                          <div
-                            key={item.type}
-                            className={cn(
-                              'group relative rounded-md border p-1 transition-colors',
-                              activePlacing ? 'border-teal-400 bg-teal-50' : 'border-stone-200 hover:border-teal-300 hover:bg-stone-50',
-                            )}
-                            onMouseEnter={(e) => {
-                              const r = e.currentTarget.getBoundingClientRect()
-                              setLibHover({ title: item.label, lines: [`默认尺寸 ${item.w}×${item.h}`, '点击选择后点击画布放置'], x: r.right, y: r.top })
-                            }}
-                            onMouseLeave={() => setLibHover(null)}
-                          >
-                            <button
-                              type="button"
-                              aria-label={`放置${item.label}`}
-                              onClick={() => {
-                                setPlacingShape(activePlacing ? null : item.type)
-                                setPlacingStdId(null)
-                                setPlacingSymbol(null)
-                                setPlacingMark(null)
-                                setPendingConn(null)
-                              }}
-                              className="flex h-14 w-full items-center justify-center"
-                            >
-                              <svg viewBox={`0 0 ${item.w} ${item.h}`} className="max-h-12 max-w-full" aria-hidden="true">
-                                <ShapeBody s={{ id: `lib-${item.type}`, type: item.type, x: 0, y: 0, w: item.w, h: item.h, label: '' }} />
-                              </svg>
-                            </button>
-                            <div className="truncate px-0.5 pb-0.5 text-center text-[10px] leading-tight text-stone-500">{item.label}</div>
-                            <button
-                              type="button"
-                              title={`以「${item.label}」为基础新建图元（进入图元编辑器）`}
-                              className="absolute right-0.5 top-0.5 hidden rounded bg-white/90 p-0.5 text-stone-300 shadow-sm transition-colors hover:text-violet-600 group-hover:block"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                enterEditorFromLib(item)
-                              }}
-                            >
-                              <Shapes className="h-3 w-3" />
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </LibSection>
-                  )}
-                  {/* 内建图元：五大分类→子分类两级手风琴 + 搜索过滤 */}
-                  {libTab === 'std' && (() => {
-                    const q = stdSearch.trim().toLowerCase()
-                    const pick = (sym: StdSymbol) => {
+                {libTab === 'std' && (
+                  <SymbolPalette
+                    registry={stdRegistry}
+                    renderThumb={pidThumbRenderer()}
+                    activeSymbolId={placingShape === 'std' ? placingStdId : null}
+                    onPick={(sym) => {
                       const activeStd = placingShape === 'std' && placingStdId === sym.id
                       setPlacingShape(activeStd ? null : 'std')
                       setPlacingStdId(activeStd ? null : sym.id)
                       setPlacingSymbol(null)
                       setPlacingMark(null)
                       setPendingConn(null)
-                    }
-                    const onStdEnter = (sym: StdSymbol) => (e: React.MouseEvent<HTMLDivElement>) => {
-                      const r = e.currentTarget.getBoundingClientRect()
-                      setLibHover({
-                        title: sym.label,
-                        lines: [`${STD_MAJOR_LABEL[sym.major]} · ${STD_SUB_LABEL[sym.sub] ?? sym.sub} · ${sym.standard}`, sym.desc, `默认尺寸 ${sym.sw}×${sym.sh} · 点击画布放置`],
-                        x: r.right, y: r.top,
-                      })
-                    }
-                    const renderCells = (items: StdSymbol[]) => items.map((sym) => (
-                      <StdLibCell
-                        key={sym.id} sym={sym}
-                        active={placingShape === 'std' && placingStdId === sym.id}
-                        onPick={() => pick(sym)}
-                        onEnter={onStdEnter(sym)}
-                        onLeave={() => setLibHover(null)}
-                      />
-                    ))
-                    if (q) {
-                      const hits = STD_SYMBOLS.filter((sym) =>
-                        sym.label.toLowerCase().includes(q)
-                        || sym.desc.toLowerCase().includes(q)
-                        || (STD_SUB_LABEL[sym.sub] ?? '').toLowerCase().includes(q)
-                        || sym.id.toLowerCase().includes(q))
-                      return hits.length === 0 ? (
-                        <div className="px-1 py-3 text-center text-[11px] leading-relaxed text-stone-400">
-                          未找到与「{stdSearch.trim()}」匹配的图元（库内共 {STD_SYMBOLS.length} 个）
-                        </div>
-                      ) : (
-                        <LibSection label={`搜索「${stdSearch.trim()}」`} count={hits.length} open onToggle={() => setStdSearch('')}>
-                          {renderCells(hits)}
-                        </LibSection>
-                      )
-                    }
-                    return STD_MAJOR_ORDER.map((m: StdMajor) => {
-                      const items = STD_SYMBOLS.filter((sym) => sym.major === m)
-                      const majorOpen = openGroups[`m-${m}`] ?? m === 'equipment'
-                      return (
-                        <LibSection key={m} label={STD_MAJOR_LABEL[m]} count={items.length} open={majorOpen} onToggle={() => toggleGroup(`m-${m}`)} stack>
-                          {STD_SUBGROUPS[m].map((sd) => {
-                            const subItems = STD_SYMBOLS.filter((sym) => sym.sub === sd.id)
-                            return (
-                              <LibSection
-                                key={sd.id} nested
-                                label={sd.label} count={subItems.length}
-                                open={openGroups[sd.id] ?? true}
-                                onToggle={() => toggleGroup(sd.id)}
-                              >
-                                {renderCells(subItems)}
-                              </LibSection>
-                            )
-                          })}
-                        </LibSection>
-                      )
-                    })
-                  })()}
-                  {/* 自定义图元（保存后自动出现在此页签） */}
-                  {libTab === 'custom' && (
-                    <>
-                      {symbolsLoading && (
-                        <div className="px-1 py-2 text-[11px] text-stone-400">自定义图元加载中…</div>
-                      )}
-                      <LibSection label="我的图元" count={symbols.length} open={!!openGroups.custom} onToggle={() => toggleGroup('custom')}>
-                        {symbols.map((sym) => {
-                          const activeSym = placingSymbol?.id === sym.id
-                          return (
-                            <div
-                              key={`sym-${sym.id}`}
-                              className={cn(
-                                'group relative rounded-md border p-1 transition-colors',
-                                activeSym ? 'border-teal-400 bg-teal-50' : 'border-stone-200 hover:border-teal-300 hover:bg-stone-50',
-                              )}
-                              onMouseEnter={(e) => {
-                                const r = e.currentTarget.getBoundingClientRect()
-                                setLibHover({ title: sym.name, lines: [sym.basedOn ? `基于「${sym.basedOn}」` : '自定义图元', '点击选择后点击画布放置'], x: r.right, y: r.top })
-                              }}
-                              onMouseLeave={() => setLibHover(null)}
-                            >
-                              <button
-                                type="button"
-                                title={`点击画布放置「${sym.name}」`}
-                                onClick={() => {
-                                  setPlacingSymbol(activeSym ? null : sym)
-                                  setPlacingShape(null)
-                                  setPlacingStdId(null)
-                                  setPlacingMark(null)
-                                  setPendingConn(null)
-                                }}
-                                className="flex h-14 w-full items-center justify-center"
-                              >
-                                <SymbolThumb parts={sym.parts} className="h-12 w-12 text-stone-500" />
-                              </button>
-                              <div className="truncate px-0.5 pb-0.5 text-center text-[10px] leading-tight text-stone-500">{sym.name}</div>
-                              <div className="absolute right-0.5 top-0.5 hidden gap-0.5 rounded bg-white/90 p-0.5 shadow-sm group-hover:flex">
-                                <button type="button" title="编辑此图元" className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-teal-700" onClick={(e) => { e.stopPropagation(); setLibHover(null); enterEditSymbol(sym) }}>
-                                  <Pencil className="h-3 w-3" />
-                                </button>
-                                <button type="button" title="以此图元为基础新建" className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-violet-700" onClick={(e) => { e.stopPropagation(); setLibHover(null); enterCopyOfSymbol(sym) }}>
-                                  <Copy className="h-3 w-3" />
-                                </button>
-                                <button type="button" title="删除此图元" className="rounded p-0.5 text-stone-400 hover:bg-rose-50 hover:text-rose-600" onClick={(e) => { e.stopPropagation(); setLibHover(null); setDeleteSymbolTarget(sym) }}>
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </LibSection>
-                      {!symbolsLoading && symbols.length === 0 && (
-                        <div className="px-1 py-3 text-center text-[11px] leading-relaxed text-stone-400">
-                          暂无自定义图元——选中画布图元后用「存为自定义图元」创建
-                        </div>
-                      )}
-                    </>
-                  )}
+                    }}
+                  />
+                )}
+                {libTab === 'basic' && (
+                  <SymbolPalette
+                    registry={basicRegistry}
+                    renderThumb={pidThumbRenderer()}
+                    activeSymbolId={placingShape}
+                    onPick={(sym) => {
+                      const activePlacing = placingShape === sym.id
+                      setPlacingShape(activePlacing ? null : sym.id as PidShapeType)
+                      setPlacingStdId(null)
+                      setPlacingSymbol(null)
+                      setPlacingMark(null)
+                      setPendingConn(null)
+                    }}
+                    cellAction={(sym) => (
+                      <button
+                        type="button"
+                        title={`以「${sym.label}」为基础新建图元（进入图元编辑器）`}
+                        className="absolute right-0.5 top-0.5 hidden rounded bg-white/90 p-0.5 text-stone-300 shadow-sm transition-colors hover:text-violet-600 group-hover:block"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          enterEditorFromLib(pidTypeLibOf(sym.id))
+                        }}
+                      >
+                        <Shapes className="h-3 w-3" />
+                      </button>
+                    )}
+                  />
+                )}
+                {libTab === 'custom' && (
+                  <>
+                    {symbolsLoading && (
+                      <div className="px-1 py-2 text-[11px] text-stone-400">自定义图元加载中…</div>
+                    )}
+                    <SymbolPalette
+                      registry={customRegistry}
+                      renderThumb={pidThumbRenderer(symbols)}
+                      activeSymbolId={placingSymbol ? `custom-${placingSymbol.id}` : null}
+                      onPick={(sym) => {
+                        const rid = customRowIdOf(sym.id)
+                        const row = rid != null ? symbols.find((s) => s.id === rid) : null
+                        if (!row) return
+                        const activeSym = placingSymbol?.id === row.id
+                        setPlacingSymbol(activeSym ? null : row)
+                        setPlacingShape(null)
+                        setPlacingStdId(null)
+                        setPlacingMark(null)
+                        setPendingConn(null)
+                      }}
+                      cellAction={(sym) => {
+                        const rid = customRowIdOf(sym.id)
+                        const row = rid != null ? symbols.find((s) => s.id === rid) : null
+                        if (!row) return null
+                        return (
+                          <div className="absolute right-0.5 top-0.5 hidden gap-0.5 rounded bg-white/90 p-0.5 shadow-sm group-hover:flex">
+                            <button type="button" title="编辑此图元" className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-teal-700" onClick={(e) => { e.stopPropagation(); enterEditSymbol(row) }}>
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button type="button" title="以此图元为基础新建" className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-violet-700" onClick={(e) => { e.stopPropagation(); enterCopyOfSymbol(row) }}>
+                              <Copy className="h-3 w-3" />
+                            </button>
+                            <button type="button" title="删除此图元" className="rounded p-0.5 text-stone-400 hover:bg-rose-50 hover:text-rose-600" onClick={(e) => { e.stopPropagation(); setDeleteSymbolTarget(row) }}>
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )
+                      }}
+                    />
+                    {!symbolsLoading && symbols.length === 0 && (
+                      <div className="px-1 py-3 text-center text-[11px] leading-relaxed text-stone-400">
+                        暂无自定义图元——选中画布图元后用「存为自定义图元」创建
+                      </div>
+                    )}
+                  </>
+                )}
                 </div>
                 <div className="mt-auto border-t px-3 py-2 text-[11px] leading-relaxed text-stone-400">
                   {placingSymbol
@@ -5498,13 +4684,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                             aria-label={`替换为${item.label}`}
                             className={cellCls}
                             onClick={() => replaceShapesWithRef.current(replaceTargetIds, {
-                              type: item.type, w: item.w, h: item.h,
+                              type: item.type as PidShapeType, w: item.w, h: item.h,
                               stdId: undefined, parts: undefined, designW: undefined, designH: undefined, flip: undefined,
                             })}
                           >
                             <span className="flex h-14 w-full items-center justify-center">
                               <svg viewBox={`0 0 ${item.w} ${item.h}`} className="max-h-12 max-w-full" aria-hidden="true">
-                                <ShapeBody s={{ id: `rep-${item.type}`, type: item.type, x: 0, y: 0, w: item.w, h: item.h, label: '' }} />
+                                <ShapeBody s={{ id: `rep-${item.type}`, type: item.type as PidShapeType, x: 0, y: 0, w: item.w, h: item.h, label: '' }} />
                               </svg>
                             </span>
                             <span className="block truncate px-0.5 pb-0.5 text-center text-[10px] leading-tight text-stone-500">{item.label}</span>
@@ -6776,3 +5962,4 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     </div>
   )
 }
+
