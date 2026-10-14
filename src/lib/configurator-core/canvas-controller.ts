@@ -25,6 +25,7 @@ export type GestureKind =
   | 'conn-label'   // 连线标注沿线拖动
   | 'conn-seg'     // 连线中段拖动
   | 'conn-end'     // 连线端点改接
+  | 'conn-draft'   // 锚点拖拽连线草稿（一步创建；轻点仍走宿主 click 两步流）
   | 'line-draft'   // 直线橡皮筋
   | 'select'       // 框选橡皮筋（预留）
   | 'custom'       // 宿主自定义手势
@@ -219,6 +220,61 @@ export function hitTestRect<N extends Pick<NodeGeom, 'id' | 'x' | 'y' | 'w' | 'h
     out.push(s.id)
   }
   return out
+}
+
+// ---------- 纯几何：多选对齐 / 均匀分布（多选工具条配套） ----------
+
+export type AlignMode = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
+export type DistributeAxis = 'h' | 'v'
+
+/** 位置补丁：宿主按 id 回写 x/y（其余字段不动），坐标取整与画布网格精度一致 */
+export interface PosPatch { id: string; x: number; y: number }
+
+/**
+ * 多选对齐（纯函数）：以全体包围盒为基准对齐成员位置，返回 x/y 补丁。
+ * 成员 < 2 返回空数组。旋转图元按未旋转包围盒（与框选命中粒度一致）。
+ */
+export function alignBoxes<N extends Pick<NodeGeom, 'id' | 'x' | 'y' | 'w' | 'h'>>(
+  shapes: readonly N[], ids: readonly string[], mode: AlignMode,
+): PosPatch[] {
+  const ms = shapes.filter((s) => ids.includes(s.id))
+  if (ms.length < 2) return []
+  const x0 = Math.min(...ms.map((s) => s.x))
+  const x1 = Math.max(...ms.map((s) => s.x + s.w))
+  const y0 = Math.min(...ms.map((s) => s.y))
+  const y1 = Math.max(...ms.map((s) => s.y + s.h))
+  return ms.map((s) => {
+    const x = mode === 'left' ? x0 : mode === 'right' ? x1 - s.w : mode === 'hcenter' ? (x0 + x1) / 2 - s.w / 2 : s.x
+    const y = mode === 'top' ? y0 : mode === 'bottom' ? y1 - s.h : mode === 'vcenter' ? (y0 + y1) / 2 - s.h / 2 : s.y
+    return { id: s.id, x: Math.round(x), y: Math.round(y) }
+  })
+}
+
+/**
+ * 多选均匀分布（纯函数）：沿轴排序后首尾固定，中间按等间距分布（Figma 惯例，间距相等）。
+ * 成员 < 3 返回 null（无可分布中间项）；成员重叠致负间距返回空数组（宿主静默跳过）。
+ */
+export function distributeBoxes<N extends Pick<NodeGeom, 'id' | 'x' | 'y' | 'w' | 'h'>>(
+  shapes: readonly N[], ids: readonly string[], axis: DistributeAxis,
+): PosPatch[] | null {
+  const ms = shapes.filter((s) => ids.includes(s.id))
+  if (ms.length < 3) return null
+  const posKey: 'x' | 'y' = axis === 'h' ? 'x' : 'y'
+  const sizeKey: 'w' | 'h' = axis === 'h' ? 'w' : 'h'
+  const sorted = [...ms].sort((a, b) => a[posKey] - b[posKey])
+  const first = sorted[0]
+  const last = sorted[sorted.length - 1]
+  const span = last[posKey] + last[sizeKey] - first[posKey]
+  const totalSize = sorted.reduce((acc, s) => acc + s[sizeKey], 0)
+  const gap = (span - totalSize) / (sorted.length - 1)
+  if (!(gap >= 0)) return []
+  const patches: PosPatch[] = []
+  let cursor = first[posKey]
+  for (const s of sorted) {
+    patches.push(axis === 'h' ? { id: s.id, x: Math.round(cursor), y: s.y } : { id: s.id, x: s.x, y: Math.round(cursor) })
+    cursor += s[sizeKey] + gap
+  }
+  return patches
 }
 
 // ---------- 纯几何：连线标注沿线 / 端点吸附 / 橡皮筋 ----------

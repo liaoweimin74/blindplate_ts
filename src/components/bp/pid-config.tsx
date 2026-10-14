@@ -7,7 +7,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database, Expand, Factory, Fan, FileSignature,
+  AlertTriangle, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter,
+  AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, ArrowDown, ArrowLeft, ArrowUp, BadgeCheck, ChevronDown, Circle, Copy, Database,
+  Expand, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, Link2, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Redo2, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer, Undo2,
   Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon,
@@ -65,7 +67,9 @@ import {
   createCanvasController, resizeBox, fixedCornerOf, labelTAt, snapConnEnd, isTinyLineDraft, connExists, rewireConnTarget,
   // 框选橡皮筋（Phase 3：'select' 手势配套命中测试，Vue 壳共用）
   hitTestRect, normRect, isRealRubber,
-  type LineDraft, type ConnEndTarget, type RubberRect,
+  // 多选对齐 / 均匀分布（Phase 3：多选工具条配套纯函数，Vue 壳共用）
+  alignBoxes, distributeBoxes,
+  type LineDraft, type ConnEndTarget, type RubberRect, type AlignMode, type DistributeAxis,
   // 几何
   clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline,
   anchorPoint, anchorPointT, physAnchor, outward, anchorZoneBox, nearestFreeAnchorAt, nearestAnchorAt,
@@ -1371,6 +1375,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [hoverShapeId, setHoverShapeId] = useState<string | null>(null)
   const [hoverAnchor, setHoverAnchor] = useState<string | null>(null)
   const [pendingConn, setPendingConn] = useState<{ shapeId: string; anchor: Anchor; t?: number } | null>(null)
+  // 连线拖拽草稿（Phase 3 手势化）：从锚点环带按住拖到目标图元一步创建；轻点不接管，click 流两步连线保持兼容
+  const [connDraft, setConnDraft] = useState<{ fromShape: string; anchor: Anchor; t?: number; x: number; y: number; hover: ConnEndTarget | null } | null>(null)
   const [mousePos, setMousePos] = useState<RoutePoint | null>(null)
   const [placingShape, setPlacingShape] = useState<PidShapeType | null>(null)
   const [placingStdId, setPlacingStdId] = useState<string | null>(null)
@@ -1381,6 +1387,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [rubber, setRubber] = useState<RubberRect | null>(null) // 框选橡皮筋（画布坐标，渲染用）
   const rubberRef = useRef<RubberRect | null>(null)
   const [replaceDlgOpen, setReplaceDlgOpen] = useState(false)
+  const [alignOpen, setAlignOpen] = useState(false) // 多选工具条「对齐/均分」弹出面板（bulkIds 清空时自动收起）
   const [replaceTargetIds, setReplaceTargetIds] = useState<string[]>([]) // 进入对话框时的目标图元快照（防中途删除悬空）
   const [dlgSearch, setDlgSearch] = useState('')
   const [dlgOpenGroups, setDlgOpenGroups] = useState<Record<string, boolean>>({}) // 对话框分组折叠（独立于侧栏；开对话框时复位）
@@ -2639,6 +2646,40 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const deleteBulkShapesRef = useRef(deleteBulkShapes)
   deleteBulkShapesRef.current = deleteBulkShapes
 
+  // ---- 多选对齐 / 均匀分布（Phase 3）：core 纯函数出补丁，单次 mutate = 单笔撤销事务 ----
+  const applyAlign = (m: AlignMode) => {
+    const patches = alignBoxes(contentRef.current.shapes, bulkIds, m)
+    if (!patches.length) return
+    mutate((prev) => ({
+      ...prev,
+      shapes: prev.shapes.map((sh) => {
+        const p = patches.find((q) => q.id === sh.id)
+        return p ? { ...sh, x: p.x, y: p.y } : sh
+      }),
+    }))
+  }
+  const applyDistribute = (axis: DistributeAxis) => {
+    const patches = distributeBoxes(contentRef.current.shapes, bulkIds, axis)
+    if (patches === null) {
+      toast({ title: '无法均分', description: '均匀分布至少需要 3 个图元' })
+      return
+    }
+    if (!patches.length) {
+      toast({ title: '无法均分', description: '选中图元沿该轴相互重叠，请先拉开间距' })
+      return
+    }
+    mutate((prev) => ({
+      ...prev,
+      shapes: prev.shapes.map((sh) => {
+        const p = patches.find((q) => q.id === sh.id)
+        return p ? { ...sh, x: p.x, y: p.y } : sh
+      }),
+    }))
+  }
+  useEffect(() => {
+    if (!bulkIds.length) setAlignOpen(false) // 退出多选自动收起对齐面板
+  }, [bulkIds.length])
+
   // ---- 以选中图元为基础复制新建（副本偏移 24px，保持形状/尺寸/颜色/标签，便于在既有图元上改造） ----
   const duplicateShape = (s: PidShape) => {
     const copy: PidShape = {
@@ -2854,6 +2895,26 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     setSelected({ kind: 'conn', id })
   }
 
+  /** 创建连线共享提交（两步点击 / 拖拽手势共用）：同图元同边静默拒绝（视为取消）+ 同向查重 + 端点 t 归一化 */
+  const commitConn = (from: { shapeId: string; anchor: Anchor; t?: number }, to: { shapeId: string; anchor: Anchor; t?: number }): boolean => {
+    if (from.shapeId === to.shapeId && from.anchor === to.anchor) return false
+    if (connExists(contentRef.current.connections, from, to)) {
+      toast({ title: '连线已存在', description: '相同方向的连线已存在，已跳过创建' })
+      return false
+    }
+    const ft = freeT(from.t)
+    const tt = freeT(to.t)
+    mutate((prev) => ({
+      ...prev,
+      connections: [...prev.connections, {
+        id: uid('c'), fromShape: from.shapeId, fromAnchor: from.anchor, toShape: to.shapeId, toAnchor: to.anchor,
+        ...(ft !== undefined ? { fromT: ft } : {}),
+        ...(tt !== undefined ? { toT: tt } : {}),
+      }],
+    }))
+    return true
+  }
+
   const onAnchorClick = (e: React.MouseEvent<SVGElement>, shapeId: string, anchor: Anchor, t?: number) => {
     e.stopPropagation()
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
@@ -2864,23 +2925,39 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       setSelected({ kind: 'shape', id: shapeId }) // 首击同时选中源图元，属性面板立即可用
       return
     }
-    const { shapeId: fromShape, anchor: fromAnchor, t: fromT } = pendingConn
+    const from = pendingConn
     setPendingConn(null)
-    if (fromShape === shapeId && fromAnchor === anchor) return // 同图元同边再点视为取消（同边不同位置也取消，避免误建零长连线）
-    if (connExists(content.connections, { shapeId: fromShape, anchor: fromAnchor, t: fromT }, { shapeId, anchor, t })) {
-      toast({ title: '连线已存在', description: '相同方向的连线已存在，已跳过创建' })
-      return
-    }
-    const ft = freeT(fromT)
-    const tt = freeT(t)
-    mutate((prev) => ({
-      ...prev,
-      connections: [...prev.connections, {
-        id: uid('c'), fromShape, fromAnchor, toShape: shapeId, toAnchor: anchor,
-        ...(ft !== undefined ? { fromT: ft } : {}),
-        ...(tt !== undefined ? { toT: tt } : {}),
-      }],
-    }))
+    void commitConn(from, { shapeId, anchor, t }) // 同图元同边 = commitConn 静默拒绝（取消语义，与重构前一致）
+  }
+
+  // ---- 连线拖拽手势（Phase 3）：锚点环带按住拖到目标图元一步创建（松手即连，吸附反馈实时）——
+  //      轻点（位移 < 4）不接管，click 流两步连线保持兼容；拖拽过则抑制紧随 click 防误触两步流 ----
+  const startConnDraft = (e: React.PointerEvent<SVGElement>, s: PidShape) => {
+    if (mode !== 'edit' || placingShape || placingMark || placingSymbol || pendingConn) return
+    e.stopPropagation() // 环带内按下不触发本体拖动（环带是本体 g 的子元素）
+    const start = toSvgPoint(e)
+    if (!start) return
+    const fa = nearestFreeAnchorAt(s, start.x, start.y)
+    const from = { shapeId: s.id, anchor: fa.anchor, t: fa.t }
+    canvasCtl.run({
+      kind: 'conn-draft',
+      targetId: s.id,
+      start,
+      moveThreshold: 4,
+      onMove: (p, _sess, first) => {
+        if (first) canvasCtl.guard.arm('shapeClick') // 拖拽过：紧随 click 不作连线两步流处理
+        const hover = snapConnEnd(contentRef.current.shapes, p.x, p.y)
+        setConnDraft({ fromShape: s.id, anchor: from.anchor, t: from.t, x: p.x, y: p.y, hover })
+      },
+      onEnd: (p, sess) => {
+        setConnDraft(null)
+        if (!sess.moved) return // 轻点：让位 click → onAnchorClick 两步连线
+        canvasCtl.guard.arm('click') // 空白松手吞 click：不清选择
+        const target = p ? snapConnEnd(contentRef.current.shapes, p.x, p.y) : null
+        if (!target) return // 空白松手：取消，不落连线
+        void commitConn(from, { shapeId: target.shapeId, anchor: target.anchor, t: target.t })
+      },
+    })
   }
 
   /** 连线折线提供器（挂接几何用，Task 73）：与渲染同源（anchorPointT 旋转感知 + physAnchor + routeConnection） */
@@ -3561,6 +3638,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 <path
                   d={hitPath} fillRule="evenodd" fill="transparent" pointerEvents="all"
                   className="cursor-crosshair"
+                  onPointerDown={(e) => startConnDraft(e, s)}
                   onPointerMove={(e) => {
                     const p = toSvgPoint(e)
                     if (!p) return
@@ -4254,6 +4332,22 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       )
                     })()}
 
+                    {/* 连线拖拽草稿（Phase 3 手势化）：锚点环带按住拖动——dashed 引导线 + 目标吸附点（松手即连） */}
+                    {mode === 'edit' && connDraft && (() => {
+                      const from = shapeMap.get(connDraft.fromShape)
+                      if (!from) return null
+                      const a = anchorPointT(from, connDraft.anchor, connDraft.t)
+                      const hov = connDraft.hover ? shapeMap.get(connDraft.hover.shapeId) : null
+                      const hp = hov && connDraft.hover ? anchorPointT(hov, connDraft.hover.anchor, connDraft.hover.t) : null
+                      return (
+                        <g pointerEvents="none">
+                          <line x1={a.x} y1={a.y} x2={connDraft.x} y2={connDraft.y} stroke={TEAL} strokeWidth={2} strokeDasharray="6 4" opacity={0.9} />
+                          {hp && <circle cx={hp.x} cy={hp.y} r={6} fill={TEAL} stroke="#fff" strokeWidth={1.5} />}
+                          <circle cx={connDraft.x} cy={connDraft.y} r={3.5} fill={TEAL} />
+                        </g>
+                      )
+                    })()}
+
                     {/* 连线挂起：跟随鼠标的 dashed 引导线 */}
                     {mode === 'edit' && pendingConn && mousePos &&
                       (() => {
@@ -4676,6 +4770,79 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       >
                         <Replace className="h-3.5 w-3.5" /> 替换成…
                       </button>
+                      {bulkIds.length >= 2 && (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            title="对齐 / 均匀分布（以全体包围盒为基准）"
+                            aria-expanded={alignOpen}
+                            aria-label="对齐与均匀分布"
+                            className={cn(
+                              'flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                              alignOpen ? 'bg-teal-50 text-teal-700' : 'text-stone-600 hover:bg-stone-100',
+                            )}
+                            onClick={() => setAlignOpen((v) => !v)}
+                          >
+                            <AlignCenterVertical className="h-3.5 w-3.5" /> 对齐
+                            <ChevronDown className={cn('h-3 w-3 transition-transform', alignOpen && 'rotate-180')} />
+                          </button>
+                          {alignOpen && (
+                            <div
+                              role="menu"
+                              aria-label="对齐与均匀分布操作"
+                              className="absolute left-1/2 top-full z-30 mt-1.5 -translate-x-1/2 rounded-lg border border-stone-200 bg-white p-1.5 shadow-lg"
+                            >
+                              <div className="grid grid-cols-6 gap-0.5">
+                                {([
+                                  { mode: 'left', icon: AlignStartVertical, title: '左对齐' },
+                                  { mode: 'hcenter', icon: AlignCenterVertical, title: '水平居中' },
+                                  { mode: 'right', icon: AlignEndVertical, title: '右对齐' },
+                                  { mode: 'top', icon: AlignStartHorizontal, title: '顶对齐' },
+                                  { mode: 'vcenter', icon: AlignCenterHorizontal, title: '垂直居中' },
+                                  { mode: 'bottom', icon: AlignEndHorizontal, title: '底对齐' },
+                                ] as Array<{ mode: AlignMode; icon: LucideIcon; title: string }>).map((it) => (
+                                  <button
+                                    key={it.mode}
+                                    type="button"
+                                    role="menuitem"
+                                    title={it.title}
+                                    aria-label={it.title}
+                                    className="flex h-7 w-7 items-center justify-center rounded text-stone-600 transition-colors hover:bg-teal-50 hover:text-teal-700"
+                                    onClick={() => applyAlign(it.mode)}
+                                  >
+                                    <it.icon className="h-3.5 w-3.5" />
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="my-1 h-px bg-stone-100" />
+                              <div className="grid grid-cols-6 gap-0.5">
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  title={bulkIds.length >= 3 ? '水平均分（首尾固定，中间等间距）' : '水平均分（至少 3 个图元）'}
+                                  aria-label="水平均分"
+                                  disabled={bulkIds.length < 3}
+                                  className="flex h-7 w-7 items-center justify-center rounded text-stone-600 transition-colors hover:bg-teal-50 hover:text-teal-700 disabled:pointer-events-none disabled:opacity-35"
+                                  onClick={() => applyDistribute('h')}
+                                >
+                                  <AlignHorizontalDistributeCenter className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  title={bulkIds.length >= 3 ? '垂直均分（首尾固定，中间等间距）' : '垂直均分（至少 3 个图元）'}
+                                  aria-label="垂直均分"
+                                  disabled={bulkIds.length < 3}
+                                  className="flex h-7 w-7 items-center justify-center rounded text-stone-600 transition-colors hover:bg-teal-50 hover:text-teal-700 disabled:pointer-events-none disabled:opacity-35"
+                                  onClick={() => applyDistribute('v')}
+                                >
+                                  <AlignVerticalDistributeCenter className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <button
                         type="button"
                         title="批量删除选中图元（Delete）"
@@ -5321,7 +5488,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                           <ul className="ml-5 list-disc space-y-1">
                             <li>点选图元，右上角浮出工具条：编辑源图元 · 以此图元为基础新建副本 · 存为自定义图元 · 替换成…（保留位置/尺寸/名称/连线）· 删除</li>
                             <li>按住图元拖动移位；选中后拖动四角手柄缩放（圆形自动锁定正圆比例）；属性面板 X/Y 数值精调</li>
-                            <li>Shift/Ctrl/Cmd 点击可多选，多选后浮条支持批量替换与批量删除；<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Ctrl+D</kbd> 快速复制，<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Delete</kbd> 删除选中</li>
+                            <li>Shift/Ctrl/Cmd 点击或 Shift+空白框选可多选，多选后浮条支持批量替换、对齐/均匀分布与批量删除；<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Ctrl+D</kbd> 快速复制，<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Delete</kbd> 删除选中</li>
                           </ul>
                         </section>
                         {/* 三、连线与锚点 */}
@@ -5330,7 +5497,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                             <Spline className="h-3.5 w-3.5 shrink-0 text-teal-600" />三、连线与锚点
                           </div>
                           <ul className="ml-5 list-disc space-y-1">
-                            <li>点一个图元的边框环带挂起连线，再点目标图元本体或边框任意位置完成——<b className="text-stone-700">点哪连哪</b>，锚点即点击位置在最近边上的落点，正交折线自动生成</li>
+                            <li>点一个图元的边框环带挂起连线，再点目标图元本体或边框任意位置完成——<b className="text-stone-700">点哪连哪</b>，锚点即点击位置在最近边上的落点，正交折线自动生成；也可以<b className="text-stone-700">从边框环带直接按住拖到目标图元</b>一步连线（松手即连，拖拽中有吸附点实时反馈）</li>
                             <li>拖动/缩放图元后连线实时跟随；按住连线端点可拖拽改接到其他图元或锚点</li>
                             <li>连线中点出现 ×，点击删除连线；<kbd className="rounded border border-stone-300 bg-stone-50 px-1 font-mono text-[10px]">Esc</kbd> 取消连线挂起</li>
                           </ul>
