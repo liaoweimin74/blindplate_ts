@@ -10,23 +10,22 @@
  *    本装置图（preferUnitId）优先排序，其余按最近更新倒序；
  *    标题区出现「多图命中」切换条，可手动换图定位查看。
  * 复用 pid-config 的 ShapeBody / MarkGlyph / routeConnection 渲染，与组态编辑器视觉一致。
+ * Task 126：视口状态机/缩放平移/俯瞰图/控制条全部收敛至 configurator/diagram-viewer 壳，
+ *    本文件只保留数据编排（图加载/点位命中/实时状态）与场景渲染。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { apiGet } from '@/lib/bp-api'
 import {
   anchorPointT, routeConnection, shapeLabelY, ShapeBody, MarkGlyph, normalizeState,
-  CANVAS_W, CANVAS_H, GRID_S, GRID_L, LINE, STROKE, ROSE, minimapBoundsOf,
-  IsoState, ISO_STATE_KEYS, ISO_STATE_STYLE, PidContent, PidMark,
+  CANVAS_W, CANVAS_H, LINE, IsoState, ISO_STATE_KEYS, ISO_STATE_STYLE, PidContent, PidMark,
 } from './pid-config'
-import { MapPin, Crosshair, ZoomIn, ZoomOut, ImageOff, LocateFixed, Workflow, Layers, Map as MapIcon, X } from 'lucide-react'
+import { MapPin, Crosshair, ImageOff, LocateFixed, Workflow, Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
-// 视口数学直连 core（Phase 4 去重：此前与 pid-config 各持一份逐行相同的 zoomAt/onWheel/minimapNavTo）
-import { zoomViewport, minimapNavigateWorld, panByScreen, createCanvasController } from '@/lib/configurator-core'
-import { useWheelZoom } from '@/components/configurator/use-wheel-zoom'
+import { DiagramViewer, type DiagramViewportApi } from '@/components/configurator/diagram-viewer'
+import { PidMinimapScene } from './pid-minimap-scene'
 
 /** 可定位的隔离点（兼容方案隔离点 / 作业票点位两种来源） */
 export interface LocatePoint {
@@ -69,6 +68,8 @@ const parseContent = (raw: unknown): PidContent => {
   }
 }
 
+const FOCUS_Z = 3 // 定位初始倍率（视口宽 = CANVAS_W/3，100% = 全图）
+
 export function PidLocateDialog({
   open, onClose, points, initialIndex = 0, preferUnitId = null,
 }: {
@@ -82,23 +83,14 @@ export function PidLocateDialog({
   const [loading, setLoading] = useState(false)
   const [diagrams, setDiagrams] = useState<DiagramLite[]>([])
   const [activeIdx, setActiveIdx] = useState(initialIndex)
-  const [boxW, setBoxW] = useState(0)
   const [stateMap, setStateMap] = useState<Map<string, { state: IsoState; stateLabel: string }>>(new Map())
   const [picks, setPicks] = useState<Record<string, number>>({})
-  const boxRef = useRef<HTMLDivElement>(null)
 
-  // ---- 画布视口（viewBox 方案，与 PID 组态主画布同款）：拖拽平移 + 滚轮缩放 + 俯瞰图导航，画布无边界 ----
-  const CANVAS_MIN_W = CANVAS_W / 4   // 最大放大 4x
-  const CANVAS_MAX_W = CANVAS_W * 2.5 // 最大缩小 0.4x
-  const FOCUS_Z = 3                   // 定位初始倍率（视口宽 = CANVAS_W/3，100% = 全图）
-  const [vb, setVb] = useState({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H })
-  const vbRef = useRef(vb)
-  vbRef.current = vb
-  const [panning, setPanning] = useState(false)
-  const [minimapOpen, setMinimapOpen] = useState(false)
-  const minimapNavRef = useRef(false) // 俯瞰图按下拖拽导航中（pointer capture 保证移动/抬起事件回到缩略图）
-  const focusKeyRef = useRef('')      // 已聚焦的定位目标语义 key（防父组件重渲染打断用户视角）
-  const svgRef = useRef<SVGSVGElement | null>(null)
+  // ---- 视图控制：状态机/缩放/平移/俯瞰全部由 DiagramViewer 壳托管（Task 126 收敛）；
+  //      定位聚焦经 apiRef 命令式驱动（focusKey 语义守卫：父组件重渲染导致
+  //      activeHit 引用变化但定位目标未变时，不打断用户当前视角） ----
+  const viewerApiRef = useRef<DiagramViewportApi | null>(null)
+  const focusKeyRef = useRef('')
 
   // ---- 打开时加载全部图详情（列表 API 不含 content，逐张拉取；量级小，并发安全） ----
   useEffect(() => {
@@ -181,82 +173,18 @@ export function PidLocateDialog({
     return () => { cancelled = true }
   }, [open, activeDiagram?.id])
 
-  // ---- 容器宽度测量（内层 svg 固定 1200x700，外层按宽度裁剪出取景框） ----
-  useEffect(() => {
-    const el = boxRef.current
-    if (!el || !open) return
-    const measure = () => setBoxW(el.clientWidth)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [open, loading])
-
-  const boxH = boxW > 0 ? Math.round((boxW * CANVAS_H) / CANVAS_W) : 0
-
-  // ---- 视图控制（锚点缩放/聚焦/复位/平移；数学在 core/viewport 与 pid-config 同源） ----
-  const applyVb = useCallback((next: { x: number; y: number; w: number }) => {
-    const w = Math.max(CANVAS_MIN_W, Math.min(CANVAS_MAX_W, next.w))
-    setVb({ x: next.x, y: next.y, w, h: (w * CANVAS_H) / CANVAS_W })
-  }, [])
-  const zoomAt = useCallback((factor: number, ax?: number, ay?: number) => {
-    const next = zoomViewport(vbRef.current, factor, CANVAS_MIN_W, CANVAS_MAX_W, ax, ay)
-    applyVb(next)
-  }, [applyVb])
-  const focusView = useCallback((m: { x: number; y: number }) => {
-    const w = CANVAS_W / FOCUS_Z
-    applyVb({ x: m.x - w / 2, y: m.y - ((w * CANVAS_H) / CANVAS_W) / 2, w })
-  }, [applyVb])
-  const resetView = useCallback(() => setVb({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H }), [])
-
-  // 滚轮缩放（以鼠标位置为锚点）：绑定生命周期在 useWheelZoom，数学在 core/viewport.wheelZoomIntent；
-  // loading / 无图阶段不绑定，bindKey=图 id：svg 随图切换重挂载后重新绑定
-  useWheelZoom(svgRef, { enabled: !loading, bindKey: activeDiagram?.id ?? 0, vbRef, zoomAt })
-
   // 定位点/所属图/候选图变化 → 视角自动聚焦；未挂标点 → 全景概览
-  // （focusKey 语义守卫：父组件重渲染导致 activeHit 引用变化但定位目标未变时，不打断用户当前视角）
+  // （api 未就绪时不落 focusKeyRef：子壳 effect 先于父 effect 执行，挂载轮即重试成功）
   const focusKey = activeHit ? `${activeHit.diagramId}:${activeHit.mark.id}` : 'none'
   useEffect(() => {
     if (!open) return
     if (focusKeyRef.current === focusKey) return
+    const api = viewerApiRef.current
+    if (!api) return
     focusKeyRef.current = focusKey
-    if (activeHit) focusView(activeHit.mark)
-    else resetView()
-  }, [open, focusKey, activeHit, focusView, resetView])
-
-  // 空白拖拽平移（画布本身无点击语义，无需位移阈值；手势会话走 core createCanvasController 与 pid-config 同源）
-  const canvasCtl = useMemo(() => createCanvasController<{ x: number; y: number }>({ toPoint: (cx, cy) => ({ x: cx, y: cy }) }), [])
-  const startPan = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (e.button !== 0) return
-    const svg = svgRef.current
-    if (!svg) return
-    const startCx = e.clientX
-    const startCy = e.clientY
-    const startVb = vbRef.current
-    canvasCtl.run({
-      kind: 'pan',
-      start: { x: startCx, y: startCy },
-      toPoint: (cx, cy) => ({ x: cx, y: cy }),
-      onMove: (p) => {
-        setPanning(true)
-        const s = svg.getBoundingClientRect().width / startVb.w
-        applyVb(panByScreen(startVb, p.x - startCx, p.y - startCy, s))
-      },
-      onEnd: () => setPanning(false),
-    })
-  }
-
-  // ---- 俯瞰图导航：点击/拖拽缩略图 → 视口中心移动到对应世界坐标（保持当前缩放倍率）；
-  //      letterbox 逆换算在 core/viewport.minimapNavigateWorld 与 pid-config 同源 ----
-  const minimapNavTo = (clientX: number, clientY: number, navSvg: SVGSVGElement) => {
-    const w = minimapNavigateWorld(clientX, clientY, navSvg.getBoundingClientRect(), minimapBoundsOf(vbRef.current))
-    if (!w) return
-    const v = vbRef.current
-    setVb({ x: w.x - v.w / 2, y: w.y - v.h / 2, w: v.w, h: v.h })
-  }
-
-  // 俯瞰图世界包围盒（画布区域 ∪ 当前视口 + 留白）：随平移/缩放动态扩展，无限画布下视口永在框内
-  const mmBounds = minimapBoundsOf(vb)
+    if (activeHit) api.focusOn(activeHit.mark.x, activeHit.mark.y, CANVAS_W / FOCUS_Z)
+    else api.resetView()
+  }, [open, focusKey, activeHit])
 
   const marked = points.filter((p) => hits.has(p.key)).length
 
@@ -340,45 +268,32 @@ export function PidLocateDialog({
           </div>
         )}
 
-        {/* 画布取景框 */}
-        <div
-          ref={boxRef}
-          className="relative w-full overflow-hidden rounded-lg border bg-white"
-          style={{ height: boxH > 0 ? boxH : 340 }}
-        >
-          {loading ? (
+        {/* 画布取景框：骨架屏 / 无图引导 / DiagramViewer 查看壳（视口+俯瞰+控制条全托管） */}
+        {loading ? (
+          <div className="w-full overflow-hidden rounded-lg border bg-white" style={{ aspectRatio: `${CANVAS_W} / ${CANVAS_H}` }}>
             <Skeleton className="h-full w-full rounded-none" />
-          ) : !activeDiagram ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-stone-400">
-              <Workflow className="h-8 w-8 text-stone-300" />
-              <p className="text-xs">暂无已保存的 PID 组态图</p>
-              <p className="text-[11px] text-stone-400">请先到「台账管理 → PID 组态」绘制并保存组态图</p>
-            </div>
-          ) : (
-            <>
-              <svg
-                ref={svgRef}
-                viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
-                className={cn('absolute inset-0 block h-full w-full touch-none select-none', panning ? 'cursor-grabbing' : 'cursor-grab')}
-                onPointerDown={startPan}
-              >
-                <defs>
-                  <pattern id="bp-loc-grid-s" width={20} height={20} patternUnits="userSpaceOnUse">
-                    <path d="M 20 0 L 0 0 0 20" fill="none" stroke={GRID_S} strokeWidth={1} />
-                  </pattern>
-                  <pattern id="bp-loc-grid-l" width={100} height={100} patternUnits="userSpaceOnUse">
-                    <rect width={100} height={100} fill="url(#bp-loc-grid-s)" />
-                    <path d="M 100 0 L 0 0 0 100" fill="none" stroke={GRID_L} strokeWidth={1.2} />
-                  </pattern>
-                  <marker id="bp-loc-arrow" viewBox="0 0 10 10" refX={9} refY={5} markerWidth={5.5} markerHeight={5.5} orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill={LINE} />
-                  </marker>
-                </defs>
-                {/* 无限桌面：白底+网格跟随视口（3 倍视口尺寸，拖到任何位置都有桌面）；画布原点区域虚线标界 */}
-                <rect x={vb.x - vb.w} y={vb.y - vb.h} width={vb.w * 3} height={vb.h * 3} fill="#fff" />
-                <rect x={vb.x - vb.w} y={vb.y - vb.h} width={vb.w * 3} height={vb.h * 3} fill="url(#bp-loc-grid-l)" />
-                <rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} fill="none" stroke="#d6d3d1" strokeWidth={1.2} strokeDasharray="12 8" vectorEffect="non-scaling-stroke" />
-
+          </div>
+        ) : !activeDiagram ? (
+          <div className="flex h-[340px] flex-col items-center justify-center gap-2 rounded-lg border bg-white text-stone-400">
+            <Workflow className="h-8 w-8 text-stone-300" />
+            <p className="text-xs">暂无已保存的 PID 组态图</p>
+            <p className="text-[11px] text-stone-400">请先到「台账管理 → PID 组态」绘制并保存组态图</p>
+          </div>
+        ) : (
+          <DiagramViewer
+            worldW={CANVAS_W}
+            worldH={CANVAS_H}
+            enabled
+            bindKey={activeDiagram.id}
+            desktop
+            onViewportApi={(api) => { viewerApiRef.current = api }}
+            defs={
+              <marker id="bp-loc-arrow" viewBox="0 0 10 10" refX={9} refY={5} markerWidth={5.5} markerHeight={5.5} orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={LINE} />
+              </marker>
+            }
+            scene={
+              <>
                 {/* 连线（与编辑器一致的正交折弯；方向 forward 起点→终点 / reverse 终点→起点 / none 无向） */}
                 {activeDiagram.content.connections.map((c) => {
                   const a = activeDiagram.content.shapes.find((s) => s.id === c.fromShape)
@@ -433,162 +348,40 @@ export function PidLocateDialog({
                     <circle cx={activeHit.mark.x} cy={activeHit.mark.y} r={3} fill="#d97706" />
                   </g>
                 )}
-              </svg>
-
-              {/* 未挂标引导浮层 */}
-              {active && !activeHit && (
-                <div className="absolute inset-x-4 top-3 z-10 rounded-lg border border-amber-200 bg-amber-50/95 px-3 py-2 shadow-sm">
-                  <div className="flex items-start gap-2">
-                    <ImageOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                    <div className="text-[11px] leading-relaxed text-amber-800">
-                      <p className="font-medium">隔离点 <span className="font-mono">{active.code}</span> 尚未在 PID 组态图中挂标，暂无法定位</p>
-                      <p className="text-amber-700/80">请到「台账管理 → PID 组态」打开本装置组态图，使用「标注隔离点」工具为该点添加挂标后即可定位查看</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 视图控制（左下角悬浮）：档位缩放 + 俯瞰图开关 + 定位回中 + 操作提示 */}
-              <div className="absolute bottom-3 left-3 z-10 flex items-center gap-1 rounded-lg border bg-white/95 p-1 shadow-sm">
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-stone-500" onClick={() => zoomAt(1 / 1.3)} title="缩小">
-                  <ZoomOut className="h-3.5 w-3.5" />
-                </Button>
-                <span className="w-10 text-center text-[10px] font-mono text-stone-500">{Math.round((CANVAS_W / vb.w) * 100)}%</span>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-stone-500" onClick={() => zoomAt(1.3)} title="放大">
-                  <ZoomIn className="h-3.5 w-3.5" />
-                </Button>
-                <div className="mx-0.5 h-4 w-px bg-stone-200" />
-                <Button
-                  variant="ghost" size="sm"
-                  className={cn('h-7 w-7 p-0', minimapOpen ? 'text-emerald-600' : 'text-stone-500')}
-                  onClick={() => setMinimapOpen((v) => !v)}
-                  title="俯瞰图开关：画布右下角显示整图缩略导航，点击/拖拽缩略图快速移动视口"
-                  aria-pressed={minimapOpen}
+              </>
+            }
+            minimapScene={(bounds) => (
+              <PidMinimapScene content={activeDiagram.content} bounds={bounds} targetMarkId={activeHit?.mark.id ?? null} />
+            )}
+            extra={
+              activeHit ? (
+                <button
+                  type="button"
+                  title="回到定位点"
+                  aria-label="回到定位点"
+                  className="flex h-7 items-center rounded px-1.5 text-[10px] text-teal-700 transition-colors hover:bg-teal-50"
+                  onClick={() => viewerApiRef.current?.focusOn(activeHit.mark.x, activeHit.mark.y, CANVAS_W / FOCUS_Z)}
                 >
-                  <MapIcon className="h-3.5 w-3.5" />
-                </Button>
-                {activeHit && (
-                  <Button variant="ghost" size="sm" className="h-7 px-1.5 text-[10px] text-teal-700" onClick={() => focusView(activeHit.mark)} title="回到定位点">
-                    <Crosshair className="mr-0.5 h-3 w-3" />定位
-                  </Button>
-                )}
-              </div>
-
-              {/* 俯瞰图（开关控制，画布右下角）：整图缩略 + 图元/连线/隔离点简化轮廓 + 当前视口 amber 框 + 定位点 amber 光环，点击/拖拽快速定位 */}
-              {minimapOpen && activeDiagram && (
-                <div className="absolute bottom-3 right-3 z-10 overflow-hidden rounded-lg border border-stone-200 bg-white/95 shadow-md backdrop-blur">
-                  <div className="flex items-center justify-between gap-2 border-b border-stone-100 py-1 pl-2 pr-1">
-                    <span className="flex select-none items-center gap-1 text-[10px] font-medium text-stone-500">
-                      <MapIcon className="h-3 w-3" />
-                      俯瞰图
+                  <Crosshair className="mr-0.5 h-3 w-3" />定位
+                </button>
+              ) : undefined
+            }
+            legend={
+              /* 六态图例（单行紧凑：无左侧标签占位，窄屏横向滚动不换行） */
+              <div className="mt-2 flex flex-nowrap items-center gap-x-3 gap-y-0 overflow-x-auto bp-thin-scrollbar" role="list" aria-label="状态图例">
+                {ISO_STATE_KEYS.map((k) => {
+                  const st = ISO_STATE_STYLE[k]
+                  return (
+                    <span key={k} role="listitem" className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+                      <span className="inline-block h-2.5 w-2.5 shrink-0 rotate-45 rounded-[2px] border" style={{ background: st.fill, borderColor: st.stroke }} />
+                      {st.legend}
                     </span>
-                    <span className="hidden select-none text-[9px] text-stone-400 sm:inline">点击/拖拽定位</span>
-                    <button
-                      type="button"
-                      title="关闭俯瞰图（左下角可重新打开）"
-                      className="rounded p-0.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-                      onClick={() => setMinimapOpen(false)}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                  <svg
-                    viewBox={`${mmBounds.x} ${mmBounds.y} ${mmBounds.w} ${mmBounds.h}`}
-                    className="block h-28 w-44 cursor-pointer touch-none sm:h-32 sm:w-52"
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return
-                      e.preventDefault()
-                      minimapNavRef.current = true
-                      try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 旧环境无 capture，点击定位仍可用 */ }
-                      minimapNavTo(e.clientX, e.clientY, e.currentTarget)
-                    }}
-                    onPointerMove={(e) => {
-                      if (minimapNavRef.current) minimapNavTo(e.clientX, e.clientY, e.currentTarget)
-                    }}
-                    onPointerUp={(e) => {
-                      minimapNavRef.current = false
-                      try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* 忽略 */ }
-                    }}
-                    onPointerCancel={() => { minimapNavRef.current = false }}
-                  >
-                    <g pointerEvents="none">
-                      {/* 世界背景：画布区域白底、视口外微灰（画布原点参照） */}
-                      <rect x={mmBounds.x} y={mmBounds.y} width={mmBounds.w} height={mmBounds.h} fill="#f5f5f4" />
-                      <rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} fill="#fff" stroke="#e7e5e4" vectorEffect="non-scaling-stroke" />
-                      {/* 连线（锚点直线近似，细线不随缩略图缩放变粗） */}
-                      {activeDiagram.content.connections.map((c) => {
-                        const f = activeDiagram.content.shapes.find((s) => s.id === c.fromShape)
-                        const t = activeDiagram.content.shapes.find((s) => s.id === c.toShape)
-                        if (!f || !t) return null
-                        const a = anchorPointT(f, c.fromAnchor, c.fromT)
-                        const b = anchorPointT(t, c.toAnchor, c.toT)
-                        return (
-                          <line
-                            key={c.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                            stroke={LINE} strokeWidth={1} vectorEffect="non-scaling-stroke" opacity={0.65}
-                          />
-                        )
-                      })}
-                      {/* 图元（按类型简化轮廓，保留填充/描边色） */}
-                      {activeDiagram.content.shapes.map((s) => {
-                        const fill = s.fill && s.fill !== 'transparent' ? s.fill : '#fff'
-                        const stroke = s.stroke ?? STROKE
-                        if (s.type === 'line') {
-                          return s.flip
-                            ? <line key={s.id} x1={s.x} y1={s.y + s.h} x2={s.x + s.w} y2={s.y} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                            : <line key={s.id} x1={s.x} y1={s.y} x2={s.x + s.w} y2={s.y + s.h} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                        }
-                        if (s.type === 'circle') {
-                          return <circle key={s.id} cx={s.x + s.w / 2} cy={s.y + s.h / 2} r={Math.min(s.w, s.h) / 2} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                        }
-                        if (s.type === 'ellipse') {
-                          return <ellipse key={s.id} cx={s.x + s.w / 2} cy={s.y + s.h / 2} rx={s.w / 2} ry={s.h / 2} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                        }
-                        if (s.type === 'triangle') {
-                          return <polygon key={s.id} points={`${s.x},${s.y + s.h} ${s.x + s.w},${s.y + s.h} ${s.x + s.w / 2},${s.y}`} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                        }
-                        return <rect key={s.id} x={s.x} y={s.y} width={s.w} height={s.h} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                      })}
-                      {/* 隔离点标注（玫红菱形；目标定位点 amber 加大 + 光环） */}
-                      {activeDiagram.content.marks.map((m) => {
-                        const isTarget = activeHit?.mark.id === m.id
-                        const r = (mmBounds.w / 40) * (isTarget ? 1.9 : 1)
-                        return (
-                          <polygon
-                            key={m.id}
-                            points={`${m.x},${m.y - r} ${m.x + r},${m.y} ${m.x},${m.y + r} ${m.x - r},${m.y}`}
-                            fill={isTarget ? '#f59e0b' : ROSE} stroke="#fff" strokeWidth={1} vectorEffect="non-scaling-stroke"
-                          />
-                        )
-                      })}
-                      {activeHit && (
-                        <circle cx={activeHit.mark.x} cy={activeHit.mark.y} r={mmBounds.w / 26} fill="none" stroke="#f59e0b" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-                      )}
-                      {/* 当前视口（amber，与定位高亮同色语言） */}
-                      <rect
-                        x={vb.x} y={vb.y} width={vb.w} height={vb.h}
-                        fill="rgba(245,158,11,0.15)" stroke="#f59e0b" strokeWidth={1.5} vectorEffect="non-scaling-stroke"
-                      />
-                    </g>
-                  </svg>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* 六态图例（单行紧凑：无左侧标签占位，窄屏横向滚动不换行） */}
-        <div className="flex flex-nowrap items-center gap-x-3 gap-y-0 overflow-x-auto bp-thin-scrollbar" role="list" aria-label="状态图例">
-          {ISO_STATE_KEYS.map((k) => {
-            const st = ISO_STATE_STYLE[k]
-            return (
-              <span key={k} role="listitem" className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
-                <span className="inline-block h-2.5 w-2.5 shrink-0 rotate-45 rounded-[2px] border" style={{ background: st.fill, borderColor: st.stroke }} />
-                {st.legend}
-              </span>
-            )
-          })}
-        </div>
+                  )
+                })}
+              </div>
+            }
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

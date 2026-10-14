@@ -739,3 +739,25 @@ Stage Summary:
 - 风险提示：本次 30 提交中含 2 个历史 UUID 快照提交（ea6e956/8e8a50b 时代仅 db churn），已随历史入库属既有口径，不再 rewrite
 - 【push 成功（用户供 PAT）】用户提供 fine-grained PAT→追加 .env（GITHUB_TOKEN 恰 1 处，check-ignore 确认不追踪）→GET /user 鉴权=liaoweimin74 (id 73637681) 本人→凭据经内联 credential helper+env 注入推送（token 不落命令行不落 .git/config）→bbb32da..f7b9927 推送成功 31 提交（Task 116 组态引擎框架无关化全套 + Task 123 徽章热区 + Task 124 视口数学下沉 + Task 125 交接）→三方验证 LOCAL==REMOTE==f7b9927、ahead 0 零残留
 - 【运维口径】PAT 用后留存 .env 备下次推送（平台沙箱重置会再次抹除，属第 6 次同款风险，纪律不变：缺失即向用户索取）
+
+---
+Task ID: 126
+Agent: 主会话(Z.ai Code)
+Task: diagram-viewer 只读查看组件壳——「SVG 渲染+缩放平移+图例+显隐开关」收敛，三处消费方接入替换 + E2E 回归
+
+Work Log:
+- 【重复清单】精读三消费方固化重复面：①视口状态机（vb/applyVb/zoomAt/resetView/startPan/wheel/容器测量）pid-config↔pid-locate 逐行同源 ②俯瞰图 UI+导航手势两份 ~100 行 ③缩放控制条三份 ④俯瞰简化场景两份 ~55 行 ⑤pid-import 原图查看器为 scale+scroll 模型（独一份）
+- 【套件落地】新建 configurator/diagram-viewer.tsx（562 行，零 bp 依赖）：useDiagramViewport（vb 状态机/锚点缩放/拖拽平移/滚轮绑定/容器测量/percent 口径 base=world|container/aspect|measure 双高宽比策略）+ ViewerControls（±/%/复位/俯瞰开关/显隐 toggles/extra）+ ViewerMinimap（浮层框+pointer capture 导航+amber 视口框）+ DiagramViewer 组合壳（desktop 无限桌面+useId 防冲突 pattern+onViewportApi 命令式外泄）；bp 层新建 pid-minimap-scene.tsx（78 行共享俯瞰场景，bounds 自适应菱形半径，targetMarkId amber 高亮）
+- 【接入①pid-locate】610→402 行全量换 DiagramViewer：视口/俯瞰/控制条/桌面网格全部壳托管；定位聚焦经 onViewportApi→focusOn（focusKey 语义守卫保留）；八处 E2E：开弹窗即 300%（FOCUS_Z=3 精确）、点位切换 amber 环迁移 (759,189)、俯瞰开关/图例行/定位回中全在位
+- 【接入②pid-import】原图查看器重写为 DiagramViewer image 模式（scale+scroll→viewBox 窗口裁剪）：naturalSize 预读 effect→世界尺寸，base100=container（1:1=容器宽）、initial=width（整图适宽）、measure 比例；1:1/适应宽度入控制条 extra；E2E：2400×1400 徽章✓ 1:1=100%+scale≈1✓ 滚轮 1.12 锚点✓ 拖拽 dx=-51.1=期望值✓
+- 【接入③pid-config】外科手术式套件化（6124→5936 行）：状态机/控制条/俯瞰图三块替换为 useDiagramViewport+ViewerControls（四显隐开关转 toggles props）+ViewerMinimap（场景转 PidMinimapScene）；编辑手势语义保真（startPan moveThreshold=4 + onMovedEnd→canvasCtl.guard.arm('click')）；画布 svg/场景渲染/行高测量零改动
+- 【E2E·agent-browser】admin 登录（验证码直读）→pid-config 查看态：缩放 100→156%✓ 俯瞰开+导航落点=-259.2 精确✓ 管线名开关 18→0→18✓（注：IP- 前缀是隔离点编号属另一开关，管线码正则 ^AUTO-P|\d{3}-[A-Z]\d{3} 才是徽章）拖拽平移 dx=-81.7=1/scale 精确✓ 滚轮 1.12✓ 复位 0 0 1200 700+100%✓ →编辑态：34 图元 cursor-move✓ E103 本体点击 selRing=true✓（点选须落 ShapeBody 本体洞内，环带属连线草稿——Task 123 权界复认）
+- 【E2E 排坑】①Radix 外点关闭：后台元素合成 pointerdown 冒泡至 document 会被判弹窗外交互关闭弹窗（pid-import 查看器首次被误关）→弹窗内交互全部限定弹窗元素 ②querySelector('svg') 会串到 lucide 图标（24×24）与背景画布→一律 cursor-grab/cursor-pointer 类+弹窗作用域 ③同步读 vb 在 setState flush 前取旧值→跨 eval 读 ④tab 需 pointerdown+up+click 三连派发 ⑤window 全局不跨 eval 持久
+- 【E2E 实测修】container 基准 maxW=base/minZoom 可能 < worldW（454/0.2=2270<2400）→fitWorld 被缩放下限夹住永远看不到整图宽→maxW=Math.max(base/minZoom, worldW) 修复并注释固化；复核老实现同有此限（老 fit clamp 至 20% 仅近似贴合），重写后修正
+- 【静态】tsc src 零错误；ESLint 仅存量 5（PPT 脚本）；dev.log 全程零 error；新代码过 react-hooks v6 四条新规（refs 禁渲染期写→effect 同步/禁改 hook 入参→onViewportApi 回调外泄/observer 回调内 setState 合法化）
+
+Stage Summary:
+- 组态查看壳四件套落位：三消费方视口/俯瞰/控制条重复清零（净删 ~400 行），pid-import 查看器由 scroll 模型升级为与主画布同源的 viewBox 模型（滚轮锚点缩放+拖拽平移补齐）
+- 框架无关契约再验证：壳仅依赖 core/viewport 纯函数+useWheelZoom 薄壳，Vue 壳可按同 API 组装（core 数学+DOM 绑定各写各的）
+- 遗留小刺：①viewer 容器测量取 Radix 开窗动画中间帧（percent 显示偏差 ~5%，RO 稳定后自愈）②pid-import 提取等待期无取消按钮（存量）
+- 下一阶段：Task 127 Phase 4 本体（pid-config 业务对齐重写：主数据绑定/隔离点标志/装置归属/底图）

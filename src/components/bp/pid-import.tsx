@@ -3,7 +3,7 @@
 // 安全纪律：识别结果仅作草稿，逐项人工确认后才写库；位号为空的项无法导入；主数据按编码幂等（已存在自动复用）
 import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Copy, FileImage, Loader2, Maximize2, Scan, Sparkles, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Copy, FileImage, Loader2, Maximize2, Scan, Sparkles, Upload, X, ZoomIn } from 'lucide-react'
 import { apiGet, apiPost } from '@/lib/bp-api'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -19,6 +19,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { DiagramViewer, type DiagramViewportApi } from '@/components/configurator/diagram-viewer'
 
 // ============ 类型 ============
 interface EqRow { enabled: boolean; code: string; name: string; type: string; x: number | null; y: number | null; w: number | null; h: number | null }
@@ -89,9 +90,8 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
   const [origData, setOrigData] = useState<string | null>(null)
   const [origNatural, setOrigNatural] = useState<{ w: number; h: number } | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
-  const [zoom, setZoom] = useState(1) // 1 = 原始尺寸 100%
-  const ZOOM_MIN = 0.2
-  const ZOOM_MAX = 4
+  // Task 126：缩放状态机收敛至 DiagramViewer（container 基准 1:1 + 20%~400%）
+  const viewerApiRef = useRef<DiagramViewportApi | null>(null)
   const [extracting, setExtracting] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [importing, setImporting] = useState(false)
@@ -106,6 +106,23 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
   }, [])
 
   useEffect(() => () => stopPolling(), [stopPolling])
+
+  // 需求6：原图 naturalSize 预读（svg image 世界尺寸依赖；上传时即读，早于打开查看器完成）
+  useEffect(() => {
+    if (!origData) {
+      setOrigNatural(null)
+      return
+    }
+    let cancelled = false
+    const img = new window.Image()
+    img.onload = () => {
+      if (!cancelled) setOrigNatural({ w: img.naturalWidth, h: img.naturalHeight })
+    }
+    img.src = origData
+    return () => {
+      cancelled = true
+    }
+  }, [origData])
 
   const [diagName, setDiagName] = useState('')
   const [unitMode, setUnitMode] = useState<'existing' | 'new'>('existing')
@@ -124,7 +141,6 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
     setOrigData(null)
     setOrigNatural(null)
     setViewerOpen(false)
-    setZoom(1)
     setExtracting(false)
     setImporting(false)
     setDiagName('')
@@ -163,7 +179,6 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
       })
       setOrigData(origUrl)
       setOrigNatural(null)
-      setZoom(1)
       dataUrl = await loadImageAsDataUrl(file)
     } catch (err) {
       toast({ title: '图片读取失败', description: (err as Error).message, variant: 'destructive' })
@@ -530,7 +545,8 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
       </DialogContent>
     </Dialog>
 
-    {/* 原图查看器（需求6）：跳出窗口按原始尺寸展示未压缩原图，支持放大缩小/1:1/适应窗口，容器滚动/拖动查看细节 */}
+    {/* 原图查看器（需求6 · Task 126 壳化）：DiagramViewer image 模式——窗口式裁剪（measure 实测比例）
+        默认整图适宽；滚轮缩放/拖拽平移/±/1:1/适应宽度，20%~400% */}
     <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
       <DialogContent className="flex max-w-[94vw] flex-col gap-3 p-3 sm:p-4">
         <DialogHeader className="space-y-0.5">
@@ -544,75 +560,55 @@ export function PidImportWizard({ open, onOpenChange, units, onDone }: PidImport
             )}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            默认按原始尺寸 100% 显示；滚动/拖动查看细节，可放大至 400% 或缩小至 20%
+            默认整图适宽展示；滚轮缩放/拖拽平移查看细节，可放大至 400% 或缩小至 20%，支持 1:1 原始像素
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-center gap-0.5 rounded-lg border bg-white px-1 py-1">
-          <button
-            type="button"
-            title="缩小"
-            aria-label="缩小原图"
-            className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={zoom <= ZOOM_MIN + 0.001}
-            onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z / 1.25))}
-          >
-            <ZoomOut className="h-4 w-4" />
-          </button>
-          <span className="w-12 select-none text-center font-mono text-xs font-medium text-stone-600">{Math.round(zoom * 100)}%</span>
-          <button
-            type="button"
-            title="放大"
-            aria-label="放大原图"
-            className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={zoom >= ZOOM_MAX - 0.001}
-            onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z * 1.25))}
-          >
-            <ZoomIn className="h-4 w-4" />
-          </button>
-          <div className="mx-0.5 h-4 w-px bg-stone-200" />
-          <button
-            type="button"
-            title="原始尺寸（100%）"
-            aria-label="重置为原始尺寸"
-            className={cn('rounded p-1.5 transition-colors', zoom === 1 ? 'bg-violet-50 text-violet-700' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-800')}
-            onClick={() => setZoom(1)}
-          >
-            <Maximize2 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            title="适应窗口宽度"
-            aria-label="适应窗口宽度"
-            className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
-            onClick={() => {
-              if (!origNatural) return
-              const containerW = Math.max(320, (typeof window !== 'undefined' ? window.innerWidth : 1200) * 0.86)
-              setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, containerW / origNatural.w)))
-            }}
-          >
-            <Scan className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="h-[66vh] overflow-auto rounded-md border bg-stone-200/60 bp-thin-scrollbar">
-          {origData ? (
-            <Image
-              src={origData}
-              alt="PID 图纸原图"
-              width={origNatural?.w ?? 1600}
-              height={origNatural?.h ?? 1200}
-              unoptimized
-              draggable={false}
-              className="block max-w-none select-none"
-              style={{ width: origNatural ? Math.round(origNatural.w * zoom) : 'auto', height: 'auto' }}
-              onLoad={(e) => {
-                const t = e.currentTarget
-                setOrigNatural((prev) => (prev ?? { w: t.naturalWidth, h: t.naturalHeight }))
-              }}
+        {origData && (
+          origNatural ? (
+            <DiagramViewer
+              worldW={origNatural.w}
+              worldH={origNatural.h}
+              base100="container"
+              minZoom={0.2}
+              maxZoom={4}
+              ratio="measure"
+              initial="width"
+              enabled
+              bindKey={`${origNatural.w}x${origNatural.h}`}
+              boxClassName="bg-stone-200/60"
+              boxStyle={{ height: '66vh' }}
+              onViewportApi={(api) => { viewerApiRef.current = api }}
+              scene={<image href={origData} x={0} y={0} width={origNatural.w} height={origNatural.h} />}
+              extra={
+                <>
+                  <div className="mx-0.5 h-4 w-px bg-stone-200" />
+                  <button
+                    type="button"
+                    title="原始尺寸（100%）"
+                    aria-label="重置为原始尺寸"
+                    className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+                    onClick={() => viewerApiRef.current?.setPercent(100)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    title="适应窗口宽度"
+                    aria-label="适应窗口宽度"
+                    className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+                    onClick={() => viewerApiRef.current?.fitWorld()}
+                  >
+                    <Scan className="h-4 w-4" />
+                  </button>
+                </>
+              }
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-stone-400">未加载原图</div>
-          )}
-        </div>
+            <div className="flex h-[66vh] items-center justify-center rounded-md border bg-stone-200/60">
+              <Loader2 className="h-5 w-5 animate-spin text-stone-400" />
+            </div>
+          )
+        )}
       </DialogContent>
     </Dialog>
     </>

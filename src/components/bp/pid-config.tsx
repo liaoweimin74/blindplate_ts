@@ -69,8 +69,7 @@ import {
   hitTestRect, normRect, isRealRubber,
   // 多选对齐 / 均匀分布（Phase 3：多选工具条配套纯函数，Vue 壳共用）
   alignBoxes, distributeBoxes,
-  // 视口数学（Phase 4：viewBox 缩放/平移/俯瞰图导航唯一下沉点，pid-locate 共用）
-  zoomViewport, minimapNavigateWorld,
+  // 视口数学（Phase 4：viewBox 缩放/平移/俯瞰图导航唯一下沉点；Task 126 状态机收敛至 useDiagramViewport）
   type LineDraft, type ConnEndTarget, type RubberRect, type AlignMode, type DistributeAxis,
   // 几何
   clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline,
@@ -81,7 +80,8 @@ import {
   autoLayout, type SymbolRegistry,
 } from '@/lib/configurator-core'
 import { SymbolPalette, NodePropertyPanel, NumField, ColorSwatches } from '@/components/configurator'
-import { useWheelZoom } from '@/components/configurator/use-wheel-zoom'
+import { useDiagramViewport, ViewerControls, ViewerMinimap } from '@/components/configurator/diagram-viewer'
+import { PidMinimapScene } from './pid-minimap-scene'
 import {
   buildStdRegistry, buildBasicRegistry, buildCustomRegistry, pidTypeLibOf, pidTypeLabel,
   pidThumbRenderer, customRowIdOf, PID_TYPE_LIBRARY, type PidTypeLibItem,
@@ -1360,7 +1360,6 @@ function SymbolEditor({ ctx, currentUser, onClose, onSaved }: {
 // ============ 主模块 ============
 export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }: ModuleProps & { readOnly?: boolean }) {
   const { toast } = useToast()
-  const svgRef = useRef<SVGSVGElement | null>(null)
 
   // ---- 数据 ----
   const [diagrams, setDiagrams] = useState<DiagramMeta[]>([])
@@ -1400,22 +1399,21 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [lineDraft, setLineDraft] = useState<LineDraft | null>(null)
   const lineDraftRef = useRef<LineDraft | null>(null)
 
-  // ---- 画布平移缩放（viewBox 方案：内容坐标零侵入，编辑/查看/只读三态通用） ----
-  const CANVAS_MIN_W = CANVAS_W / 4   // 最大放大 4x
-  const CANVAS_MAX_W = CANVAS_W * 2.5 // 最大缩小 0.4x
-  const [vb, setVb] = useState({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_H })
-  const vbRef = useRef(vb)
-  vbRef.current = vb
-  const [panning, setPanning] = useState(false)
-
-  // ---- 画布自适应高度（占满视口剩余）：viewBox 高宽比跟随容器实测比例，无 letterbox 坐标偏移 ----
-  const [canvasRatio, setCanvasRatio] = useState(CANVAS_H / CANVAS_W)
-  const canvasRatioRef = useRef(canvasRatio)
-  canvasRatioRef.current = canvasRatio
+  // ---- 画布平移缩放（viewBox 方案：内容坐标零侵入，编辑/查看/只读三态通用；
+  //      Task 126 状态机收敛至 useDiagramViewport：vb/锚点缩放/拖拽平移/滚轮/容器测量一站式） ----
   const canvasBoxRef = useRef<HTMLDivElement | null>(null)
   const canvasRowRef = useRef<HTMLDivElement | null>(null)
+  const vp = useDiagramViewport({
+    worldW: CANVAS_W,
+    worldH: CANVAS_H,
+    minZoom: 0.4,          // 最大缩小 0.4x（原 CANVAS_MAX_W = CANVAS_W×2.5）
+    maxZoom: 4,            // 最大放大 4x（原 CANVAS_MIN_W = CANVAS_W/4）
+    ratio: 'measure',      // 容器实测比：画布占满可用高度，无 letterbox 坐标偏移
+    enabled: !detailLoading,
+  })
+  const { vb, setVb, vbRef, svgRef, zoomAt, resetView, panning, percent: zoomPercent, atMin: zoomAtMin, atMax: zoomAtMax } = vp
+  const canvasW = vp.containerW // 浮动工具条定位 clamp 用
   const [canvasH, setCanvasH] = useState(0) // 0 = 未测量（回落到画布比例兜底）
-  const [canvasW, setCanvasW] = useState(0) // 浮动工具条定位 clamp 用
   // click 误触抑制时间戳已收敛至 canvasCtl.guard（平移/图元拖动/连线/落笔四类，core ClickGuard）
 
   // ---- 画布文字/角标显隐四开关（缩放悬浮栏控制，编辑/查看通用；默认全显示）：设备名 / 管线名 / 标注文字 / 绑定角标 ----
@@ -1442,9 +1440,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   }
   const [markHover, setMarkHover] = useState<{ id: string; x: number; y: number } | null>(null)
 
-  // ---- 俯瞰图（工具栏开关，画布右下角显示：整图缩略 + 当前视口框，点击/拖拽快速定位） ----
+  // ---- 俯瞰图（工具栏开关，画布右下角显示：整图缩略 + 当前视口框，点击/拖拽快速定位；
+  //      Task 126 浮层框/导航手势收敛至 ViewerMinimap） ----
   const [minimapOpen, setMinimapOpen] = useState(false)
-  const minimapNavRef = useRef(false) // 俯瞰图按下拖拽导航中（pointer capture 保证移动/抬起事件回到缩略图）
 
   // ---- 面板折叠（图元库/属性面板）：localStorage 记忆开关状态，移动端首次默认折叠给画布留空间 ----
   const [libCollapsed, setLibCollapsed] = useState(false)
@@ -1597,7 +1595,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const selectedConn = selected?.kind === 'conn' ? content.connections.find((c) => c.id === selected.id) ?? null : null
   const selectedMark = selected?.kind === 'mark' ? content.marks.find((m) => m.id === selected.id) ?? null : null
   // 俯瞰图世界包围盒（画布区域 ∪ 当前视口 + 留白）：随平移/缩放动态扩展，无限画布下视口永在框内
-  const mmBounds = minimapBoundsOf(vb)
+  const mmBounds = vp.bounds
 
   // ---- 挂标跨图占用提示（写入侧对称提示：该点已在其他 N 张图挂标，防多图版本漂移） ----
   const [markUsage, setMarkUsage] = useState<{ diagramName: string; unitName: string | null }[] | null>(null)
@@ -1755,47 +1753,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   // 捕获首帧 toSvgPoint 闭包安全：其仅读 svgRef/vbRef 两个稳定 ref，跨渲染恒取最新值）
   const canvasCtl = useMemo(() => createCanvasController<RoutePoint>({ toPoint: (cx, cy) => toSvgPoint({ clientX: cx, clientY: cy }) }), [])
 
-  // ---- 视图控制：缩放（锚点为中心）/ 重置 / 空白拖拽平移 ----
-  const applyVb = useCallback((next: { x: number; y: number; w: number }) => {
-    const w = clamp(next.w, CANVAS_MIN_W, CANVAS_MAX_W)
-    const h = w * canvasRatioRef.current // 高宽比跟随容器实测（画布占满可用高度，无 letterbox）
-    // 画布无限大：平移不设边界（白底/网格跟随视口，任意位置都是可绘制桌面）；跑远了用俯瞰图或重置视图找回
-    setVb({ x: next.x, y: next.y, w, h })
-  }, [])
-  const zoomAt = useCallback((factor: number, ax?: number, ay?: number) => {
-    // 锚点缩放数学在 core/viewport.zoomViewport（与 pid-locate 同源）；h 由 applyVb 按容器实测比例回填
-    const cur = vbRef.current
-    const next = zoomViewport(cur, factor, CANVAS_MIN_W, CANVAS_MAX_W, ax, ay)
-    applyVb(next)
-  }, [applyVb])
-  const resetView = useCallback(() => setVb({ x: 0, y: 0, w: CANVAS_W, h: CANVAS_W * canvasRatioRef.current }), [])
-
-  // 容器实测比例（ResizeObserver）：画布高度自适应后 viewBox 高宽比 = 容器比，屏幕坐标换算零偏移
-  useEffect(() => {
-    const el = canvasBoxRef.current
-    if (!el) return
-    const measure = () => {
-      const r = el.getBoundingClientRect()
-      if (r.width > 4 && r.height > 4) {
-        setCanvasW(Math.round(r.width))
-        setCanvasRatio(r.height / r.width)
-      }
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [detailLoading])
-
-  // 比例变化（容器尺寸变化）时同步校正当前视口高度（保持 x/y/w）
-  useEffect(() => {
-    setVb((v) => {
-      const h = v.w * canvasRatio
-      return Math.abs(h - v.h) < 0.5 ? v : { ...v, h }
-    })
-  }, [canvasRatio])
-
-  // 画布高度 = 视口剩余高度（三栏行显式撑满，页面恰为一屏；回顶时重新校准避免滚动偏移干扰）
+  // ---- 视图控制（Task 126）：缩放/重置/滚轮绑定/平移换算全部由 useDiagramViewport 托管；
+  //      画布高度 = 视口剩余高度（三栏行显式撑满，页面恰为一屏；回顶时重新校准避免滚动偏移干扰）
+  //      为编辑器布局关注，保留在本地 ----
   useEffect(() => {
     const measure = () => {
       const row = canvasRowRef.current
@@ -1813,41 +1773,13 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }, [detailLoading, full])
 
-  // 滚轮缩放（以鼠标位置为锚点）：事件绑定生命周期在 useWheelZoom（React 适配层薄壳），
-  // 数学在 core/viewport.wheelZoomIntent（与 pid-locate 同源）；detailLoading 参与 enabled：骨架屏阶段 svg 未挂载
-  useWheelZoom(svgRef, { enabled: !detailLoading, vbRef, zoomAt })
-
+  // 空白拖拽平移：视口状态机在 useDiagramViewport（Task 126）；编辑器语义在此对齐——
+  // 轻点（<4px）保留原有点击语义（取消选中/打开档案），实际拖拽过才吞 click 防误点挂标/误取消选中
   const startPan = (e: React.PointerEvent<SVGSVGElement>) => {
-    const svg = svgRef.current
-    if (!svg) return
-    const startCx = e.clientX
-    const startCy = e.clientY
-    const startVb = vbRef.current
-    canvasCtl.run({
-      kind: 'pan',
-      start: { x: startCx, y: startCy },
-      toPoint: (cx, cy) => ({ x: cx, y: cy }), // 平移工作在屏幕坐标系（viewBox 反向换算在 onMove 内做）
-      moveThreshold: 4, // 轻点（<4px）保留原有点击语义（取消选中/打开档案）
-      onMove: (p) => {
-        setPanning(true)
-        const s = svg.getBoundingClientRect().width / startVb.w
-        applyVb({ x: startVb.x - (p.x - startCx) / s, y: startVb.y - (p.y - startCy) / s, w: startVb.w })
-      },
-      onEnd: (_p, s) => {
-        setPanning(false)
-        // 实际拖拽过才吞 click：防误点挂标/误取消选中
-        if (s.moved) canvasCtl.guard.arm('click')
-      },
+    vp.startPan(e, {
+      moveThreshold: 4,
+      onMovedEnd: (moved) => { if (moved) canvasCtl.guard.arm('click') },
     })
-  }
-
-  // ---- 俯瞰图导航：点击/拖拽缩略图 → 画布视口中心移动到对应世界坐标（保持当前缩放倍率）；
-  //      letterbox 逆换算在 core/viewport.minimapNavigateWorld（与 pid-locate 同源） ----
-  const minimapNavTo = (clientX: number, clientY: number, svg: SVGSVGElement) => {
-    const w = minimapNavigateWorld(clientX, clientY, svg.getBoundingClientRect(), minimapBoundsOf(vbRef.current))
-    if (!w) return
-    const v = vbRef.current
-    setVb({ x: w.x - v.w / 2, y: w.y - v.h / 2, w: v.w, h: v.h })
   }
 
   // ---- 自动布局（编辑态工具栏）：确认弹窗 → 应用快照对比 + toast 撤销 ----
@@ -4453,179 +4385,59 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 )}
                 {!detailLoading && (
                   <>
-                  {/* 视图控制浮层（HTML 层实现，交互稳定不随画布缩放变形） */}
-                  <div className="absolute bottom-2.5 left-2.5 z-10 flex items-center gap-0.5 rounded-lg border border-stone-200 bg-white/95 p-1 shadow-sm backdrop-blur">
-                    <button
-                      type="button"
-                      title="缩小（或画布上滚动滚轮）"
-                      className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-                      disabled={vb.w >= CANVAS_MAX_W - 1}
-                      onClick={() => zoomAt(1 / 1.25)}
-                    >
-                      <Minus className="h-4 w-4" />
-                    </button>
-                    <span
-                      className="w-11 select-none text-center font-mono text-xs font-medium text-stone-600"
-                      title="当前缩放比例（1:1 = 100%）"
-                    >
-                      {Math.round((CANVAS_W / vb.w) * 100)}%
-                    </span>
-                    <button
-                      type="button"
-                      title="放大（或画布上滚动滚轮）"
-                      className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-                      disabled={vb.w <= CANVAS_MIN_W + 1}
-                      onClick={() => zoomAt(1.25)}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                    <div className="mx-0.5 h-4 w-px bg-stone-200" />
-                    <button
-                      type="button"
-                      title="重置视图（1:1 全景）"
-                      className="rounded p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
-                      onClick={resetView}
-                    >
-                      <RotateCcw className="h-4 w-4" />
-                    </button>
-                    <div className="mx-0.5 h-4 w-px bg-stone-200" />
-                    <button
-                      type="button"
-                      title={showDeviceLabels ? '设备名：显示中，点击隐藏图元名称文字' : '设备名：已隐藏，点击显示图元名称文字'}
-                      aria-pressed={showDeviceLabels}
-                      aria-label="设备名显示开关"
-                      className={cn('rounded p-1.5 transition-colors', showDeviceLabels ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
-                      onClick={() => toggleCanvasFlag(setShowDeviceLabels, 'bp-pid-show-device', !showDeviceLabels)}
-                    >
-                      <Factory className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      title={showPipeLabels ? '管线名：显示中，点击隐藏管线号徽章' : '管线名：已隐藏，点击显示管线号徽章'}
-                      aria-pressed={showPipeLabels}
-                      aria-label="管线名显示开关"
-                      className={cn('rounded p-1.5 transition-colors', showPipeLabels ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
-                      onClick={() => toggleCanvasFlag(setShowPipeLabels, 'bp-pid-show-pipe', !showPipeLabels)}
-                    >
-                      <Spline className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      title={showMarkText ? '标注文字：显示中，点击隐藏隔离点标注文字（仅保留状态色图标）' : '标注文字：已隐藏，点击恢复显示隔离点标注文字'}
-                      aria-pressed={showMarkText}
-                      aria-label="标注文字显示开关"
-                      className={cn('rounded p-1.5 transition-colors', showMarkText ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
-                      onClick={() => toggleCanvasFlag(setShowMarkText, 'bp-pid-show-mark', !showMarkText)}
-                    >
-                      <MapPin className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      title={showBindBadge ? '绑定角标：显示中，点击隐藏已绑定设备的图元中央角标' : '绑定角标：已隐藏，点击显示已绑定设备的图元中央角标'}
-                      aria-pressed={showBindBadge}
-                      aria-label="绑定角标显示开关"
-                      className={cn('rounded p-1.5 transition-colors', showBindBadge ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600')}
-                      onClick={() => toggleCanvasFlag(setShowBindBadge, 'bp-pid-show-badge', !showBindBadge)}
-                    >
-                      <Link2 className="h-4 w-4" />
-                    </button>
-                  </div>
+                  {/* 视图控制浮层（Task 126 收敛至 ViewerControls：±/%/复位 + 显隐四开关；HTML 层实现，交互稳定不随画布缩放变形） */}
+                  <ViewerControls
+                    percent={zoomPercent}
+                    onZoomIn={() => zoomAt(1.25)}
+                    onZoomOut={() => zoomAt(1 / 1.25)}
+                    atMin={zoomAtMin}
+                    atMax={zoomAtMax}
+                    onReset={resetView}
+                    toggles={[
+                      {
+                        key: 'device',
+                        label: showDeviceLabels ? '设备名：显示中，点击隐藏图元名称文字' : '设备名：已隐藏，点击显示图元名称文字',
+                        icon: <Factory className="h-4 w-4" />,
+                        on: showDeviceLabels,
+                        onToggle: () => toggleCanvasFlag(setShowDeviceLabels, 'bp-pid-show-device', !showDeviceLabels),
+                      },
+                      {
+                        key: 'pipe',
+                        label: showPipeLabels ? '管线名：显示中，点击隐藏管线号徽章' : '管线名：已隐藏，点击显示管线号徽章',
+                        icon: <Spline className="h-4 w-4" />,
+                        on: showPipeLabels,
+                        onToggle: () => toggleCanvasFlag(setShowPipeLabels, 'bp-pid-show-pipe', !showPipeLabels),
+                      },
+                      {
+                        key: 'mark',
+                        label: showMarkText ? '标注文字：显示中，点击隐藏隔离点标注文字（仅保留状态色图标）' : '标注文字：已隐藏，点击恢复显示隔离点标注文字',
+                        icon: <MapPin className="h-4 w-4" />,
+                        on: showMarkText,
+                        onToggle: () => toggleCanvasFlag(setShowMarkText, 'bp-pid-show-mark', !showMarkText),
+                      },
+                      {
+                        key: 'badge',
+                        label: showBindBadge ? '绑定角标：显示中，点击隐藏已绑定设备的图元中央角标' : '绑定角标：已隐藏，点击显示已绑定设备的图元中央角标',
+                        icon: <Link2 className="h-4 w-4" />,
+                        on: showBindBadge,
+                        onToggle: () => toggleCanvasFlag(setShowBindBadge, 'bp-pid-show-badge', !showBindBadge),
+                      },
+                    ]}
+                  />
 
-                  {/* 俯瞰图（工具栏开关控制）：整图缩略 + 图元/连线/隔离点简化轮廓 + 当前视口 amber 框，点击/拖拽快速定位（无限画布下远距离找回的主要手段） */}
-                  {minimapOpen && (
-                    <div className="absolute bottom-2.5 right-2.5 z-10 overflow-hidden rounded-lg border border-stone-200 bg-white/95 shadow-md backdrop-blur">
-                      <div className="flex items-center justify-between gap-2 border-b border-stone-100 py-1 pl-2 pr-1">
-                        <span className="flex select-none items-center gap-1 text-[10px] font-medium text-stone-500">
-                          <MapIcon className="h-3 w-3" />
-                          俯瞰图
-                        </span>
-                        <span className="hidden select-none text-[9px] text-stone-400 sm:inline">点击/拖拽定位</span>
-                        <button
-                          type="button"
-                          title="关闭俯瞰图（工具栏可重新打开）"
-                          className="rounded p-0.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-                          onClick={() => setMinimapOpen(false)}
-                        >
-                          <CloseIcon className="h-3 w-3" />
-                        </button>
-                      </div>
-                      <svg
-                        viewBox={`${mmBounds.x} ${mmBounds.y} ${mmBounds.w} ${mmBounds.h}`}
-                        className="block h-28 w-44 cursor-pointer touch-none sm:h-32 sm:w-52"
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return
-                          e.preventDefault()
-                          minimapNavRef.current = true
-                          try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 旧环境无 capture，点击定位仍可用 */ }
-                          minimapNavTo(e.clientX, e.clientY, e.currentTarget)
-                        }}
-                        onPointerMove={(e) => {
-                          if (minimapNavRef.current) minimapNavTo(e.clientX, e.clientY, e.currentTarget)
-                        }}
-                        onPointerUp={(e) => {
-                          minimapNavRef.current = false
-                          try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* 忽略 */ }
-                        }}
-                        onPointerCancel={() => { minimapNavRef.current = false }}
-                      >
-                        <g pointerEvents="none">
-                          {/* 世界背景：画布区域白底、视口外微灰（画布原点参照） */}
-                          <rect x={mmBounds.x} y={mmBounds.y} width={mmBounds.w} height={mmBounds.h} fill="#f5f5f4" />
-                          <rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} fill="#fff" stroke="#e7e5e4" vectorEffect="non-scaling-stroke" />
-                          {/* 连线（锚点直线近似，细线不随缩略图缩放变组） */}
-                          {content.connections.map((c) => {
-                            const f = shapeMap.get(c.fromShape)
-                            const t = shapeMap.get(c.toShape)
-                            if (!f || !t) return null
-                            const a = anchorPointT(f, c.fromAnchor, c.fromT)
-                            const b = anchorPointT(t, c.toAnchor, c.toT)
-                            return (
-                              <line
-                                key={c.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                                stroke={LINE} strokeWidth={1} vectorEffect="non-scaling-stroke" opacity={0.65}
-                              />
-                            )
-                          })}
-                          {/* 图元（按类型简化轮廓，保留填充/描边色） */}
-                          {content.shapes.map((s) => {
-                            const fill = s.fill && s.fill !== 'transparent' ? s.fill : '#fff'
-                            const stroke = s.stroke ?? STROKE
-                            if (s.type === 'line') {
-                              return s.flip
-                                ? <line key={s.id} x1={s.x} y1={s.y + s.h} x2={s.x + s.w} y2={s.y} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                                : <line key={s.id} x1={s.x} y1={s.y} x2={s.x + s.w} y2={s.y + s.h} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                            }
-                            if (s.type === 'circle') {
-                              return <circle key={s.id} cx={s.x + s.w / 2} cy={s.y + s.h / 2} r={Math.min(s.w, s.h) / 2} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                            }
-                            if (s.type === 'ellipse') {
-                              return <ellipse key={s.id} cx={s.x + s.w / 2} cy={s.y + s.h / 2} rx={s.w / 2} ry={s.h / 2} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                            }
-                            if (s.type === 'triangle') {
-                              return <polygon key={s.id} points={`${s.x},${s.y + s.h} ${s.x + s.w},${s.y + s.h} ${s.x + s.w / 2},${s.y}`} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                            }
-                            return <rect key={s.id} x={s.x} y={s.y} width={s.w} height={s.h} fill={fill} stroke={stroke} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                          })}
-                          {/* 隔离点标注（玫红菱形，世界半径随包围盒反向缩放保持屏幕可见） */}
-                          {content.marks.map((m) => {
-                            const r = mmBounds.w / 40
-                            return (
-                              <polygon
-                                key={m.id}
-                                points={`${m.x},${m.y - r} ${m.x + r},${m.y} ${m.x},${m.y + r} ${m.x - r},${m.y}`}
-                                fill={ROSE} stroke="#fff" strokeWidth={1} vectorEffect="non-scaling-stroke"
-                              />
-                            )
-                          })}
-                          {/* 当前视口（amber，与定位高亮同色语言） */}
-                          <rect
-                            x={vb.x} y={vb.y} width={vb.w} height={vb.h}
-                            fill="rgba(245,158,11,0.15)" stroke="#f59e0b" strokeWidth={1.5} vectorEffect="non-scaling-stroke"
-                          />
-                        </g>
-                      </svg>
-                    </div>
-                  )}
+                  {/* 俯瞰图（工具栏开关控制，Task 126 浮层框/导航手势收敛至 ViewerMinimap）：整图缩略 +
+                      图元/连线/隔离点简化轮廓（PidMinimapScene 共享场景）+ 当前视口 amber 框，
+                      点击/拖拽快速定位（无限画布下远距离找回的主要手段） */}
+                  <ViewerMinimap
+                    open={minimapOpen}
+                    bounds={mmBounds}
+                    vb={vb}
+                    onNavigate={vp.navToWorld}
+                    onClose={() => setMinimapOpen(false)}
+                    originW={CANVAS_W}
+                    originH={CANVAS_H}
+                    scene={<PidMinimapScene content={content} bounds={mmBounds} />}
+                  />
 
                   {/* 隔离点状态图例（查看模式）：画布右下角浮动浮层，单行紧凑、无左侧标签占位；
                       俯瞰图开启时自动上移至俯瞰图上方，窄屏横向滚动不换行 */}
