@@ -804,3 +804,26 @@ Stage Summary:
 - 方法论沉淀：①Bash stdout 污染应对（`[字母` 吞噬模式，交叉验证三件套=浏览器实测/Read 工具/python 内部布尔）②React 合成 PointerEvent 对框选类修饰键手势的注入不可靠（ctrl 通路可代测），真实浏览器行为以 CDP trusted 事件为准
 - 下一轮建议：①本修复与 d9661cc/c40dc4f 共 3 提交待 push（等用户指令）②Vue 壳 YAGNI 挂起不变③框选批量拖动（Phase 3 批量位移）未重测可作为下轮补充项
 
+
+---
+Task ID: 129
+Agent: 主会话(Z.ai Code)
+Task: 用户「继续下一轮」——Task 128 交接建议③框选批量拖动补测 + 自主新需求：图纸导出（SVG/PNG）+ 画布搜索定位
+
+Work Log:
+- 【开场处置】快照 hook 垃圾提交 2f1decd（仅 db churn，Task 123/125/128 同款第 4 次）→ reset --soft + restore --staged 清理，HEAD 收敛至 6a863d9，ahead 3 全为真实提交（d9661cc diagram-viewer / c40dc4f 底图 / 6a863d9 attachBox 修复）；.env GITHUB_TOKEN 本轮存活（7 次魔咒未触发）
+- 【进度考古】上一会话（context 耗尽前）已完成队列①②③④：Task 126 diagram-viewer 三消费方 + Task 127 Phase 4 底图全链路 + Task 128 手势回归双 bug 修复——本轮队列实质为「交接建议③补测 + 自主新需求」
+- 【功能面盘点】pid-config 已有：撤销/重做按钮（histSize 禁用态）/Delete/Ctrl+D/Esc 快捷键/框选批量拖删对齐（Task 89）；真实缺口×2：①图纸导出（全库无 toPng/toSvg/download 图纸能力）②画布内搜索定位（现有搜索仅为图元库侧栏过滤，无法按位号聚焦画布图元）
+- 【导出实现】buildExportSvg：flushSync 同步清零选中/悬停态（选中连线 rose 描边不入图）→ cloneNode → viewBox/width/height 固定 0 0 1200 700 → [data-noexport] 剥离（22 处渲染点标记：网格/原点框/空态提示/选中环/缩放手柄/锚点环带/命中 path/吸附点/橡皮筋/连线草稿/端点预览/放置幽灵×3/挂接提示/删除按钮）→ 白底 rect 从 3×vb 收缩为主图区域 → 内联 <style> 字体声明（克隆脱离应用 CSS 继承链）→ XMLSerializer；PNG：SVG→Image→2× canvas 光栅化（白底铺底，bgImage dataURL 不污染）；类名全剥实测定案：vector-effect 属性在元素自带 120 处，pid-std 类规则无依赖可安全剥离
+- 【搜索定位实现】computeLocateResults：图元匹配 label+绑定设备编码/名称（equipOptions 联查），隔离点匹配 code/name，上限 10 条；runLocate→vp.focusOn（图元长边×3.5 保留上下文/隔离点 w=300）+ locateHit amber 闪烁环（animate-pulse 2.6s 自消，切图清除）；工具条新增两 Popover（搜索定位/导出图纸），编辑/查看/只读三态通用，位于俯瞰开关分隔线之前
+- 【E2E·搜索定位全绿】①搜 E103 三类命中（图元/绑定设备/IP-E103 隔离点）②点选聚焦 vb=(425.25,168.32,304.5,309.37) 中心=图元中心 (577.5,323) 逐位吻合，amber 环 x=527=534-7 与 Task 128 基线 W87 精确互证 ③2.6s 环自消 ④隔离点定位环形 r=15 cx=543 cy=407 + vb w=300 精确
+- 【E2E·导出全绿】SVG 53.3KB：prolog/viewBox=0 0 1200 700/width×height/零 data-noexport/零网格/零 cursor 类/零选中环/含 E103 内容/连线 stroke-width=2（非选中 2.4，flushSync 清选实证：live selRing 导出后消失）/字体样式/xmlns 12 项断言通过；PNG 358KB：image/png magic bytes ✓ + toast ✓ + spinner 复位 ✓（拦截 URL.createObjectURL 捕获 Blob 验证，download 命令对程序化 a.click 不适用）
+- 【E2E·框选批量拖动全绿】Shift+空白橡皮筋 → 已选 6 个 ✓；成员 ring 世界坐标 before [[305,87],[528,296]] → 批量拖动 (+60,+40) 屏幕px → after [[470,197],[693,406]]，双成员位移 (165,110) 与期望 (60/k,40/k)=(165.25,110.17) 逐位吻合（Math.round 取整）✓ 选择保持 ✓ dirty 置位 ✓ 无意外 pan ✓；Ctrl+Z 后选区清空=applyHistSnapshot 设计行为（setBulkIds([])）
+- 【排障课】①批量拖动首测 vb 偏移 (-165,-110) 与 (+60,+40)px/k 逐位吻合=手势被当 pan——startDragShape 未触发的分发目标差异（ring.parentElement 跨 eval 引用 vs elementFromPoint 现取），body 命中法（Task 128 元老方法）稳定复现 ②symbol 型图元 ShapeBody 首个 rect 为部件局部坐标（x=8），批量位移读数须用选中环世界坐标（ring x = s.x-6）③agent-browser :has-text 选择器方言不支持→改 createObjectURL 拦截法捕获导出 Blob ④导出弹窗点击行不自动关闭，连点 trigger 会 toggle 关闭——测试须先查 rows 再兜底重开
+- 【静态】tsc 全项目仅 scripts/smoke-viewport.ts 1 个 Task 124 既有（历轮 tsc 均只查 src/）；ESLint 仅存量 5（PPT 脚本）；dev.log 全程零 error；编译 ✓ 6.2s
+
+Stage Summary:
+- PID 组态图纸交付能力补齐：SVG 矢量（1200×700 主图区域、白底无网格、交互层 22 处 data-noexport 全剥离、选中态 flushSync 清零后克隆）+ PNG 2× 位图（2400×1400）双格式导出
+- 画布搜索定位闭环：位号/设备绑定/隔离点编码三类命中 → focusOn 聚焦 + amber 脉冲环 2.6s 自消，与 pid-locate 定位体验同源（复用 useDiagramViewport.focusOn）
+- Task 128 交接建议③闭环：框选批量拖动 E2E 实测通过，Phase 3 批量位移证据链补全
+- 待办队列状态：①②③④全清（Task 126~129），Vue 壳 YAGNI 挂起不变，4 决策项仍待用户；本地 ahead 4（3 真实 + 本轮 1）待用户「push」

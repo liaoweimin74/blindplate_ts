@@ -5,6 +5,7 @@
 // 设计核心：连线只存锚点归属（fromShape/fromAnchor → toShape/toAnchor），折线路径在渲染时实时推导，拖拽/缩放后自动跟随
 //            自定义图元实例内嵌部件快照（parts + designW/H），库删除不影响已放置实例的渲染
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter,
@@ -12,7 +13,7 @@ import {
   Expand, Factory, Fan, FileSignature,
   FlaskConical, History, Hourglass, Link2, ListChecks, Loader2, MapPin, Maximize2, Minimize2, Minus, MonitorDot,
   MousePointer2, Map as MapIcon, MoveDiagonal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Plus, RefreshCw, Redo2, RotateCcw, Save, Search, Shapes, Sparkles, Spline, Square, Thermometer, Undo2,
-  Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon, Image as ImageIcon,
+  Download, FileImage, Replace, TicketCheck, Trash2, Triangle, Unlink, Wand2, Workflow, X as CloseIcon, Image as ImageIcon,
 } from 'lucide-react'
 import { ModuleProps, entryActionEventName } from '@/lib/bp-types'
 import {
@@ -1417,7 +1418,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   // boxRef 必须挂主画布裁剪容器：ResizeObserver 测 containerW（工具条渲染/定位）+ measure 比例回填
   // （Task 128 E2E 实测：漏挂 → containerW 恒 0，单选/多选浮动工具条永不渲染，且 measure 比例
   //   停留在初值 worldH/worldW，vb 与容器比例错配产生 letterbox，指针换算 y 向恒定偏差）
-  const { vb, setVb, vbRef, svgRef, attachBox: vpAttachBox, zoomAt, resetView, panning, percent: zoomPercent, atMin: zoomAtMin, atMax: zoomAtMax } = vp
+  const { vb, setVb, vbRef, svgRef, attachBox: vpAttachBox, zoomAt, resetView, focusOn, panning, percent: zoomPercent, atMin: zoomAtMin, atMax: zoomAtMax } = vp
   const canvasW = vp.containerW // 浮动工具条定位 clamp 用
   const [canvasH, setCanvasH] = useState(0) // 0 = 未测量（回落到画布比例兜底）
   // click 误触抑制时间戳已收敛至 canvasCtl.guard（平移/图元拖动/连线/落笔四类，core ClickGuard）
@@ -1685,6 +1686,157 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   undoContentRef.current = undoContent
   const redoContentRef = useRef(redoContent)
   redoContentRef.current = redoContent
+
+  // ---- 搜索定位（Task 129）：位号/设备绑定/隔离点编码 → focusOn 聚焦 + amber 闪烁环（2.6s 自消）----
+  const [locateOpen, setLocateOpen] = useState(false)
+  const [locateQuery, setLocateQuery] = useState('')
+  const [locateHit, setLocateHit] = useState<{ kind: 'shape' | 'mark'; id: string } | null>(null)
+  const locateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (locateTimerRef.current) clearTimeout(locateTimerRef.current) }, [])
+  // 切图后定位高亮/查询失效（闪烁环指向旧图图元无意义）
+  useEffect(() => { setLocateHit(null); setLocateQuery('') }, [activeId])
+
+  interface LocateResult { kind: 'shape' | 'mark'; id: string; title: string; sub: string }
+  /** 按关键字过滤当前图：图元匹配位号(label)与绑定设备编码/名称，隔离点匹配编码/名称；至多 10 条 */
+  const computeLocateResults = (raw: string): LocateResult[] => {
+    const q = raw.trim().toLowerCase()
+    if (!q || !activeDiagram) return []
+    const out: LocateResult[] = []
+    for (const s of content.shapes) {
+      const eq = s.equipmentId != null ? equipOptions.find((x) => x.id === s.equipmentId) : null
+      const hay = [s.label, eq?.code, eq?.name].filter(Boolean).join(' ').toLowerCase()
+      if (hay.includes(q)) {
+        out.push({ kind: 'shape', id: s.id, title: s.label || eq?.code || s.id, sub: eq ? `绑定设备 ${eq.code} ${eq.name}` : `图元 · ${s.type}` })
+        if (out.length >= 10) return out
+      }
+    }
+    for (const m of content.marks) {
+      const hay = `${m.code} ${m.name ?? ''}`.toLowerCase()
+      if (hay.includes(q)) {
+        out.push({ kind: 'mark', id: m.id, title: m.code, sub: m.name || '隔离点标注' })
+        if (out.length >= 10) return out
+      }
+    }
+    return out
+  }
+  /** 定位跳转：聚焦目标并保留周边上下文（宽度取图元长边 3.5 倍 / 隔离点固定 300 世界单位） */
+  const runLocate = (r: LocateResult) => {
+    setLocateOpen(false)
+    if (r.kind === 'shape') {
+      const s = shapeMap.get(r.id)
+      if (!s) return
+      focusOn(s.x + s.w / 2, s.y + s.h / 2, Math.max(s.w, s.h) * 3.5)
+    } else {
+      const m = content.marks.find((x) => x.id === r.id)
+      if (!m) return
+      focusOn(m.x, m.y, 300)
+    }
+    if (locateTimerRef.current) clearTimeout(locateTimerRef.current)
+    setLocateHit({ kind: r.kind, id: r.id })
+    locateTimerRef.current = setTimeout(() => setLocateHit(null), 2600)
+  }
+
+  // ---- 图纸导出（Task 129）：克隆画布 DOM → 剥离交互层（data-noexport）→ 白底固定主图区域 → SVG 矢量 / PNG 2× 位图 ----
+  const [exporting, setExporting] = useState(false)
+  /** 克隆当前画布为可交付 SVG 字符串：0 0 1200 700 主图区域，网格/原点框/选中环/手柄/橡皮筋/草稿/幽灵预览/定位闪烁环全部剥离 */
+  const buildExportSvg = (): string | null => {
+    const svgEl = svgRef.current
+    if (!svgEl) return null
+    // 选中/悬停态同步清零再克隆（flushSync 强制同步 flush 到 DOM）：选中连线为 rose 描边、选中环带等交互态不应入图
+    flushSync(() => {
+      setSelected(null)
+      setBulkIds([])
+      setHoverShapeId(null)
+      setHoverAnchor(null)
+      setMousePos(null)
+    })
+    const clone = svgEl.cloneNode(true) as SVGSVGElement
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+    clone.setAttribute('viewBox', `0 0 ${CANVAS_W} ${CANVAS_H}`)
+    clone.setAttribute('width', String(CANVAS_W))
+    clone.setAttribute('height', String(CANVAS_H))
+    clone.removeAttribute('class')
+    clone.removeAttribute('style')
+    // 类名全部剥离：应用层 cursor/动画类在独立 SVG 无样式定义且无意义；
+    // pid-std 的 vector-effect 兜底规则不依赖——映射器已在每个元素上写 vector-effect 属性（实测导出内含 120 处）
+    clone.querySelectorAll('[class]').forEach((el) => el.removeAttribute('class'))
+    // 交互层剥离：data-noexport 标记的网格/原点框/空态提示/选中环/手柄/橡皮筋/草稿等
+    clone.querySelectorAll('[data-noexport]').forEach((el) => el.remove())
+    // 白底从「3× 当前视口」收缩为固定主图区域（克隆自 DOM，几何为视口相对动态值）
+    const bg = clone.querySelector(':scope > rect[fill="#fff"]') as SVGRectElement | null
+    if (bg) {
+      bg.setAttribute('x', '0')
+      bg.setAttribute('y', '0')
+      bg.setAttribute('width', String(CANVAS_W))
+      bg.setAttribute('height', String(CANVAS_H))
+    }
+    // 内联字体声明（克隆脱离应用 CSS，text 元素的字体继承链断掉，独立 SVG 需自带）
+    const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style')
+    styleEl.textContent =
+      'text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}'
+    clone.insertBefore(styleEl, clone.firstChild)
+    return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`
+  }
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 4000) // 等 click 消费完成后再回收（Firefox 需延迟）
+  }
+  const handleExport = (fmt: 'svg' | 'png') => {
+    if (!activeDiagram || exporting) return
+    const str = buildExportSvg()
+    if (!str) {
+      toast({ title: '导出失败', description: '画布尚未就绪，请稍后重试', variant: 'destructive' })
+      return
+    }
+    const base = `${activeDiagram.name}_PID图纸`
+    if (fmt === 'svg') {
+      downloadBlob(new Blob([str], { type: 'image/svg+xml;charset=utf-8' }), `${base}.svg`)
+      toast({ title: 'SVG 已导出', description: `${activeDiagram.name} · ${CANVAS_W}×${CANVAS_H} 矢量图，可无损缩放` })
+      return
+    }
+    // PNG：SVG → Image 解码 → 2× canvas 光栅化（白底铺底防透明；底图为 dataURL 不污染画布）
+    setExporting(true)
+    const url = URL.createObjectURL(new Blob([str], { type: 'image/svg+xml;charset=utf-8' }))
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const k = 2
+        const cv = document.createElement('canvas')
+        cv.width = CANVAS_W * k
+        cv.height = CANVAS_H * k
+        const ctx = cv.getContext('2d')
+        if (!ctx) throw new Error('Canvas 2D 上下文不可用')
+        ctx.fillStyle = '#fff'
+        ctx.fillRect(0, 0, cv.width, cv.height)
+        ctx.drawImage(img, 0, 0, cv.width, cv.height)
+        cv.toBlob((b) => {
+          URL.revokeObjectURL(url)
+          setExporting(false)
+          if (!b) {
+            toast({ title: '导出失败', description: 'PNG 编码失败', variant: 'destructive' })
+            return
+          }
+          downloadBlob(b, `${base}.png`)
+          toast({ title: 'PNG 已导出', description: `${activeDiagram.name} · ${CANVAS_W * k}×${CANVAS_H * k} 位图` })
+        }, 'image/png')
+      } catch (err) {
+        URL.revokeObjectURL(url)
+        setExporting(false)
+        toast({ title: '导出失败', description: (err as Error).message, variant: 'destructive' })
+      }
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      setExporting(false)
+      toast({ title: '导出失败', description: 'SVG 解码失败', variant: 'destructive' })
+    }
+    img.src = url
+  }
 
   // ---- 全屏/窗口切换 ----
   const enterFull = () => {
@@ -3435,11 +3587,12 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           />
           {/* 挂接吸附预览（Task 73）：可挂接图元拖到该管线上时 emerald 高亮提示即将断开粘合 */}
           {mountHint === c.id && (
-            <polyline points={ptsAttr} fill="none" stroke="#10b981" strokeWidth={6} opacity={0.35}
+            <polyline data-noexport="1" points={ptsAttr} fill="none" stroke="#10b981" strokeWidth={6} opacity={0.35}
               strokeLinecap="round" pointerEvents="none" />
           )}
           {mode === 'edit' && (
             <polyline
+              data-noexport="1"
               points={ptsAttr} fill="none" stroke="transparent" strokeWidth={12} className="cursor-pointer"
               onClick={(e) => handleConnClick(e, c.id)}
             />
@@ -3447,6 +3600,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           {/* 中段拖拽提示线（选中态）：拖动可横向/纵向调整布线 */}
           {segDraggable && (
             <line
+              data-noexport="1"
               x1={pts[1][0]} y1={pts[1][1]} x2={pts[2][0]} y2={pts[2][1]}
               stroke={draggingConnSeg === c.id ? ROSE : TEAL}
               strokeWidth={draggingConnSeg === c.id ? 3.2 : 1.4}
@@ -3456,6 +3610,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           {/* 已绑定管线的管线号徽章改为统一在 renderConnBadges 渲染（层级高于所有连线，避免被其他连线的点击层遮挡） */}
           {isSel && mode === 'edit' && (
             <g
+              data-noexport="1"
               className="cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation()
@@ -3573,6 +3728,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           )}
           {(isSel || isBulk) && mode === 'edit' && (
             <rect
+              data-noexport="1"
               x={s.x - 6} y={s.y - 6} width={s.w + 12} height={s.h + 12} rx={4}
               fill="none" stroke={TEAL} strokeWidth={isSel ? 1.2 : 1}
               strokeDasharray="5 3" opacity={isSel ? 1 : 0.65}
@@ -3591,12 +3747,12 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                 {showAnchors && (() => {
                   const zb = anchorZoneBox(s)
                   return (
-                    <rect x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none" stroke={TEAL} strokeWidth={1.2}
+                    <rect data-noexport="1" x={zb.x} y={zb.y} width={zb.w} height={zb.h} fill="none" stroke={TEAL} strokeWidth={1.2}
                       strokeDasharray="4 3" opacity={0.85} pointerEvents="none" />
                   )
                 })()}
                 <path
-                  d={hitPath} fillRule="evenodd" fill="transparent" pointerEvents="all"
+                  data-noexport="1" d={hitPath} fillRule="evenodd" fill="transparent" pointerEvents="all"
                   className="cursor-crosshair"
                   onPointerDown={(e) => startConnDraft(e, s)}
                   onPointerMove={(e) => {
@@ -3630,7 +3786,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                   const an = pendingAn ?? hoverAn
                   if (!an) return null
                   const ap = anchorPointT(s, an.anchor, an.t)
-                  return <circle cx={ap.x} cy={ap.y} r={6} fill={TEAL} stroke="#fff" strokeWidth={1.5} pointerEvents="none" />
+                  return <circle data-noexport="1" cx={ap.x} cy={ap.y} r={6} fill={TEAL} stroke="#fff" strokeWidth={1.5} pointerEvents="none" />
                 })()}
               </>
             )
@@ -3638,6 +3794,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
           {isSel && mode === 'edit' && handles.map(([hd, hx, hy, cur]) => (
             // 缩放手柄置于锚点命中区之上（渲染在最后）：选中态四角手柄不被环带拦截，改大小交互不受影响
             <rect
+              data-noexport="1"
               key={hd} x={hx - 4} y={hy - 4} width={8} height={8}
               fill="#fff" stroke={TEAL} strokeWidth={1.3} style={{ cursor: cur }}
               onPointerDown={(e) => startResize(e, s, hd)}
@@ -3666,7 +3823,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         >
           {mode !== 'edit' && showMarkText && <title>点击查看该点位盲板作业全生命周期档案</title>}
           {isSel && mode === 'edit' && (
-            <circle cx={m.x} cy={m.y} r={11} fill="none" stroke={TEAL} strokeWidth={1.2} strokeDasharray="3 2" />
+            <circle data-noexport="1" cx={m.x} cy={m.y} r={11} fill="none" stroke={TEAL} strokeWidth={1.2} strokeDasharray="3 2" />
           )}
           <MarkGlyph m={m} edit={mode === 'edit'} state={state} stateLabel={st?.stateLabel ?? ''} hideText={hideText} />
           {/* 编辑态：挂标当前所属管线号小徽章（自动计算/确认更新后实时可见；随「标注文字」开关一并隐藏） */}
@@ -4000,6 +4157,101 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
               </Button>
             </div>
           )}
+          {/* 搜索定位（Task 129）：位号/设备绑定/隔离点编码 → 画布聚焦 + amber 闪烁环；编辑/查看/只读通用 */}
+          <Popover open={locateOpen} onOpenChange={(o) => { setLocateOpen(o); if (o) setLocateQuery('') }}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn('h-10 w-10 p-0', locateHit && 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100')}
+                title="搜索定位：按位号 / 设备编码 / 隔离点编码查找图元并聚焦"
+                aria-label="搜索定位画布图元"
+                disabled={!activeId}
+              >
+                <Search className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-2" align="end">
+              <Input
+                value={locateQuery}
+                onChange={(e) => setLocateQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const rs = computeLocateResults(locateQuery)
+                    if (rs.length > 0) runLocate(rs[0])
+                  }
+                }}
+                placeholder="位号 / 设备编码 / 隔离点编码…"
+                className="h-9 text-xs"
+                autoFocus
+                aria-label="画布图元搜索"
+              />
+              <div className="mt-2 max-h-64 overflow-y-auto bp-thin-scrollbar">
+                {locateQuery.trim() === '' ? (
+                  <p className="px-2 py-4 text-center text-[11px] leading-relaxed text-stone-400">
+                    在当前图中查找图元与隔离点
+                    <br />
+                    输入关键字 · 回车定位第一个结果
+                  </p>
+                ) : (() => {
+                  const rs = computeLocateResults(locateQuery)
+                  if (rs.length === 0) {
+                    return <p className="px-2 py-4 text-center text-[11px] text-stone-400">无匹配结果</p>
+                  }
+                  return rs.map((r) => (
+                    <button
+                      key={`${r.kind}-${r.id}`} type="button" onClick={() => runLocate(r)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-teal-50"
+                    >
+                      <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold', r.kind === 'shape' ? 'bg-teal-50 text-teal-700' : 'bg-rose-50 text-rose-600')}>
+                        {r.kind === 'shape' ? '图元' : '隔离点'}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-stone-700">{r.title}</span>
+                        {r.sub && <span className="block truncate text-[10px] text-stone-400">{r.sub}</span>}
+                      </span>
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-stone-300" />
+                    </button>
+                  ))
+                })()}
+              </div>
+            </PopoverContent>
+          </Popover>
+          {/* 导出图纸（Task 129）：克隆画布剥离交互层 → SVG 矢量 / PNG 2× 位图，白底无网格交付口径 */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className="h-10 w-10 p-0"
+                title="导出图纸：SVG 矢量图（无损缩放）或 PNG 位图（2× 清晰度）"
+                aria-label="导出图纸"
+                disabled={!activeId || exporting}
+              >
+                {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-2" align="end">
+              <button
+                type="button" onClick={() => handleExport('svg')} disabled={exporting}
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-teal-50 disabled:opacity-50"
+              >
+                <FileImage className="h-4 w-4 shrink-0 text-teal-700" />
+                <span className="min-w-0">
+                  <span className="block text-xs font-medium text-stone-700">导出 SVG 矢量图</span>
+                  <span className="block text-[10px] text-stone-400">1200×700 主图区域 · 交付归档</span>
+                </span>
+              </button>
+              <button
+                type="button" onClick={() => handleExport('png')} disabled={exporting}
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-teal-50 disabled:opacity-50"
+              >
+                <ImageIcon className="h-4 w-4 shrink-0 text-teal-700" />
+                <span className="min-w-0">
+                  <span className="block text-xs font-medium text-stone-700">导出 PNG 位图（2×）</span>
+                  <span className="block text-[10px] text-stone-400">2400×1400 高清 · 即时分享</span>
+                </span>
+              </button>
+            </PopoverContent>
+          </Popover>
           <div className="mx-1 hidden h-6 w-px bg-stone-200 sm:block" />
           <Button
             variant="outline"
@@ -4233,6 +4485,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       />
                     )}
                     <rect
+                      data-noexport="1"
                       x={vb.x - vb.w} y={vb.y - vb.h} width={vb.w * 3} height={vb.h * 3} fill="url(#bp-pid-grid-l)"
                       className={cn(
                         mode === 'edit' && placingShape === 'line' && 'cursor-crosshair',
@@ -4242,6 +4495,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     />
                     {/* 画布原点标界（0,0 起的 1200×700 主图区域，无限桌面上找回「家」的参照） */}
                     <rect
+                      data-noexport="1"
                       x={0} y={0} width={CANVAS_W} height={CANVAS_H} fill="none"
                       stroke="#d6d3d1" strokeWidth={1.2} strokeDasharray="12 8" vectorEffect="non-scaling-stroke"
                       pointerEvents="none"
@@ -4249,7 +4503,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
                     {/* 空态提示 */}
                     {mode === 'edit' && content.shapes.length === 0 && content.marks.length === 0 && (
-                      <g pointerEvents="none">
+                      <g data-noexport="1" pointerEvents="none">
                         <text x={CANVAS_W / 2} y={CANVAS_H / 2 - 10} textAnchor="middle" fontSize={15} fill="#a8a29e">
                           从左侧选择图元开始绘制
                         </text>
@@ -4259,7 +4513,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       </g>
                     )}
                     {mode === 'view' && content.marks.length === 0 && (
-                      <g pointerEvents="none">
+                      <g data-noexport="1" pointerEvents="none">
                         <text x={CANVAS_W / 2} y={CANVAS_H / 2} textAnchor="middle" fontSize={14} fill="#a8a29e">
                           本图尚未标注隔离点
                         </text>
@@ -4277,6 +4531,30 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
                     {/* 隔离点标注 */}
                     {renderMarks()}
+
+                    {/* 搜索定位闪烁环（Task 129）：amber 虚线脉冲 2.6s 自消；导出时随 data-noexport 剥离 */}
+                    {locateHit && (() => {
+                      if (locateHit.kind === 'shape') {
+                        const s = content.shapes.find((x) => x.id === locateHit.id)
+                        if (!s) return null
+                        return (
+                          <rect
+                            data-noexport="1" x={s.x - 7} y={s.y - 7} width={s.w + 14} height={s.h + 14} rx={6}
+                            fill="rgba(245,158,11,0.10)" stroke="#f59e0b" strokeWidth={2.5} strokeDasharray="7 4"
+                            vectorEffect="non-scaling-stroke" pointerEvents="none" className="animate-pulse"
+                          />
+                        )
+                      }
+                      const m = content.marks.find((x) => x.id === locateHit.id)
+                      if (!m) return null
+                      return (
+                        <circle
+                          data-noexport="1" cx={m.x} cy={m.y} r={15}
+                          fill="rgba(245,158,11,0.12)" stroke="#f59e0b" strokeWidth={2.5} strokeDasharray="7 4"
+                          vectorEffect="non-scaling-stroke" pointerEvents="none" className="animate-pulse"
+                        />
+                      )
+                    })()}
 
                     {/* 连线编辑 overlay（最上层）：选中连线的中段拖拽命中区 + 起止端点拖拽改接手柄 */}
                     {mode === 'edit' && selectedConn && !connEndDrag && !pendingConn && (() => {
@@ -4296,7 +4574,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       const segOk = selectedConn.fromShape !== selectedConn.toShape && ((oaH && obH) || (!oaH && !obH))
                       const last = pts[pts.length - 1]
                       return (
-                        <g>
+                        <g data-noexport="1">
                           {segOk && (
                             <line
                               x1={pts[1][0]} y1={pts[1][1]} x2={pts[2][0]} y2={pts[2][1]}
@@ -4352,7 +4630,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         previewPts = [[fixed.x, fixed.y], [connEndDrag.x, connEndDrag.y]]
                       }
                       return (
-                        <g pointerEvents="none">
+                        <g data-noexport="1" pointerEvents="none">
                           {content.shapes.map((s) => {
                             const zb = anchorZoneBox(s)
                             const hot = connEndDrag.hover?.shapeId === s.id
@@ -4383,7 +4661,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       const hov = connDraft.hover ? shapeMap.get(connDraft.hover.shapeId) : null
                       const hp = hov && connDraft.hover ? anchorPointT(hov, connDraft.hover.anchor, connDraft.hover.t) : null
                       return (
-                        <g pointerEvents="none">
+                        <g data-noexport="1" pointerEvents="none">
                           <line x1={a.x} y1={a.y} x2={connDraft.x} y2={connDraft.y} stroke={TEAL} strokeWidth={2} strokeDasharray="6 4" opacity={0.9} />
                           {hp && <circle cx={hp.x} cy={hp.y} r={6} fill={TEAL} stroke="#fff" strokeWidth={1.5} />}
                           <circle cx={connDraft.x} cy={connDraft.y} r={3.5} fill={TEAL} />
@@ -4398,7 +4676,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                         if (!from) return null
                         const a = anchorPointT(from, pendingConn.anchor, pendingConn.t)
                         return (
-                          <g pointerEvents="none">
+                          <g data-noexport="1" pointerEvents="none">
                             <line x1={a.x} y1={a.y} x2={mousePos.x} y2={mousePos.y} stroke={TEAL} strokeWidth={2} strokeDasharray="6 4" />
                             <circle cx={mousePos.x} cy={mousePos.y} r={3.5} fill={TEAL} />
                           </g>
@@ -4407,7 +4685,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
 
                     {/* 放置幽灵预览（直线为十字准星引导，其余为包围盒框） */}
                     {mode === 'edit' && placingShapeLib && mousePos && !lineDraft && (
-                      <g pointerEvents="none" opacity={0.75}>
+                      <g data-noexport="1" pointerEvents="none" opacity={0.75}>
                         {placingShapeLib.type === 'line' ? (
                           <>
                             <line x1={mousePos.x - 12} y1={mousePos.y} x2={mousePos.x + 12} y2={mousePos.y} stroke={TEAL} strokeWidth={1.2} />
@@ -4447,7 +4725,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     )}
                     {/* 直线橡皮筋拖拽预览：起点实心 · 终点空心 · 实时长度/角度 */}
                     {lineDraft && (
-                      <g pointerEvents="none">
+                      <g data-noexport="1" pointerEvents="none">
                         <line
                           x1={lineDraft.sx} y1={lineDraft.sy} x2={lineDraft.ex} y2={lineDraft.ey}
                           stroke={TEAL} strokeWidth={1.8} strokeDasharray="6 4"
@@ -4468,7 +4746,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                     )}
                     {/* 框选橡皮筋（Phase 3）：teal 半透明填充 + 虚线描边；non-scaling-stroke 视觉恒定 */}
                     {rubber && (
-                      <g pointerEvents="none">
+                      <g data-noexport="1" pointerEvents="none">
                         <rect
                           x={rubber.x0} y={rubber.y0}
                           width={Math.max(rubber.x1 - rubber.x0, 0.01)} height={Math.max(rubber.y1 - rubber.y0, 0.01)}
@@ -4478,7 +4756,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       </g>
                     )}
                     {mode === 'edit' && placingSymbol && mousePos && (
-                      <g pointerEvents="none" opacity={0.8}>
+                      <g data-noexport="1" pointerEvents="none" opacity={0.8}>
                         {(() => {
                           const { w: gw, h: gh } = symbolInstanceSize(placingSymbol.designW, placingSymbol.designH)
                           const gx = mousePos.x - gw / 2
@@ -4496,7 +4774,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
                       </g>
                     )}
                     {mode === 'edit' && placingMark && mousePos && (
-                      <g pointerEvents="none" opacity={0.7}>
+                      <g data-noexport="1" pointerEvents="none" opacity={0.7}>
                         <polygon
                           points={`${mousePos.x},${mousePos.y - 7} ${mousePos.x + 7},${mousePos.y} ${mousePos.x},${mousePos.y + 7} ${mousePos.x - 7},${mousePos.y}`}
                           fill="#f43f5e" stroke="#fff" strokeWidth={1.4}
