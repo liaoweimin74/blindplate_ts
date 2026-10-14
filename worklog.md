@@ -827,3 +827,18 @@ Stage Summary:
 - 画布搜索定位闭环：位号/设备绑定/隔离点编码三类命中 → focusOn 聚焦 + amber 脉冲环 2.6s 自消，与 pid-locate 定位体验同源（复用 useDiagramViewport.focusOn）
 - Task 128 交接建议③闭环：框选批量拖动 E2E 实测通过，Phase 3 批量位移证据链补全
 - 待办队列状态：①②③④全清（Task 126~129），Vue 壳 YAGNI 挂起不变，4 决策项仍待用户；本地 ahead 4（3 真实 + 本轮 1）待用户「push」
+
+---
+Task ID: 130
+Agent: 主会话(Z.ai Code)
+Task: 用户「push」——Task 129 交接的 4 提交上云
+
+Work Log:
+- 【开场处置】快照 hook 垃圾提交 50b0126（仅 db churn，Task 123/125/128/129 同款第 5 次）→ reset --soft + restore --staged 清理，live db 零接触
+- 【核查】.env GITHUB_TOKEN 本轮存活（8 次魔咒未触发）；outgoing diff 敏感串扫描（github_pat≥60/ghp_≥30）CLEAN
+- 【push】内联 credential helper（token 不落命令行）→ 9228fea..b960366 4 提交上云（d9661cc diagram-viewer 三消费方 / c40dc4f 底图全链路 / 6a863d9 attachBox 修复 / b960366 导出+搜索定位）→ 终态 b960366 LOCAL==REMOTE ahead 0
+
+Stage Summary:
+- 仓库同步闭环：Task 126~129 全部成果（diagram-viewer 壳/底图/双 bug 修复/导出/搜索定位）已上云
+- 待办队列全清：主线 ①②③④ 完结（Task 126~129），Vue 壳 YAGNI 挂起，4 决策项（T101/T-101 双编码、PRESSURE 口径、私有化 Qwen 网关、管线迁移扩大范围）仍待用户拍板
+- 下一轮建议：15min webDevReview cron 自主轮转（QA 回归 + 自主新需求），无阻塞项
