@@ -58,13 +58,16 @@ import {
   NodeGeom, Selection, Anchor, EdgeDirection, ConnEndpoint, RoutePoint,
   // 常量与色板
   CANVAS_W, CANVAS_H, STROKE, LINE, TEAL, ROSE, GRID_S, GRID_L,
-  FILL_PALETTE, STROKE_PALETTE, ANCHOR_LABEL, MARK_EDGE_SNAP_DIST, LABEL_T_MIN, LABEL_T_MAX, CONN_END_SNAP_DIST,
+  FILL_PALETTE, STROKE_PALETTE, ANCHOR_LABEL, MARK_EDGE_SNAP_DIST,
   minimapBoundsOf,
   createHistory,
+  // 画布交互控制器（Phase 2 泛型化：手势会话/误触抑制/四角缩放/端点吸附/连线改接全部 core 化，Vue 壳共用）
+  createCanvasController, resizeBox, fixedCornerOf, labelTAt, snapConnEnd, isTinyLineDraft, connExists, rewireConnTarget,
+  type LineDraft, type ConnEndTarget,
   // 几何
-  clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline, projectToPolyline,
+  clamp, uid, freeT, tEq, distToSegment, polylineLength, pointAlongPolyline,
   anchorPoint, anchorPointT, physAnchor, outward, anchorZoneBox, nearestFreeAnchorAt, nearestAnchorAt,
-  distToAnchorZone, anchorHitBandPath, anchorHitSolidPath, routeConnection, shapeLabelY,
+  anchorHitBandPath, anchorHitSolidPath, routeConnection, shapeLabelY,
   rotateAnchorName, anchorNameForPhysical, oppositeAnchor,
   // 布局 / 注册表
   autoLayout, type SymbolRegistry,
@@ -793,9 +796,8 @@ function SymbolEditor({ ctx, currentUser, onClose, onSaved }: {
   const [hoverId, setHoverId] = useState<string | null>(null)
   const [mousePos, setMousePos] = useState<RoutePoint | null>(null)
   // 直线橡皮筋绘制（与主画布交互一致）：按下定起点 → 拖动实时改角度 → 抬起定终点
-  const [lineDraft, setLineDraft] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null)
-  const lineDraftRef = useRef<{ sx: number; sy: number; ex: number; ey: number } | null>(null)
-  const lineEndAtRef = useRef(0) // 吞掉紧随 pointerup 的 click，防误清新建部件选中态
+  const [lineDraft, setLineDraft] = useState<LineDraft | null>(null)
+  const lineDraftRef = useRef<LineDraft | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirmBack, setConfirmBack] = useState(false)
@@ -817,6 +819,9 @@ function SymbolEditor({ ctx, currentUser, onClose, onSaved }: {
       y: ((e.clientY - r.top) * EDITOR_SIZE) / r.height,
     }
   }
+
+  // 编辑器画布交互控制器（core 通用手势循环 + click 误触抑制，与主画布共用同一 createCanvasController）
+  const editorCtl = useMemo(() => createCanvasController<RoutePoint>({ toPoint: (cx, cy) => toEditorPoint({ clientX: cx, clientY: cy }) }), [])
 
   const addPartAt = (type: PidShapeType, p: RoutePoint) => {
     const lib = libOf(type)
@@ -876,7 +881,7 @@ function SymbolEditor({ ctx, currentUser, onClose, onSaved }: {
     })
   }
 
-  // ---- 部件拖拽移动（放置态时让位给画布橡皮筋绘制） ----
+  // ---- 部件拖拽移动（放置态时让位给画布橡皮筋绘制；core 手势会话） ----
   const startDrag = (e: React.PointerEvent<SVGElement>, p0: SymbolPart) => {
     if (placing) return
     e.stopPropagation()
@@ -884,79 +889,47 @@ function SymbolEditor({ ctx, currentUser, onClose, onSaved }: {
     if (!start) return
     const offX = start.x - p0.x
     const offY = start.y - p0.y
-    let moved = false
-    const onMove = (ev: PointerEvent) => {
-      const q = toEditorPoint(ev)
-      if (!q) return
-      moved = true
-      const nx = Math.round(clamp(q.x - offX, 0, EDITOR_SIZE - p0.w))
-      const ny = Math.round(clamp(q.y - offY, 0, EDITOR_SIZE - p0.h))
-      setParts((prev) => prev.map((pp) => (pp.id === p0.id ? { ...pp, x: nx, y: ny } : pp)))
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      if (moved) setDirty(true)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    editorCtl.run({
+      kind: 'drag-shape',
+      targetId: p0.id,
+      start,
+      onMove: (q) => {
+        const nx = Math.round(clamp(q.x - offX, 0, EDITOR_SIZE - p0.w))
+        const ny = Math.round(clamp(q.y - offY, 0, EDITOR_SIZE - p0.h))
+        setParts((prev) => prev.map((pp) => (pp.id === p0.id ? { ...pp, x: nx, y: ny } : pp)))
+      },
+      onEnd: (_p, s) => {
+        if (s.moved) setDirty(true)
+      },
+    })
   }
 
-  // ---- 部件四角缩放（放置态时让位；对角为固定点；圆形锁定正圆比例；直线可翻转向） ----
+  // ---- 部件四角缩放（放置态时让位；对角为固定点；圆形锁定正圆比例；直线可翻转向；core resizeBox + clampRect 限定编辑器画布） ----
   const startResize = (e: React.PointerEvent<SVGElement>, p0: SymbolPart, handle: ResizeHandle) => {
     if (placing) return
     e.stopPropagation()
     e.preventDefault()
     const lib = libOf(p0.type)
-    const minW = lib.minW
-    const minH = lib.minH
-    const fx = handle === 'nw' || handle === 'sw' ? p0.x + p0.w : p0.x
-    const fy = handle === 'nw' || handle === 'ne' ? p0.y + p0.h : p0.y
-    let moved = false
-    const onMove = (ev: PointerEvent) => {
-      const raw = toEditorPoint(ev)
-      if (!raw) return
-      moved = true
-      const px = clamp(raw.x, 0, EDITOR_SIZE)
-      const py = clamp(raw.y, 0, EDITOR_SIZE)
-      let x1 = Math.min(fx, px)
-      let x2 = Math.max(fx, px)
-      let y1 = Math.min(fy, py)
-      let y2 = Math.max(fy, py)
-      if (x2 - x1 < minW) {
-        if (px < fx) x1 = x2 - minW
-        else x2 = x1 + minW
-      }
-      if (y2 - y1 < minH) {
-        if (py < fy) y1 = y2 - minH
-        else y2 = y1 + minH
-      }
-      if (p0.type === 'circle') {
-        const size = Math.max(x2 - x1, y2 - y1)
-        if (px >= fx) x2 = x1 + size
-        else x1 = x2 - size
-        if (py >= fy) y2 = y1 + size
-        else y1 = y2 - size
-      }
-      x1 = Math.max(0, x1)
-      y1 = Math.max(0, y1)
-      x2 = Math.min(EDITOR_SIZE, x2)
-      y2 = Math.min(EDITOR_SIZE, y2)
-      const w = Math.max(minW, Math.round(x2 - x1))
-      const h = Math.max(minH, Math.round(y2 - y1))
-      setParts((prev) => prev.map((pp) => (
-        pp.id === p0.id
-          ? { ...pp, x: Math.round(x1), y: Math.round(y1), w, h, ...(p0.type === 'line' ? { flip: (px >= fx) !== (py >= fy) } : null) }
-          : pp
-      )))
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      if (moved) setDirty(true)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    editorCtl.run({
+      kind: 'resize',
+      targetId: p0.id,
+      start: { x: p0.x, y: p0.y },
+      onMove: (raw) => {
+        const r = resizeBox({
+          handle, box: p0, px: raw.x, py: raw.y, minW: lib.minW, minH: lib.minH,
+          lockSquare: p0.type === 'circle',
+          clampRect: { x0: 0, y0: 0, x1: EDITOR_SIZE, y1: EDITOR_SIZE },
+        })
+        setParts((prev) => prev.map((pp) => (
+          pp.id === p0.id
+            ? { ...pp, x: r.x, y: r.y, w: r.w, h: r.h, ...(p0.type === 'line' ? { flip: r.flip } : null) }
+            : pp
+        )))
+      },
+      onEnd: (_p, s) => {
+        if (s.moved) setDirty(true)
+      },
+    })
   }
 
   // ---- 编辑器快捷键：Delete 删除部件 / Esc 取消放置·选中（画布快捷键已让位，见主组件 guard） ----
@@ -980,7 +953,7 @@ function SymbolEditor({ ctx, currentUser, onClose, onSaved }: {
     return () => window.removeEventListener('keydown', onKey)
   }, [placing, selectedId])
 
-  // ---- 直线橡皮筋绘制（编辑器内与主画布同交互） ----
+  // ---- 直线橡皮筋绘制（编辑器内与主画布同交互；core 手势会话 + isTinyLineDraft 落笔判定） ----
   const handleCanvasPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (placing !== 'line') return
     const p = toEditorPoint(e)
@@ -988,34 +961,32 @@ function SymbolEditor({ ctx, currentUser, onClose, onSaved }: {
     e.preventDefault()
     const sx = clamp(p.x, 0, EDITOR_SIZE)
     const sy = clamp(p.y, 0, EDITOR_SIZE)
-    const setDraft = (d: { sx: number; sy: number; ex: number; ey: number } | null) => {
+    let last: LineDraft = { sx, sy, ex: sx, ey: sy }
+    const setDraft = (d: LineDraft | null) => {
       lineDraftRef.current = d
       setLineDraft(d)
     }
-    setDraft({ sx, sy, ex: sx, ey: sy })
-    const onMove = (ev: PointerEvent) => {
-      const q = toEditorPoint(ev)
-      if (!q) return
-      setDraft({ sx, sy, ex: clamp(q.x, 0, EDITOR_SIZE), ey: clamp(q.y, 0, EDITOR_SIZE) })
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      const d = lineDraftRef.current
-      setDraft(null)
-      lineEndAtRef.current = Date.now()
-      if (!d) return
-      // 编辑器画布小，阈值 4 设计单位；微距点击不落笔，直线工具保持激活
-      if (Math.max(Math.abs(d.ex - d.sx), Math.abs(d.ey - d.sy)) < 4) return
-      addLinePart(d.sx, d.sy, d.ex, d.ey)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    setDraft(last)
+    editorCtl.run({
+      kind: 'line-draft',
+      start: { x: sx, y: sy },
+      onMove: (q) => {
+        last = { sx, sy, ex: clamp(q.x, 0, EDITOR_SIZE), ey: clamp(q.y, 0, EDITOR_SIZE) }
+        setDraft(last)
+      },
+      onEnd: () => {
+        setDraft(null)
+        editorCtl.guard.arm('lineEnd')
+        // 编辑器画布小，阈值 4 设计单位；微距点击不落笔，直线工具保持激活
+        if (isTinyLineDraft(last, 4)) return
+        addLinePart(last.sx, last.sy, last.ex, last.ey)
+      },
+    })
   }
 
   const handleCanvasClick = (e: React.MouseEvent<SVGElement>) => {
     // 直线走 pointer 橡皮筋流程；刚结束绘制时吞掉紧随其后的 click（防误清新建部件选中态）
-    if (placing === 'line' || Date.now() - lineEndAtRef.current < 350) return
+    if (placing === 'line' || editorCtl.guard.block('lineEnd')) return
     const p = toEditorPoint(e)
     if (placing) {
       if (p) addPartAt(placing, p)
@@ -1412,9 +1383,8 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const [placingMark, setPlacingMark] = useState<PlacingMark | null>(null)
   const [placingSymbol, setPlacingSymbol] = useState<SymbolRow | null>(null)
   // 直线橡皮筋绘制：按下定起点 → 拖动实时改角度/长度 → 抬起定终点（任意方向，/ 与 \ 双向支持）
-  const [lineDraft, setLineDraft] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null)
-  const lineDraftRef = useRef<{ sx: number; sy: number; ex: number; ey: number } | null>(null)
-  const lineEndAtRef = useRef(0) // 直线绘制结束时刻：吞掉紧随 pointerup 的 click，防误清新线选中态
+  const [lineDraft, setLineDraft] = useState<LineDraft | null>(null)
+  const lineDraftRef = useRef<LineDraft | null>(null)
 
   // ---- 画布平移缩放（viewBox 方案：内容坐标零侵入，编辑/查看/只读三态通用） ----
   const CANVAS_MIN_W = CANVAS_W / 4   // 最大放大 4x
@@ -1432,8 +1402,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   const canvasRowRef = useRef<HTMLDivElement | null>(null)
   const [canvasH, setCanvasH] = useState(0) // 0 = 未测量（回落到画布比例兜底）
   const [canvasW, setCanvasW] = useState(0) // 浮动工具条定位 clamp 用
-  const suppressClickAtRef = useRef(0) // 平移拖拽结束时刻：吞掉紧随 pointerup 的 click，防误点挂标/误取消选中
-  const suppressShapeClickAtRef = useRef(0) // 图元拖动刚结束时刻：吞掉紧随的 click——全域锚点命中区下防止拖动图元被误判为「点击边框连线」
+  // click 误触抑制时间戳已收敛至 canvasCtl.guard（平移/图元拖动/连线/落笔四类，core ClickGuard）
 
   // ---- 画布文字/角标显隐四开关（缩放悬浮栏控制，编辑/查看通用；默认全显示）：设备名 / 管线名 / 标注文字 / 绑定角标 ----
   const [showDeviceLabels, setShowDeviceLabels] = useState(true)
@@ -1529,9 +1498,9 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
   // ---- 连线交互增强：中段拖拽（竖线横向/横线纵向）+ 端点拖拽改接锚点 ----
   const [draggingConnSeg, setDraggingConnSeg] = useState<string | null>(null)
   const [connEndDrag, setConnEndDrag] = useState<
-    { id: string; which: 'from' | 'to'; x: number; y: number; hover: { shapeId: string; anchor: Anchor; t?: number } | null } | null
+    { id: string; which: 'from' | 'to'; x: number; y: number; hover: ConnEndTarget | null } | null
   >(null)
-  const connDragEndAtRef = useRef(0) // 连线拖拽结束时刻：吞掉紧随 pointerup 的 click，防误清选中
+  // 连线拖拽结束 click 抑制已收敛至 canvasCtl.guard（connDragEnd）
 
   // ---- 查看模式状态 ----
   const [statusPoints, setStatusPoints] = useState<StatusPoint[]>([])
@@ -1768,6 +1737,10 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     }
   }
 
+  // 画布交互控制器（core 通用手势循环 + click 误触抑制；toPoint = viewBox 换算与 toSvgPoint 同源。
+  // 捕获首帧 toSvgPoint 闭包安全：其仅读 svgRef/vbRef 两个稳定 ref，跨渲染恒取最新值）
+  const canvasCtl = useMemo(() => createCanvasController<RoutePoint>({ toPoint: (cx, cy) => toSvgPoint({ clientX: cx, clientY: cy }) }), [])
+
   // ---- 视图控制：缩放（锚点为中心）/ 重置 / 空白拖拽平移 ----
   const applyVb = useCallback((next: { x: number; y: number; w: number }) => {
     const w = clamp(next.w, CANVAS_MIN_W, CANVAS_MAX_W)
@@ -1851,25 +1824,22 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const startCx = e.clientX
     const startCy = e.clientY
     const startVb = vbRef.current
-    let moved = false
-    const onMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - startCx
-      const dy = ev.clientY - startCy
-      if (!moved && Math.hypot(dx, dy) < 4) return
-      moved = true
-      setPanning(true)
-      const s = svg.getBoundingClientRect().width / startVb.w
-      applyVb({ x: startVb.x - dx / s, y: startVb.y - dy / s, w: startVb.w })
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setPanning(false)
-      // 实际拖拽过才吞 click：轻点（<4px）保留原有点击语义（取消选中/打开档案）
-      if (moved) suppressClickAtRef.current = Date.now() + 350
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    canvasCtl.run({
+      kind: 'pan',
+      start: { x: startCx, y: startCy },
+      toPoint: (cx, cy) => ({ x: cx, y: cy }), // 平移工作在屏幕坐标系（viewBox 反向换算在 onMove 内做）
+      moveThreshold: 4, // 轻点（<4px）保留原有点击语义（取消选中/打开档案）
+      onMove: (p) => {
+        setPanning(true)
+        const s = svg.getBoundingClientRect().width / startVb.w
+        applyVb({ x: startVb.x - (p.x - startCx) / s, y: startVb.y - (p.y - startCy) / s, w: startVb.w })
+      },
+      onEnd: (_p, s) => {
+        setPanning(false)
+        // 实际拖拽过才吞 click：防误点挂标/误取消选中
+        if (s.moved) canvasCtl.guard.arm('click')
+      },
+    })
   }
 
   // ---- 俯瞰图导航：点击/拖拽缩略图 → 画布视口中心移动到对应世界坐标（保持当前缩放倍率） ----
@@ -2735,7 +2705,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     setMousePos(toSvgPoint(e))
   }
 
-  // ---- 画布 pointerdown：空白左键拖拽平移（三态通用）+ 直线橡皮筋（编辑态直线工具） ----
+  // ---- 画布 pointerdown：空白左键拖拽平移（三态通用）+ 直线橡皮筋（编辑态直线工具；core 手势会话） ----
   const handleCanvasPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     // 平移：编辑态放置/连线挂起时让位给落点流程（placingXxx 走 click 落点）；直线绘制模式不平移
     if (e.button === 0 && !(mode === 'edit' && (placingShape || placingMark || placingSymbol || pendingConn))) {
@@ -2745,41 +2715,37 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const p = toSvgPoint(e)
     if (!p) return
     e.preventDefault()
-    const sx = p.x
-    const sy = p.y
-    const setDraft = (d: { sx: number; sy: number; ex: number; ey: number } | null) => {
+    let last: LineDraft = { sx: p.x, sy: p.y, ex: p.x, ey: p.y }
+    const setDraft = (d: LineDraft | null) => {
       lineDraftRef.current = d
       setLineDraft(d)
     }
-    setDraft({ sx, sy, ex: sx, ey: sy })
-    const onMove = (ev: PointerEvent) => {
-      const q = toSvgPoint(ev)
-      if (!q) return
-      setDraft({ sx, sy, ex: q.x, ey: q.y })
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      const d = lineDraftRef.current
-      setDraft(null)
-      lineEndAtRef.current = Date.now()
-      if (!d) return
-      // 位移过小视为误触单击：不落笔，直线工具保持激活（Esc 退出）
-      if (Math.max(Math.abs(d.ex - d.sx), Math.abs(d.ey - d.sy)) < 5) return
-      addLineShape(d.sx, d.sy, d.ex, d.ey)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    setDraft(last)
+    canvasCtl.run({
+      kind: 'line-draft',
+      start: p,
+      onMove: (q) => {
+        last = { sx: p.x, sy: p.y, ex: q.x, ey: q.y }
+        setDraft(last)
+      },
+      onEnd: () => {
+        setDraft(null)
+        canvasCtl.guard.arm('lineEnd')
+        // 位移过小视为误触单击：不落笔，直线工具保持激活（Esc 退出）
+        if (isTinyLineDraft(last)) return
+        addLineShape(last.sx, last.sy, last.ex, last.ey)
+      },
+    })
   }
 
   const handleCanvasClick = (e: React.MouseEvent<SVGElement>) => {
     if (mode !== 'edit') return
     // 平移拖拽刚结束：吞掉本次 click（拖拽画布不等于点击空白）
-    if (Date.now() < suppressClickAtRef.current) return
+    if (canvasCtl.guard.block('click')) return
     // 直线走 pointer 橡皮筋流程；刚结束绘制时吞掉紧随其后的 click（否则会误清新线选中态）
-    if (placingShape === 'line' || Date.now() - lineEndAtRef.current < 350) return
+    if (placingShape === 'line' || canvasCtl.guard.block('lineEnd')) return
     // 连线（中段/端点）拖拽刚结束时同样吞 click，保留连线选中态
-    if (Date.now() - connDragEndAtRef.current < 350) return
+    if (canvasCtl.guard.block('connDragEnd')) return
     const p = toSvgPoint(e)
     if (placingShape) {
       if (p) addShapeAt(placingShape, p, placingStdId ?? undefined)
@@ -2830,7 +2796,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     if (!m) return
     if (mode !== 'edit') {
       // 平移拖拽刚结束：吞掉本次 click（拖拽画布不等于点击挂标，防误开档案抽屉）
-      if (Date.now() < suppressClickAtRef.current) return
+      if (canvasCtl.guard.block('click')) return
       // 盲板状态页（查看模式）：点击隔离点挂标 → 打开该点位盲板作业全生命周期抽屉
       e.stopPropagation()
       void openDossier(m, statusMap.get(id))
@@ -2856,7 +2822,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     e.stopPropagation()
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     // 图元拖动刚结束的 click 不算「点边框连线」（命中区常驻渲染，拖动释放必带 click，须抑制）
-    if (Date.now() < suppressShapeClickAtRef.current) return
+    if (canvasCtl.guard.block('shapeClick')) return
     if (!pendingConn) {
       setPendingConn({ shapeId, anchor, t })
       setSelected({ kind: 'shape', id: shapeId }) // 首击同时选中源图元，属性面板立即可用
@@ -2865,10 +2831,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     const { shapeId: fromShape, anchor: fromAnchor, t: fromT } = pendingConn
     setPendingConn(null)
     if (fromShape === shapeId && fromAnchor === anchor) return // 同图元同边再点视为取消（同边不同位置也取消，避免误建零长连线）
-    const dup = content.connections.some(
-      (c) => c.fromShape === fromShape && c.fromAnchor === fromAnchor && tEq(c.fromT, fromT) && c.toShape === shapeId && c.toAnchor === anchor && tEq(c.toT, t),
-    )
-    if (dup) {
+    if (connExists(content.connections, { shapeId: fromShape, anchor: fromAnchor, t: fromT }, { shapeId, anchor, t })) {
       toast({ title: '连线已存在', description: '相同方向的连线已存在，已跳过创建' })
       return
     }
@@ -2956,7 +2919,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     toast({ title: '已解除管线挂接', description: '管线两端自动闭合，图元旋转已复位' })
   }
 
-  // ---- 拖拽移动（图元 / 标注） ----
+  // ---- 拖拽移动（图元 / 标注；core 手势会话：first=首次实际移动=事务压栈时机） ----
   const startDragShape = (e: React.PointerEvent<SVGElement>, s: PidShape) => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol || pendingConn) return // 连线挂起时让位：点目标图元本体 = 连线（Task 86-2）
     e.stopPropagation()
@@ -2964,43 +2927,41 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     if (!start) return
     const offX = start.x - s.x
     const offY = start.y - s.y
-    let moved = false
-    const onMove = (ev: PointerEvent) => {
-      const p = toSvgPoint(ev)
-      if (!p) return
-      if (!moved) { moved = true; pushHistory() } // 拖拽事务：首次实际移动时压栈（撤销恢复拖拽前位置）
-      suppressShapeClickAtRef.current = Date.now() + 400 // 拖动过：紧随的 click 不作连线点击处理（全域锚点命中区防误触发）
-      // 无限画布：拖拽不限制在 0..CANVAS_W（与放置/缩放边界策略一致）
-      const nx = Math.round(p.x - offX)
-      const ny = Math.round(p.y - offY)
-      setContent((prev) => ({
-        ...prev,
-        shapes: prev.shapes.map((sh) => (sh.id === s.id ? { ...sh, x: nx, y: ny } : sh)),
-      }))
-      // 挂接吸附预览（Task 73）：可挂接图元拖动时检测落点管线，命中则高亮该连线
-      if (isMountableShape(s)) {
-        const probe = { ...s, x: nx, y: ny }
-        const ct = contentRef.current
-        const others = ct.connections.filter((c) => c.fromShape !== s.id && c.toShape !== s.id)
-        const hit = findMountTarget(
-          { shapes: ct.shapes.map((sh) => (sh.id === s.id ? probe : sh)), connections: others },
-          s.id,
-          polylineOfRef.current,
-        )
-        setMountHint(hit ? hit.conn.id : null)
-      }
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setMountHint(null)
-      if (moved) {
-        setDirty(true)
-        if (isMountableShape(s)) resolveMountAfterDrag(s.id)
-      }
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    canvasCtl.run({
+      kind: 'drag-shape',
+      targetId: s.id,
+      start,
+      onMove: (p, _sess, first) => {
+        if (first) pushHistory() // 拖拽事务：首次实际移动时压栈（撤销恢复拖拽前位置）
+        canvasCtl.guard.arm('shapeClick') // 拖动过：紧随的 click 不作连线点击处理（全域锚点命中区防误触发）
+        // 无限画布：拖拽不限制在 0..CANVAS_W（与放置/缩放边界策略一致）
+        const nx = Math.round(p.x - offX)
+        const ny = Math.round(p.y - offY)
+        setContent((prev) => ({
+          ...prev,
+          shapes: prev.shapes.map((sh) => (sh.id === s.id ? { ...sh, x: nx, y: ny } : sh)),
+        }))
+        // 挂接吸附预览（Task 73）：可挂接图元拖动时检测落点管线，命中则高亮该连线
+        if (isMountableShape(s)) {
+          const probe = { ...s, x: nx, y: ny }
+          const ct = contentRef.current
+          const others = ct.connections.filter((c) => c.fromShape !== s.id && c.toShape !== s.id)
+          const hit = findMountTarget(
+            { shapes: ct.shapes.map((sh) => (sh.id === s.id ? probe : sh)), connections: others },
+            s.id,
+            polylineOfRef.current,
+          )
+          setMountHint(hit ? hit.conn.id : null)
+        }
+      },
+      onEnd: (_p, sess) => {
+        setMountHint(null)
+        if (sess.moved) {
+          setDirty(true)
+          if (isMountableShape(s)) resolveMountAfterDrag(s.id)
+        }
+      },
+    })
   }
 
   const startDragMark = (e: React.PointerEvent<SVGElement>, m: PidMark) => {
@@ -3010,33 +2971,31 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     if (!start) return
     const offX = start.x - m.x
     const offY = start.y - m.y
-    let moved = false
     let last = { x: m.x, y: m.y } // 拖拽终点（移动判定以此为准）
-    const onMove = (ev: PointerEvent) => {
-      const p = toSvgPoint(ev)
-      if (!p) return
-      if (!moved) { moved = true; pushHistory() }
-      const nx = Math.round(p.x - offX)
-      const ny = Math.round(p.y - offY)
-      last = { x: nx, y: ny }
-      setContent((prev) => ({
-        ...prev,
-        marks: prev.marks.map((mk) => (mk.id === m.id ? { ...mk, x: nx, y: ny } : mk)),
-      }))
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      if (!moved) return
-      setDirty(true)
-      // 移动终点：按落点所属管线与当前归属不一致时弹确认
-      checkMarkPipeOwnership({ ...m, x: last.x, y: last.y })
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    canvasCtl.run({
+      kind: 'drag-mark',
+      targetId: m.id,
+      start,
+      onMove: (p, _sess, first) => {
+        if (first) pushHistory()
+        const nx = Math.round(p.x - offX)
+        const ny = Math.round(p.y - offY)
+        last = { x: nx, y: ny }
+        setContent((prev) => ({
+          ...prev,
+          marks: prev.marks.map((mk) => (mk.id === m.id ? { ...mk, x: nx, y: ny } : mk)),
+        }))
+      },
+      onEnd: (_p, sess) => {
+        if (!sess.moved) return
+        setDirty(true)
+        // 移动终点：按落点所属管线与当前归属不一致时弹确认
+        checkMarkPipeOwnership({ ...m, x: last.x, y: last.y })
+      },
+    })
   }
 
-  // ---- 管线号标注沿线拖动：指针位置投影到连线折线，标注只能沿管线滑动（不偏离折线） ----
+  // ---- 管线号标注沿线拖动：指针位置投影到连线折线，标注只能沿管线滑动（不偏离折线；core labelTAt） ----
   const startDragConnLabel = (e: React.PointerEvent<SVGElement>, c: PidConn) => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     e.stopPropagation()
@@ -3052,30 +3011,27 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
       { x: b.x, y: b.y, anchor: physAnchor(to, c.toAnchor) },
       c.fromShape === c.toShape,
     )
-    let moved = false
     setDraggingLabelId(c.id)
-    const onMove = (ev: PointerEvent) => {
-      const p = toSvgPoint(ev)
-      if (!p) return
-      const proj = projectToPolyline(pts, p.x, p.y)
-      if (!proj) return
-      if (!moved) { moved = true; pushHistory() }
-      // 投影参数 clamp 在两端 6% 内（不盖住锚点/设备），保留 3 位小数存储
-      const t = Math.round(clamp(proj.t, LABEL_T_MIN, LABEL_T_MAX) * 1000) / 1000
-      setContent((prev) => ({
-        ...prev,
-        connections: prev.connections.map((cc) => (cc.id === c.id ? { ...cc, labelT: t } : cc)),
-      }))
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setDraggingLabelId(null)
-      if (moved) setDirty(true)
-      // 原地点击的选中在命中区 onClick（stopPropagation）里处理，避免被 svg 根 click 清除
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    canvasCtl.run({
+      kind: 'conn-label',
+      targetId: c.id,
+      start: { x: a.x, y: a.y },
+      onMove: (p, _sess, first) => {
+        if (first) pushHistory()
+        // 投影参数 clamp 在两端 6% 内（不盖住锚点/设备），保留 3 位小数存储
+        const t = labelTAt(pts, p.x, p.y)
+        if (t === null) return
+        setContent((prev) => ({
+          ...prev,
+          connections: prev.connections.map((cc) => (cc.id === c.id ? { ...cc, labelT: t } : cc)),
+        }))
+      },
+      onEnd: (_p, sess) => {
+        setDraggingLabelId(null)
+        if (sess.moved) setDirty(true)
+        // 原地点击的选中在命中区 onClick（stopPropagation）里处理，避免被 svg 根 click 清除
+      },
+    })
   }
 
   // ---- 连线中段拖拽：H-H 路由竖直中段横向移动 / V-V 路由水平中段纵向移动（写入 midOverride，折线实时重排） ----
@@ -3083,152 +3039,89 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     e.stopPropagation()
     setDraggingConnSeg(c.id)
-    let moved = false
-    const onMove = (ev: PointerEvent) => {
-      const p = toSvgPoint(ev)
-      if (!p) return
-      if (!moved) { moved = true; pushHistory() }
-      const val = Math.round(axis === 'x' ? p.x : p.y) // 无限画布：中段覆盖值不限制在画布内
-      setContent((prev) => ({
-        ...prev,
-        connections: prev.connections.map((cc) => (cc.id === c.id ? { ...cc, midOverride: val } : cc)),
-      }))
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setDraggingConnSeg(null)
-      connDragEndAtRef.current = Date.now()
-      if (moved) setDirty(true)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    canvasCtl.run({
+      kind: 'conn-seg',
+      targetId: c.id,
+      start: { x: 0, y: 0 },
+      onMove: (p, _sess, first) => {
+        if (first) pushHistory()
+        const val = Math.round(axis === 'x' ? p.x : p.y) // 无限画布：中段覆盖值不限制在画布内
+        setContent((prev) => ({
+          ...prev,
+          connections: prev.connections.map((cc) => (cc.id === c.id ? { ...cc, midOverride: val } : cc)),
+        }))
+      },
+      onEnd: (_p, sess) => {
+        setDraggingConnSeg(null)
+        canvasCtl.guard.arm('connDragEnd')
+        if (sess.moved) setDirty(true)
+      },
+    })
   }
 
-  // ---- 连线端点拖拽改接：拖起起点/终点 → 移动中吸附最近图元边框（自由位置，Task 86-2）并实时预览折线 → 松手改接（无目标回退，改接后清 midOverride 重新自动布线） ----
+  // ---- 连线端点拖拽改接：拖起起点/终点 → 移动中吸附最近图元边框（自由位置，Task 86-2；core snapConnEnd）并实时预览折线 → 松手改接（core rewireConnTarget：无目标回退，改接后清 midOverride 重新自动布线） ----
   const startDragConnEnd = (e: React.PointerEvent<SVGElement>, c: PidConn, which: 'from' | 'to') => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     e.stopPropagation()
     const start = toSvgPoint(e)
     if (!start) return
     setConnEndDrag({ id: c.id, which, x: start.x, y: start.y, hover: null })
-    let hover: { shapeId: string; anchor: Anchor; t?: number } | null = null
-    const onMove = (ev: PointerEvent) => {
-      const p = toSvgPoint(ev)
-      if (!p) return
-      hover = null
-      let bestD = CONN_END_SNAP_DIST
-      for (const s of contentRef.current.shapes) {
+    let hover: ConnEndTarget | null = null
+    canvasCtl.run({
+      kind: 'conn-end',
+      targetId: c.id,
+      start,
+      onMove: (p) => {
         // 边框吸附：指针在边框锚点区内视为 0 距，周边 ≤ 阈值按最近边吸附（自由位置：落在哪就连哪）
-        const d = distToAnchorZone(s, p.x, p.y)
-        if (d < bestD) {
-          bestD = d
-          hover = { shapeId: s.id, ...nearestFreeAnchorAt(s, p.x, p.y) }
+        hover = snapConnEnd(contentRef.current.shapes, p.x, p.y)
+        setConnEndDrag({ id: c.id, which, x: p.x, y: p.y, hover })
+      },
+      onEnd: () => {
+        setConnEndDrag(null)
+        canvasCtl.guard.arm('connDragEnd')
+        const target = hover
+        if (!target) return // 空白处松手：回退原接线
+        const cc = contentRef.current.connections.find((x) => x.id === c.id)
+        if (!cc) return
+        const r = rewireConnTarget(contentRef.current.connections, c.id, which, target)
+        if (!r.ok) {
+          if (r.reason === 'same-anchor') toast({ title: '无法改接', description: '起点与终点不能落在同一锚点' })
+          if (r.reason === 'dup') toast({ title: '连线已存在', description: '相同方向的连线已存在，已保留原接线' })
+          return
         }
-      }
-      setConnEndDrag({ id: c.id, which, x: p.x, y: p.y, hover })
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      setConnEndDrag(null)
-      connDragEndAtRef.current = Date.now()
-      const target = hover
-      if (!target) return // 空白处松手：回退原接线
-      const cc = contentRef.current.connections.find((x) => x.id === c.id)
-      if (!cc) return
-      const otherShape = which === 'from' ? cc.toShape : cc.fromShape
-      const otherAnchor = which === 'from' ? cc.toAnchor : cc.fromAnchor
-      const otherT = which === 'from' ? cc.toT : cc.fromT
-      const changed = which === 'from'
-        ? cc.fromShape !== target.shapeId || cc.fromAnchor !== target.anchor || !tEq(cc.fromT, target.t)
-        : cc.toShape !== target.shapeId || cc.toAnchor !== target.anchor || !tEq(cc.toT, target.t)
-      if (!changed) return
-      if (target.shapeId === otherShape && target.anchor === otherAnchor && tEq(target.t, otherT)) {
-        toast({ title: '无法改接', description: '起点与终点不能落在同一锚点' })
-        return
-      }
-      const dup = contentRef.current.connections.some((x) =>
-        x.id !== cc.id && (
-          which === 'from'
-            ? x.fromShape === target.shapeId && x.fromAnchor === target.anchor && tEq(x.fromT, target.t) && x.toShape === cc.toShape && x.toAnchor === cc.toAnchor && tEq(x.toT, cc.toT)
-            : x.fromShape === cc.fromShape && x.fromAnchor === cc.fromAnchor && tEq(x.fromT, cc.fromT) && x.toShape === target.shapeId && x.toAnchor === target.anchor && tEq(x.toT, target.t)
-        ),
-      )
-      if (dup) {
-        toast({ title: '连线已存在', description: '相同方向的连线已存在，已保留原接线' })
-        return
-      }
-      const ft = freeT(which === 'from' ? target.t : cc.fromT)
-      const tt = freeT(which === 'to' ? target.t : cc.toT)
-      const patch: Partial<PidConn> = which === 'from'
-        ? { fromShape: target.shapeId, fromAnchor: target.anchor, fromT: ft }
-        : { toShape: target.shapeId, toAnchor: target.anchor, toT: tt }
-      mutate((prev) => ({
-        ...prev,
-        connections: prev.connections.map((x) => (x.id === c.id ? { ...x, ...patch, midOverride: undefined } : x)),
-      }))
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+        mutate((prev) => ({ ...prev, connections: r.conns }))
+      },
+    })
   }
 
-  // ---- 四角缩放：对角为固定点，nw/sw 时 x/y 跟随变化；直线拖任意手柄 = 拖动该端点（可实时翻转向） ----
+  // ---- 四角缩放（core fixedCornerOf + resizeBox）：对角为固定点，nw/sw 时 x/y 跟随变化；直线拖任意手柄 = 拖动该端点（可实时翻转向） ----
   const startResize = (e: React.PointerEvent<SVGElement>, s: PidShape, handle: ResizeHandle) => {
     if (mode !== 'edit' || placingShape || placingMark || placingSymbol) return
     e.stopPropagation()
     e.preventDefault()
     const lib = libOf(s.type)
-    const minW = lib.minW
-    const minH = lib.minH
-    // 固定点 = 对角
-    const fx = handle === 'nw' || handle === 'sw' ? s.x + s.w : s.x
-    const fy = handle === 'nw' || handle === 'ne' ? s.y + s.h : s.y
-    let moved = false
-    const onMove = (ev: PointerEvent) => {
-      const raw = toSvgPoint(ev)
-      if (!raw) return
-      if (!moved) { moved = true; pushHistory() }
-      const px = raw.x // 无限画布：缩放指针/新边界不再限制在 0..CANVAS_W
-      const py = raw.y
-      let x1 = Math.min(fx, px)
-      let x2 = Math.max(fx, px)
-      let y1 = Math.min(fy, py)
-      let y2 = Math.max(fy, py)
-      if (x2 - x1 < minW) {
-        if (px < fx) x1 = x2 - minW
-        else x2 = x1 + minW
-      }
-      if (y2 - y1 < minH) {
-        if (py < fy) y1 = y2 - minH
-        else y2 = y1 + minH
-      }
-      if (s.type === 'circle') {
-        // 圆形锁定正圆比例：以对角固定点为锚，取最大边同步宽高（拖成椭圆的需求请用椭圆图元）
-        const size = Math.max(x2 - x1, y2 - y1)
-        if (px >= fx) x2 = x1 + size
-        else x1 = x2 - size
-        if (py >= fy) y2 = y1 + size
-        else y1 = y2 - size
-      }
-      const w = Math.max(minW, Math.round(x2 - x1))
-      const h = Math.max(minH, Math.round(y2 - y1))
-      setContent((prev) => ({
-        ...prev,
-        shapes: prev.shapes.map((sh) => (
-          sh.id === s.id
-            ? { ...sh, x: Math.round(x1), y: Math.round(y1), w, h, ...(s.type === 'line' ? { flip: (px >= fx) !== (py >= fy) } : null) }
-            : sh
-        )),
-      }))
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      if (moved) setDirty(true)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    const fc = fixedCornerOf(handle, s)
+    canvasCtl.run({
+      kind: 'resize',
+      targetId: s.id,
+      start: fc,
+      onMove: (raw, _sess, first) => {
+        if (first) pushHistory()
+        // 无限画布：缩放指针/新边界不再限制在 0..CANVAS_W；圆形锁定正圆比例（拖成椭圆的需求请用椭圆图元）
+        const r = resizeBox({ handle, box: s, px: raw.x, py: raw.y, minW: lib.minW, minH: lib.minH, lockSquare: s.type === 'circle' })
+        setContent((prev) => ({
+          ...prev,
+          shapes: prev.shapes.map((sh) => (
+            sh.id === s.id
+              ? { ...sh, x: r.x, y: r.y, w: r.w, h: r.h, ...(s.type === 'line' ? { flip: r.flip } : null) }
+              : sh
+          )),
+        }))
+      },
+      onEnd: (_p, sess) => {
+        if (sess.moved) setDirty(true)
+      },
+    })
   }
 
   // ---- 图管理 ----
