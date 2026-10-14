@@ -737,3 +737,5 @@ Stage Summary:
 - 30 提交（Task 116 组态引擎框架无关化全套 + Task 123 徽章热区修复 + Task 124 视口数学下沉）已完成 rebase 整合并通过全部推送前核验，卡在唯一缺口：GitHub 凭据
 - 运维事实更新：GITHUB_TOKEN 已 6 次被平台抹除（本次为沙箱 home 重建连带 .env 重生成）； PAT 到位后写入 .env（check-ignore 确认不追踪）→ 推送 → ls-remote 三方验证
 - 风险提示：本次 30 提交中含 2 个历史 UUID 快照提交（ea6e956/8e8a50b 时代仅 db churn），已随历史入库属既有口径，不再 rewrite
+- 【push 成功（用户供 PAT）】用户提供 fine-grained PAT→追加 .env（GITHUB_TOKEN 恰 1 处，check-ignore 确认不追踪）→GET /user 鉴权=liaoweimin74 (id 73637681) 本人→凭据经内联 credential helper+env 注入推送（token 不落命令行不落 .git/config）→bbb32da..f7b9927 推送成功 31 提交（Task 116 组态引擎框架无关化全套 + Task 123 徽章热区 + Task 124 视口数学下沉 + Task 125 交接）→三方验证 LOCAL==REMOTE==f7b9927、ahead 0 零残留
+- 【运维口径】PAT 用后留存 .env 备下次推送（平台沙箱重置会再次抹除，属第 6 次同款风险，纪律不变：缺失即向用户索取）
