@@ -635,3 +635,24 @@ Stage Summary:
 - core 扩展点全景：SymbolRegistry（图形+元数据）/PropFieldDef schema（属性）/children 插槽（绑定 UI）/createCanvasController（交互）/createHistory（撤销）——新框架接入只需实现渲染映射 + toPoint + 面板表单
 - Phase 3 建议（可选）：①pid-config 剩余 UI 段（工具栏/图元库容器/属性面板容器）编排为 diagram-editor 通用组件②框选（bulk 多选橡皮筋，core 已预留 'select' 手势 kind）③连线创建手势化（band 点击两步→拖拽到目标一步）
 - 本地领先远程 5 提交（Task 117~120 全部代码+worklog）待用户「push」；巡检 cron 390197 在位
+
+---
+Task ID: 121
+Agent: 主会话(Z.ai Code)
+Task: 用户「继续」——Task 116 Phase 3 推进：画布框选多选 + 批量整体拖动（Task 120 交接首项）
+
+Work Log:
+- 【设计】多选复用 Task 89 既有 bulkIds 叠加态（单选语义零改动）：Shift+空白拖拽 = 框选橡皮筋（core 'select' 手势自 Task 120 预留以来首次落地），命中集写入 bulkIds——点选多选与框选多选汇流同一状态；普通空白拖拽仍为平移（零破坏）
+- 【core 扩展】canvas-controller.ts 新增框选纯函数三件：normRect（任意两角归一化）/ isRealRubber（轻点判定 minSpan=3）/ hitTestRect（x/y/w/h 包围盒相交命中，CAD/Figma 惯例相交即选中）；泛型 Pick<NodeGeom,...> 宿主超集直接可用
+- 【React 壳】startRubberSelect（moveThreshold=3 轻点保留普通 click 语义；onEnd 未 moved 不吞 click；命中后 setSelected 跟随最后命中图元）+ startBulkDrag（origins 按下快照→全体同位移，首移 pushHistory=单一事务，onEnd setDirty）+ startDragShape 分流（bulk.length>1 且含点中成员→整体拖）+ 橡皮筋渲染（teal 半透明填充+虚线描边 non-scaling-stroke 视觉恒定）+ 多选工具条改悬于全体包围盒上方中央（translate(-50%,-100%)）
+- 【Vue 壳同步】mountCanvasBoard 增加 bulkIds Set + Shift/Ctrl/Cmd 点选加入/移出 + 框选橡皮筋层（rubberLayer visibility 切换）+ 批量整体拖动 + 成员 teal 双描边高亮——双端交互能力对等，契约注释第 3 条更新
+- 【E2E·agent-browser 编辑态全绿】①框选橡皮筋几何精确（画布 790,179 w=190 h=212 与设计区域 ±1 吻合）②松手「已选 3 个」+ 替换成/批量删除工具条悬于包围盒上方中央 + 属性面板跟随最后命中（V102 X844 Y209）③批量拖动：3 成员 delta 一致 +83,+83、非成员 12 个零位移、总数 15 ④Ctrl+Z 单事务全体还原 ⑤Delete 批量删除 15→12+toast「已删除图元」→ Ctrl+Z 还原 15 ⑥Shift 轻点空白=普通 click 清多选（零回归）⑦普通空白拖拽=平移零回归（多次误 pan 意外证明 😂）⑧刷新后 API shapeCount:15/markCount:19 零残留
+- 【E2E 排障课】①agent-browser keydown Shift 不传递 modifier 给后续 mouse 事件（shiftKey=false 走 pan）→ 合成 PointerEvent 带 shiftKey:true 是正道②合成 pointerdown 必须 dispatch 到实际命中子元素（elementFromPoint 的 rect）——dispatch 到 svg 根只触发 svg 自身 handler（图元 g 的 startDragShape 永不触发）③React setState 异步 flush：dispatch 链与 DOM 断言须分两个 eval④落点须用图元中心（压边 1px 落锚点区外误 pan）
+- 【验证】tsc src/ 零错误；ESLint 仅 5 个 PPT 脚本既有；bun 冒烟 9/9（hitTestRect 相交/贴边/全含 + normRect + isRealRubber + 既有 resizeBox/connExists 回归）；dev.log 零 error
+- 【commit】824e25d（3 文件 +223/-18）；未 push 等用户指令
+
+Stage Summary:
+- 组态画布多选体系补全：Shift 点选（Task 89）+ Shift 框选（本轮）双入口汇流 bulkIds，批量拖动/批量删除/批量替换成/Esc 退出全量可用——Phase 3 交互能力清单再划掉一项
+- core 框选纯函数与 'select' 手势配套落地，Vue/React 双端共用同一命中策略
+- Phase 3 剩余（下轮建议）：①连线创建手势化（锚点拖拽到目标一步创建，兼容既有两步点击）②diagram-editor 通用编排组件（工具栏/画布/图元库/属性面板容器 core 化）③多选工具条补「对齐分布」等排版操作
+- 本地领先远程 6 提交（Task 117~121）待用户「push」；巡检 cron 390197 在位
