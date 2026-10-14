@@ -3539,7 +3539,7 @@ export default function PidConfig({ onNavigate, currentUser, focusId, readOnly }
         <g key={`badge-${c.id}`} pointerEvents={mode === 'edit' ? undefined : 'none'}>
           {mode === 'edit' && (
             <rect
-              x={lp.x - wHalf - 5} y={lp.y - 11} width={wHalf * 2 + 10} height={22} rx={6}
+              x={lp.x - wHalf - 3} y={lp.y - 9} width={wHalf * 2 + 6} height={18} rx={6}
               fill="transparent" className="cursor-grab"
               onPointerDown={(e) => startDragConnLabel(e, c)}
               onClick={(e) => {
