@@ -952,3 +952,37 @@ Stage Summary:
 - vue@3.5.44 补装完成，Vue 壳演示模块跨框架桥接恢复可用，零代码改动（纯环境问题）
 - 沙箱重建后遗症清单至此闭环：①Tee-Object 启动失败 ②代码库回滚 ③僵尸 db 句柄 ④node_modules 缺 vue——四项均已修复并验证
 - 教训沉淀：沙箱重建后先跑「保活 + bun install 核验 + db 句柄核验」三件套再开展业务工作
+
+---
+Task ID: 140
+Agent: Z.ai Code (main)
+Task: 三级抽象架构评审定稿 + Phase A/B 分层落地 + Vue 完整复刻 E2E 验证
+
+Work Log:
+- 用户提出三级抽象重构规划（一级 core / 二级组态领域 / 三级业务），逐条评审定稿：
+  ① 一级清单判定：大部分归位正确；「缩放工具栏/鸟瞰图/图元搜索/导出PNG」四项须拆「headless 能力(一级) + 薄 UI(壳层)」
+  ② 关键修正：「吸附联动」拆为三级声明附属关系(attach)→二级转译→一级执行几何后果；二级靠依赖倒置接口隔离三级
+  ③ 框架无关结论：一级 100%、二级 90%+(headless 模式)、三级服务端逻辑天然无关/客户端 UI 双壳共享
+  ④ 验收判据：换域测试（PID→电气组态时 core/kit 零改动）
+- Phase A（commit b985e1f）：core 补齐一级原语——clipboard.ts(copySelection/pasteClipboard/clipboardBounds，
+  id 重映射+attach 级联)、attach.ts(bindAttach/applyAttachFollowing 级联跟随/pruneOrphanAttach)、
+  doc-ops.ts(deleteShapes 级联清理连线+挂接/translateShapes)、canvas-mode.ts(CanvasMode 交互门禁 view 态仅 select/pan/zoom)、
+  types.ts 增 AttachRef
+- Phase B（commit 085e06f→085e06c）：新建 src/lib/configurator-kit/ 二级领域层——
+  library.ts(多页签图元库 headless：内建/基础/自建 tab+分组折叠+搜索过滤管道 getVisibleTree)、
+  binding.ts(BindingStore 数据绑定机制：bind/unbind/resolve/listFor/purgeTarget/subscribe，只给机制不给数据)、
+  commands.ts(CommandRegistry+createBuiltinCommands 18 条内置命令含快捷键归一化匹配)、
+  props.ts(schema 驱动属性面板：visiblePropFields/coercePropValue/validatePropValues/buildPropSections)
+- 发现 pid-replica-vue.ts 已存在（1800 行完整复刻，前会话产物）：修复 renderBadges 类型错误
+  （整体 return null → VNode[] + filter 类型收窄），tsc 全绿
+- E2E（agent-browser）：重新登录（验证码 7G2G）→ 菜单进「组态内核演示」→ 完整复刻页渲染确认：
+  126 符号图元库两页签+搜索+分组、工具条全集（编辑/查看/撤销重做/标注隔离点/自动布局/重置/保存/搜索定位/导出/俯瞰图）、
+  画布 PID 主图（图元 16 · 连线 14 · 标注 5）、俯瞰图浮层、图层开关、快捷键面板、同源架构说明卡、sticky footer
+- 合成 PointerEvent 点选验证：空白点击正确走取消选中路径，无报错；页签切换成功；dev.log 零错误
+
+Stage Summary:
+- 三级抽象架构定稿并落地两阶段：core 新增 4 模块（一级缺口补齐），新建 configurator-kit（二级从 0 到 1）
+- pid-replica-vue.ts 1800 行完整复刻版经 E2E 确认可用——Vue 壳复刻主线基本达成，Phase C 剩余为渐进增强
+- 分层依赖方向已固化：core ← kit ← 三级壳；换域验收判据入册
+- 后续优先事项：①React 壳(pid-config 6352 行)渐进切换 kit 瘦身 ②attach/clipboard 接入两壳交互流
+  ③binding 机制接 PID 业务数据（设备编号/管线编号绑定）
