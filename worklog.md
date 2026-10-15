@@ -916,3 +916,39 @@ Stage Summary:
 - 服务已恢复：3000 端口 200，登录金路径全绿，Task 121~136 全量代码由远端恢复，零代码损失
 - 新运维铁律三条：①每轮调用先保活 ②不用长轮询 ③浏览器验证与保活同调用；package.json tee 修复保证下次沙箱自启健康
 - 风险：worklog Task 134~136 详细条目不可恢复（已重建概要）；GITHUB_TOKEN 疑随重建抹除（用户已指示暂缓 push，暂无影响）
+
+---
+Task ID: 138
+Agent: Z.ai Code (main)
+Task: SQLITE_READONLY (1032) 写库报错排查修复——git reset 后僵尸 db 句柄定案
+
+Work Log:
+- 用户报告登录时报 Prisma `db.user.update()` 错误：`attempt to write a readonly database`（SQLite extended_code 1032），位置在「存量明文密码透明升级为 scrypt 哈希」处
+- 排查：db/custom.db 属主 z 可写、目录可写、无 -wal/-shm 残留 → 排除文件权限问题
+- 关键取证：`ls -l /proc/*/fd | rg deleted` 发现两个 `(deleted)` 的 custom.db 旧 inode 句柄——老 next-server（01:19 启动）在 01:25 git reset --hard 换文件前就打开了 db，之后一直读写幽灵文件（deleted inode）
+- 写探针交叉验证：项目内新进程 Prisma `user.update` 返回 WRITE OK → 文件本身健康，问题只在长寿命服务器进程的陈旧连接
+- 修复：kill -9 老服务器三件套 → 端口释放 → setsid 拉起新服务器 → HTTP 200
+- 全链路回归：登出 → 登录页 → admin/123456 + 验证码 W33V → 登录成功直达首页看板 → 报错的明文→scrypt 透明升级写路径实测通过 → dev.log 零 error
+- 附带发现：老服务器自 01:19 存活至 01:35+，说明平台清扫器并非每次调用必杀（偶发/机会性），保活铁律仍成立
+
+Stage Summary:
+- READONLY 根因定案：不是权限/WAL/磁盘——是 git reset 换 db 文件后僵尸服务器进程持有 deleted inode 句柄
+- 运维铁律第 4 条：git reset --hard 涉及 db 文件后必须重启 dev server（同调用内 kill + 拉起 + 验证）
+- 备注：本条目首次写入时工具调用被中断，本条为补录
+
+---
+Task ID: 139
+Agent: Z.ai Code (main)
+Task: 「组态内核演示」Vue 壳挂载失败（Cannot find module 'vue'）修复
+
+Work Log:
+- 用户报告侧边栏「组态内核演示」模块报「Vue 壳挂载失败：Cannot find module 'vue'」
+- 诊断：package.json 依赖在（"vue": "^3.5.44"，Task 132 提交随 origin/main 恢复），但 node_modules/vue 不存在——沙箱重建时 .zscripts/dev.sh 的 bun install 不完整（可能回滚窗口期 lockfile/缓存错位）
+- 修复：bun install（4.7s，+ vue@3.5.44 与 18 个关联包）→ pkill 老服务器 → setsid 重启 → HTTP 200
+- E2E 验证：侧边栏点「组态内核演示」→ 模块正常挂载 → 截图确认 vue@3.5 · render fn 徽标、状态条（画布图元 3 / 手势落定 0 / 内核就绪）、画布三图元（反应器 teal/储罐 emerald/泵）全部渲染 → 页面与 dev.log 均零错误
+- 顺带补录：Task 138 worklog 首次写入被中断，本调用一并补录两段
+
+Stage Summary:
+- vue@3.5.44 补装完成，Vue 壳演示模块跨框架桥接恢复可用，零代码改动（纯环境问题）
+- 沙箱重建后遗症清单至此闭环：①Tee-Object 启动失败 ②代码库回滚 ③僵尸 db 句柄 ④node_modules 缺 vue——四项均已修复并验证
+- 教训沉淀：沙箱重建后先跑「保活 + bun install 核验 + db 句柄核验」三件套再开展业务工作
