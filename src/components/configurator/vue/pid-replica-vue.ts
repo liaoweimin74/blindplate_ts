@@ -986,8 +986,8 @@ export function mountPidReplica(el: HTMLElement, opts: { onReady?: (info: { vue:
         return h('g', { key: c.id }, [h('polyline', a), hit])
       })
 
-      const renderBadges = () => {
-        if (!toggles.pipe) return null
+      const renderBadges = (): VNode[] => {
+        if (!toggles.pipe) return []
         return doc.connections.map((c) => {
           if (!c.pipe) return null
           const pts = connPts(c)
@@ -1011,7 +1011,7 @@ export function mountPidReplica(el: HTMLElement, opts: { onReady?: (info: { vue:
             h('rect', { x: lp.x - wHalf, y: lp.y - 8, width: wHalf * 2, height: 16, rx: 4, fill: '#ffffff', opacity: 0.95, stroke: strokeC, 'stroke-width': active ? 1.6 : 1, 'pointer-events': 'none' }),
             h('text', { x: lp.x, y: lp.y + 3.5, 'text-anchor': 'middle', 'font-size': 9, fill: textC, 'font-family': MONO, 'pointer-events': 'none' }, label),
           ])
-        })
+        }).filter((v): v is VNode => v !== null)
       }
 
       const renderMarks = () => doc.marks.map((m) => {
