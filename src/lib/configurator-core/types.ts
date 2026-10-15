@@ -16,6 +16,17 @@ export type Anchor = 'top' | 'right' | 'bottom' | 'left'
 /** 连线流向 */
 export type EdgeDirection = 'forward' | 'reverse' | 'none'
 
+/**
+ * 挂接引用：声明「本节点挂在 to 节点上，相对偏移 (dx,dy)」。
+ * 分层契约——三级业务声明附属关系（如 仪表/泵 附属于 管线），core 只执行几何后果：
+ * 父体平移时子体按 applyAttachFollowing 跟随；父体缺失/被删时宿主应清理悬空引用。
+ */
+export interface AttachRef {
+  to: string
+  dx: number
+  dy: number
+}
+
 /** 节点（图元实例）几何约束：宿主节点类型为此结构超集即可（平铺扩展字段随意加） */
 export interface NodeGeom {
   id: string
@@ -32,6 +43,8 @@ export interface NodeGeom {
   rotation?: number
   /** 直线专用：false = 包围盒 \ 对角线，true = / 对角线 */
   flip?: boolean
+  /** 挂接：跟随 to 节点平移（可选；批量删除/复制粘贴时由 doc-ops/clipboard 级联维护） */
+  attach?: AttachRef
 }
 
 /** 连线（边）几何约束 */
