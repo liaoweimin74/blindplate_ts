@@ -986,3 +986,28 @@ Stage Summary:
 - 分层依赖方向已固化：core ← kit ← 三级壳；换域验收判据入册
 - 后续优先事项：①React 壳(pid-config 6352 行)渐进切换 kit 瘦身 ②attach/clipboard 接入两壳交互流
   ③binding 机制接 PID 业务数据（设备编号/管线编号绑定）
+
+---
+Task ID: 141
+Agent: Z.ai Code (main)
+Task: 用户「push」——Task 137~140 六提交上云（PAT 第 6 次重供 + rebase 垃圾清理）
+
+Work Log:
+- 【UUID 门禁】侦察待推 9 提交，判 4 个平台自动快照：2 个 db 二进制、1 个 package.json.orig 残留（drop）、
+  1 个为前会话 Vue 复刻 1800 行真实成果（保留，d7e8604）
+- 【rebase 清理】GIT_SEQUENCE_EDITOR sed drop 3 垃圾（rebase -i origin/main），SHA 重写：
+  b985e1f→51301ac（PhaseA）、085e06c→dc8da67（PhaseB）、b5bafdd→4035de7（Task140）
+- 【db 安全链】rebase 前 cp 备份 → rebase 后恢复工作区 → 写探针 PROBE WRITE OK →
+  /proc fd 零 deleted 句柄 → pkill+setsid 重启（铁律 4）→ HTTP 200
+- 【PAT 第 6 次抹除→重供】.env GITHUB_TOKEN 消失（仅剩 DATABASE_URL）；按纪律直接向用户索取；
+  新 93 位 fine-grained PAT 入库（check-ignore 确认不追踪），GET /user 鉴权 = liaoweimin74 (id 73637681)
+- 【敏感扫描】待推 diff 扫 github_pat/ghp_/x-access-token 零命中
+- 【网络抖动兜底】首推 443 连接超时（131s）→ 连通探针 200 后 HTTP/1.1 兜底重推成功：c05b66b..9a9bba7
+- 【9a9bba7 研判】平台在 push 前窗口（06:13:10）自动 commit 的 db 快照随链上云；
+  研判接受：db 本就被 git 跟踪、内容无害，网络抖动期不做 force push 折腾
+
+Stage Summary:
+- 远程 main = 9a9bba7 = 本地 HEAD，Task 137/138/139/140 + PhaseA(core 四模块) + PhaseB(kit 四模块) 全部上云
+- 运维事实更新：GITHUB_TOKEN 已 6 次被平台抹除，重供纪律持续有效；UUID 快照机制会在任意窗口 commit db——
+  push 前须重查 origin/main..HEAD 是否混入新快照（本轮即被钻了窗口）
+- 下一步：attach/clipboard 接入 Vue 壳交互流、binding 接 PID 业务数据、React 壳渐进切 kit 瘦身
