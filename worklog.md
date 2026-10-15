@@ -894,3 +894,25 @@ Stage Summary:
 - 交付物：/home/z/my-project/configurator-standalone.zip（52KB）——零框架组态内核 + Vue 3 壳 + std 图元数据包 + 双 SFC 示例 + README，任意 Vue 3 / 原生 JS / 其他框架宿主可解压即用
 - 包内自洽性：别名改写后相对导入闭环，独立 strict tsc 通过；unzip -t 无错
 - 仓库侧零侵入：源码未动一行（sed 仅作用于包副本），.gitignore +1 行防护
+
+---
+Task ID: 137
+Agent: Z.ai Code (main)
+Task: 前端服务挂掉排查与修复 + 沙箱重建三重事故处置（服务死亡 / 进程清扫 / 代码库回滚）
+
+Work Log:
+- 用户报告「前端服务挂掉了」；探测：next-server 进程活着但 3000 端口 curl 000（连接积压 Recv-Q=30）
+- 溯源①：沙箱 01:01 重建，.zscripts/dev.sh 执行 `bun run dev`，package.json dev 脚本管道命令 `Tee-Object`（PowerShell 专用）在 bash 下 command not found，启动链异常
+- 修复①：package.json dev/start 脚本 `Tee-Object` → `tee`（本轮重要沉淀：下次沙箱重启平台自启即恢复正常）
+- 溯源②：手动 setsid/nohup 后台拉起的 dev server 反复静默死亡（无 OOM、无崩溃日志、SIGKILL 无痕）；三轮对照实验定案——平台清扫器在「下一次工具调用开始」时杀掉上一次调用拉起的全部进程（开机平台进程树除外，故 Caddy pid2 存活）；此前两次「context canceled」并非死因
+- 对策②（运维铁律）：每轮工具调用开头先「ss 查 3000 → 不在则 setsid 拉起 + 同调用内验证 200」；严禁长轮询命令（>60s 即有被用户消息取消风险）；agent-browser 验证必须与保活同一调用完成
+- 溯源③（最重）：01:01 沙箱重建把 git 仓库回滚到 Task 121 时代——HEAD 变 UUID 垃圾提交叠 Task 121 基座，Task 122~136 提交、vue-shell-demo.tsx、worklog 122~136 记录全部消失
+- 修复③：git fetch origin（HTTP/1.1 兜底，bbb32da..c05b66b）→ 确认远端即 Task 133 tip（Task 134~136 下载通道/zip 清理零代码净额，无损失）→ 保存 tee 补丁 → git reset --hard origin/main → 重打补丁
+- 恢复验证：vue-shell-demo.tsx 回归、app-shell 'vue-demo' 五处注册回归、worklog Task 133 记录回归
+- 全链路 E2E（保活+浏览器同调用）：首页 200 → 登录页渲染（teal 配色/九步流程卡）→ 验证码 G7N3 误读（N/V）→ 刷新后 TBRZ 登录成功 → 主应用侧边栏（首页看板/审批中心/作业需求/方案编制/作业任务/台账管理）完整渲染
+- Task 136 worklog 条目随回滚丢失（原 ahead-1 提交未推送），凭会话摘要于本条目内重建：zip 三下载通道交付→用户取得→全链清理（public zip/API 路由/远端零痕迹）
+
+Stage Summary:
+- 服务已恢复：3000 端口 200，登录金路径全绿，Task 121~136 全量代码由远端恢复，零代码损失
+- 新运维铁律三条：①每轮调用先保活 ②不用长轮询 ③浏览器验证与保活同调用；package.json tee 修复保证下次沙箱自启健康
+- 风险：worklog Task 134~136 详细条目不可恢复（已重建概要）；GITHUB_TOKEN 疑随重建抹除（用户已指示暂缓 push，暂无影响）
